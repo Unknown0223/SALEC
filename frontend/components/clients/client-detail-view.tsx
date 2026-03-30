@@ -1,0 +1,639 @@
+"use client";
+
+import type { ClientRow } from "@/lib/client-types";
+import { ClientEditDialog } from "@/components/clients/client-edit-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
+import { useEffectiveRole } from "@/lib/auth-store";
+import { ORDER_STATUS_LABELS } from "@/lib/order-status";
+import { cn } from "@/lib/utils";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useState } from "react";
+
+export type ClientDetailApiRow = ClientRow & {
+  phone_normalized: string | null;
+  open_orders_total: string;
+};
+
+type BalanceMovementsResponse = {
+  data: Array<{
+    id: number;
+    delta: string;
+    note: string | null;
+    user_login: string | null;
+    created_at: string;
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+  account_balance: string;
+};
+
+function auditActionLabel(action: string): string {
+  const m: Record<string, string> = {
+    "client.patch": "Rekvizitlar",
+    "client.balance_movement": "Balans",
+    "client.merge": "Birlashtirish"
+  };
+  return m[action] ?? action;
+}
+
+function auditDetailJson(d: unknown): string {
+  try {
+    return JSON.stringify(d);
+  } catch {
+    return String(d);
+  }
+}
+
+type Props = {
+  tenantSlug: string;
+  clientId: number;
+};
+
+type DetailTab = "main" | "balance" | "orders" | "audit";
+
+type ClientAuditResponse = {
+  data: Array<{
+    id: number;
+    action: string;
+    detail: unknown;
+    user_login: string | null;
+    created_at: string;
+  }>;
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export function ClientDetailView({ tenantSlug, clientId }: Props) {
+  const qc = useQueryClient();
+  const role = useEffectiveRole();
+  const isAdmin = role === "admin";
+  const [editOpen, setEditOpen] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("main");
+  const [balPage, setBalPage] = useState(1);
+  const [deltaInput, setDeltaInput] = useState("");
+  const [noteInput, setNoteInput] = useState("");
+  const [balanceFormError, setBalanceFormError] = useState<string | null>(null);
+  const [auditPage, setAuditPage] = useState(1);
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["client", tenantSlug, clientId],
+    queryFn: async () => {
+      const { data: body } = await api.get<ClientDetailApiRow>(
+        `/api/${tenantSlug}/clients/${clientId}`
+      );
+      return body;
+    }
+  });
+
+  const movementsQuery = useQuery({
+    queryKey: ["client-balance-movements", tenantSlug, clientId, balPage],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(balPage), limit: "30" });
+      const { data: body } = await api.get<BalanceMovementsResponse>(
+        `/api/${tenantSlug}/clients/${clientId}/balance-movements?${params}`
+      );
+      return body;
+    },
+    enabled: tab === "balance"
+  });
+
+  const auditQuery = useQuery({
+    queryKey: ["client-audit", tenantSlug, clientId, auditPage],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(auditPage), limit: "30" });
+      const { data: body } = await api.get<ClientAuditResponse>(
+        `/api/${tenantSlug}/clients/${clientId}/audit?${params}`
+      );
+      return body;
+    },
+    enabled: tab === "audit"
+  });
+
+  const addMovement = useMutation({
+    mutationFn: async () => {
+      const delta = Number.parseFloat(deltaInput.replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(delta) || delta === 0) {
+        throw new Error("Summa 0 dan farq qilishi kerak");
+      }
+      const { data: row } = await api.post<ClientDetailApiRow>(
+        `/api/${tenantSlug}/clients/${clientId}/balance-movements`,
+        { delta, note: noteInput.trim() || undefined }
+      );
+      return row;
+    },
+    onSuccess: async () => {
+      setBalanceFormError(null);
+      setDeltaInput("");
+      setNoteInput("");
+      await qc.invalidateQueries({ queryKey: ["client", tenantSlug, clientId] });
+      await qc.invalidateQueries({ queryKey: ["client-balance-movements", tenantSlug, clientId] });
+      await qc.invalidateQueries({ queryKey: ["client-audit", tenantSlug, clientId] });
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { status?: number; data?: { error?: string } } };
+      if (ax.response?.status === 403) {
+        setBalanceFormError("Faqat admin kiritishi mumkin.");
+        return;
+      }
+      if (ax.response?.data?.error === "BadDelta") {
+        setBalanceFormError("Noto‘g‘ri summa.");
+        return;
+      }
+      setBalanceFormError(e instanceof Error ? e.message : "Xato");
+    }
+  });
+
+  const creditLimitNum = data ? Number.parseFloat(data.credit_limit) : NaN;
+  const openNum = data ? Number.parseFloat(data.open_orders_total) : NaN;
+  const showCreditHint =
+    data != null &&
+    Number.isFinite(creditLimitNum) &&
+    creditLimitNum > 0 &&
+    Number.isFinite(openNum);
+
+  const listRowForEdit: ClientRow | null = data
+    ? (() => {
+        const { phone_normalized, open_orders_total, ...row } = data;
+        void phone_normalized;
+        void open_orders_total;
+        return row;
+      })()
+    : null;
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
+  }
+  if (isError || !data) {
+    return (
+      <p className="text-sm text-destructive">
+        {error instanceof Error ? error.message : "Klient topilmadi yoki xato."}
+      </p>
+    );
+  }
+
+  const balTotalPages =
+    movementsQuery.data != null
+      ? Math.max(1, Math.ceil(movementsQuery.data.total / movementsQuery.data.limit))
+      : 1;
+
+  return (
+    <div className="flex flex-col gap-6 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold tracking-tight">{data.name}</h2>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="secondary" onClick={() => setEditOpen(true)}>
+            Tahrir kartochka
+          </Button>
+          <Link
+            href={`/orders?client_id=${clientId}`}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-muted"
+          >
+            Shu mijozning zakazlari
+          </Link>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1 border-b border-border pb-px">
+        {(
+          [
+            ["main", "Asosiy"],
+            ["balance", "Balans"],
+            ["orders", "Zakazlar"],
+            ["audit", "Tarix"]
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={cn(
+              "rounded-t-md px-3 py-2 text-sm font-medium transition-colors",
+              tab === id
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "main" ? (
+        <div className="overflow-x-auto rounded-lg border shadow-sm">
+          <table className="w-full min-w-[520px] border-collapse text-sm">
+            <tbody>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground w-44">
+                  Telefon
+                </th>
+                <td className="px-4 py-3 font-mono text-xs">{data.phone ?? "—"}</td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Telefon (normal.)
+                </th>
+                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                  {data.phone_normalized ?? "—"}
+                </td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Manzil</th>
+                <td className="px-4 py-3">
+                  {data.address ? (
+                    <span>
+                      {data.address}{" "}
+                      <a
+                        href={`https://yandex.com/maps/?text=${encodeURIComponent(data.address)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary text-xs underline-offset-2 hover:underline whitespace-nowrap"
+                      >
+                        Xaritada ochish
+                      </a>
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Toifa</th>
+                <td className="px-4 py-3">{data.category ?? "—"}</td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Kredit limiti
+                </th>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.credit_limit}</td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Hisob saldosi
+                </th>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.account_balance}</td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Ochiq zakazlar (jami)
+                </th>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.open_orders_total}</td>
+              </tr>
+              {showCreditHint ? (
+                <>
+                  <tr className="border-b border-border bg-muted/15">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground align-top">
+                      Kredit yuki
+                    </th>
+                    <td className="px-4 py-3">
+                      <div className="max-w-xs space-y-1">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width]"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, (openNum / creditLimitNum) * 100))}%`
+                            }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground tabular-nums">
+                          {((openNum / creditLimitNum) * 100).toFixed(1)}% limitdan band
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className="border-b border-border bg-muted/15">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                      Qolgan «joy»
+                    </th>
+                    <td className="px-4 py-3 tabular-nums text-xs">
+                      {(creditLimitNum - openNum).toFixed(2)} (limit − ochiq zakazlar; saldo alohida)
+                    </td>
+                  </tr>
+                </>
+              ) : null}
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Holat</th>
+                <td className="px-4 py-3">
+                  <span
+                    className={
+                      data.is_active ? "text-green-700 dark:text-green-400" : "text-muted-foreground"
+                    }
+                  >
+                    {data.is_active ? "Faol" : "Nofaol"}
+                  </span>
+                </td>
+              </tr>
+              <tr className="border-b border-border">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Agent ID
+                </th>
+                <td className="px-4 py-3 font-mono text-xs">{data.agent_id ?? "—"}</td>
+              </tr>
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                  Ro‘yxatga olingan
+                </th>
+                <td className="px-4 py-3 text-muted-foreground text-xs">
+                  {new Date(data.created_at).toLocaleString()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {tab === "balance" ? (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Joriy saldo:{" "}
+            <span className="font-mono tabular-nums text-foreground">
+              {movementsQuery.data?.account_balance ?? data.account_balance}
+            </span>
+          </p>
+
+          {isAdmin ? (
+            <form
+              className="rounded-lg border p-4 space-y-3 max-w-md"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setBalanceFormError(null);
+                addMovement.mutate();
+              }}
+            >
+              <p className="text-sm font-medium">Harakat qo‘shish</p>
+              <div className="grid gap-1.5">
+                <Label htmlFor="bal-delta">O‘zgarish (UZS, manfiy — chiqim)</Label>
+                <Input
+                  id="bal-delta"
+                  type="text"
+                  inputMode="decimal"
+                  value={deltaInput}
+                  onChange={(e) => setDeltaInput(e.target.value)}
+                  disabled={addMovement.isPending}
+                  placeholder="masalan 50000 yoki -10000"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="bal-note">Izoh (ixtiyoriy)</Label>
+                <Input
+                  id="bal-note"
+                  value={noteInput}
+                  onChange={(e) => setNoteInput(e.target.value)}
+                  disabled={addMovement.isPending}
+                />
+              </div>
+              {balanceFormError ? (
+                <p className="text-xs text-destructive">{balanceFormError}</p>
+              ) : null}
+              <Button type="submit" size="sm" disabled={addMovement.isPending}>
+                {addMovement.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
+              </Button>
+            </form>
+          ) : (
+            <p className="text-xs text-muted-foreground">Harakat qo‘shish faqat admin uchun.</p>
+          )}
+
+          {movementsQuery.isLoading ? (
+            <p className="text-xs text-muted-foreground">Harakatlar yuklanmoqda…</p>
+          ) : movementsQuery.isError ? (
+            <p className="text-xs text-destructive">Harakatlarni yuklab bo‘lmadi.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full min-w-[480px] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                      <th className="px-2 py-2 font-medium">Vaqt</th>
+                      <th className="px-2 py-2 font-medium text-right">O‘zgarish</th>
+                      <th className="px-2 py-2 font-medium">Izoh</th>
+                      <th className="px-2 py-2 font-medium">Kim</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(movementsQuery.data?.data ?? []).map((m) => (
+                      <tr key={m.id} className="border-b last:border-0">
+                        <td className="px-2 py-2 text-muted-foreground whitespace-nowrap">
+                          {new Date(m.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums">{m.delta}</td>
+                        <td className="px-2 py-2">{m.note ?? "—"}</td>
+                        <td className="px-2 py-2 font-mono">{m.user_login ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {movementsQuery.data && movementsQuery.data.total > movementsQuery.data.limit ? (
+                <div className="flex items-center gap-2 text-xs">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={balPage <= 1}
+                    onClick={() => setBalPage((p) => Math.max(1, p - 1))}
+                  >
+                    Oldingi
+                  </Button>
+                  <span className="text-muted-foreground">
+                    {balPage} / {balTotalPages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={balPage >= balTotalPages}
+                    onClick={() => setBalPage((p) => p + 1)}
+                  >
+                    Keyingi
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {tab === "orders" ? (
+        <div className="space-y-2">
+          <ClientOrdersSnippet tenantSlug={tenantSlug} clientId={clientId} />
+          <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+            <li>
+              <Link className="text-primary underline-offset-4 hover:underline" href="/orders">
+                Barcha zakazlar
+              </Link>
+            </li>
+            <li>
+              <Link
+                className="text-primary underline-offset-4 hover:underline"
+                href={`/orders?client_id=${clientId}`}
+              >
+                Faqat bu mijoz zakazlari
+              </Link>
+            </li>
+          </ul>
+        </div>
+      ) : null}
+
+      {tab === "audit" ? (
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            PATCH, balans harakatlari va birlashtirish jurnali (admin/operator).
+          </p>
+          {auditQuery.isLoading ? (
+            <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+          ) : auditQuery.isError ? (
+            <p className="text-xs text-destructive">Jurnalni yuklab bo‘lmadi.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full min-w-[560px] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                      <th className="px-2 py-2 font-medium">Vaqt</th>
+                      <th className="px-2 py-2 font-medium">Harakat</th>
+                      <th className="px-2 py-2 font-medium">Kim</th>
+                      <th className="px-2 py-2 font-medium">Batafsil</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(auditQuery.data?.data ?? []).map((a) => (
+                      <tr key={a.id} className="border-b last:border-0 align-top">
+                        <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">
+                          {new Date(a.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2 font-medium">{auditActionLabel(a.action)}</td>
+                        <td className="px-2 py-2 font-mono">{a.user_login ?? "—"}</td>
+                        <td className="px-2 py-2 font-mono text-[11px] break-all max-w-[280px]">
+                          {auditDetailJson(a.detail)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {auditQuery.data && auditQuery.data.total > auditQuery.data.limit ? (
+                <div className="flex items-center gap-2 text-xs">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={auditPage <= 1}
+                    onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                  >
+                    Oldingi
+                  </Button>
+                  <span className="text-muted-foreground">
+                    {auditPage} /{" "}
+                    {Math.max(1, Math.ceil(auditQuery.data.total / auditQuery.data.limit))}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={auditPage * auditQuery.data.limit >= auditQuery.data.total}
+                    onClick={() => setAuditPage((p) => p + 1)}
+                  >
+                    Keyingi
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      <ClientEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        tenantSlug={tenantSlug}
+        client={listRowForEdit}
+      />
+    </div>
+  );
+}
+
+/** Zakazlar jadvalida klient ustuniga — ixcham havola. */
+export function ClientOrdersSnippet({
+  tenantSlug,
+  clientId,
+  limit = 8
+}: {
+  tenantSlug: string;
+  clientId: number;
+  limit?: number;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["orders", tenantSlug, 1, "", clientId],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: "1",
+        limit: String(limit),
+        client_id: String(clientId)
+      });
+      const { data: body } = await api.get<{
+        data: Array<{
+          id: number;
+          number: string;
+          status: string;
+          total_sum: string;
+          created_at: string;
+        }>;
+        total: number;
+      }>(`/api/${tenantSlug}/orders?${params}`);
+      return body;
+    }
+  });
+
+  if (isLoading) {
+    return <p className="text-xs text-muted-foreground">Zakazlar yuklanmoqda…</p>;
+  }
+  const rows = data?.data ?? [];
+  if (rows.length === 0) {
+    return <p className="text-xs text-muted-foreground">Hozircha zakaz yo‘q.</p>;
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full min-w-[480px] border-collapse text-xs">
+        <thead>
+          <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+            <th className="px-2 py-2 font-medium">Raqam</th>
+            <th className="px-2 py-2 font-medium">Holat</th>
+            <th className="px-2 py-2 font-medium text-right">Jami</th>
+            <th className="px-2 py-2 font-medium w-20" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((o) => (
+            <tr key={o.id} className="border-b last:border-0">
+              <td className="px-2 py-2 font-mono">{o.number}</td>
+              <td className="px-2 py-2">{ORDER_STATUS_LABELS[o.status] ?? o.status}</td>
+              <td className="px-2 py-2 text-right tabular-nums">{o.total_sum}</td>
+              <td className="px-2 py-2">
+                <Link
+                  className="text-primary underline-offset-2 hover:underline"
+                  href={`/orders/${o.id}`}
+                >
+                  Ochish
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data && data.total > rows.length ? (
+        <p className="px-2 py-2 text-[11px] text-muted-foreground border-t">
+          + yana {data.total - rows.length} ta.{" "}
+          <Link className="text-primary underline" href={`/orders?client_id=${clientId}`}>
+            Hammasi
+          </Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}

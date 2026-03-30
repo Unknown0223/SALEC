@@ -1,0 +1,21 @@
+{
+  "name": "salesdoc",
+  "private": true,
+  "description": "Monorepo: bitta buyruqda API + web panel",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "ports:free": "kill-port 4000 3000 3001 3002 3003",
+    "open:panel": "start http://127.0.0.1:3000",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npx kill-port 4000 && npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:clean": "npm run ports:free && npm run clean --prefix frontend && npm run dev",
+    "dev:alt": "concurrently -n api,web -c cyan,magenta \"cross-env PORT=4001 npm run dev --prefix backend\" \"npm run dev --prefix frontend -- -p 3010\"",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "db:deploy": "npm run db:deploy --prefix backend",
+    "test": "npm run test:ci --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "kill-port": "^2.0.1"
+  }
+}

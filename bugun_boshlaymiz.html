@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Bugun Boshlaymiz — To'liq Reja va Muhit Sozlash</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+:root{
+  --bg:#05060c;--bg2:#090c15;--bg3:#0e1120;--bg4:#131826;
+  --br:rgba(255,255,255,.055);--br2:rgba(255,255,255,.1);
+  --t:#c5cede;--mt:#46516a;
+  --a:#3b82f6;--g:#10b981;--o:#f59e0b;--r:#ef4444;
+  --p:#8b5cf6;--c:#06b6d4;--pk:#ec4899;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--t);font-size:13px;line-height:1.55}
+
+.topbar{
+  background:rgba(9,12,21,.97);border-bottom:1px solid var(--br2);
+  padding:10px 20px;display:flex;align-items:center;gap:10px;
+  position:sticky;top:0;z-index:100;backdrop-filter:blur(20px);flex-wrap:wrap;
+}
+.logo{font-size:15px;font-weight:900;color:#fff}
+.logo span{color:var(--g)}
+.today-badge{
+  margin-left:auto;font-size:11px;font-weight:700;
+  padding:5px 14px;border-radius:99px;
+  background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.25);color:#6ee7b7;
+}
+
+.tab-row{background:var(--bg2);border-bottom:1px solid var(--br);padding:8px 20px;
+  display:flex;gap:4px;overflow-x:auto;position:sticky;top:50px;z-index:99;
+  backdrop-filter:blur(16px)}
+.tab{font-size:11px;font-weight:700;padding:7px 14px;border-radius:8px;border:none;
+  background:transparent;color:var(--mt);cursor:pointer;white-space:nowrap;
+  transition:.15s;font-family:'Inter',sans-serif}
+.tab:hover{color:var(--t);background:var(--bg3)}
+.tab.on{background:var(--a);color:#fff}
+.panel{display:none}.panel.on{display:block}
+.wrap{max-width:1200px;margin:0 auto;padding:16px 20px}
+
+.S{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;
+  color:var(--a);letter-spacing:.14em;text-transform:uppercase;
+  margin:22px 0 10px;display:flex;align-items:center;gap:8px}
+.S::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--br2),transparent)}
+
+.card{background:var(--bg2);border:1px solid var(--br);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.card:hover{border-color:var(--br2)}
+.CH{display:flex;align-items:center;gap:11px;padding:11px 15px;background:var(--bg3);border-bottom:1px solid var(--br)}
+.CI{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.CN{font-size:13px;font-weight:700;color:#fff}
+.CS{font-size:10px;color:var(--mt);margin-top:1px}
+.CB{padding:13px 15px}
+
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:680px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+.kpi{background:var(--bg2);border:1px solid var(--br);border-radius:11px;padding:13px;text-align:center}
+.KN{font-size:24px;font-weight:900;line-height:1.1}
+.KL{font-size:9px;color:var(--mt);margin-top:3px;font-family:'JetBrains Mono',monospace}
+
+.b{font-size:10px;padding:2px 8px;border-radius:99px;font-weight:700;white-space:nowrap;display:inline-block}
+.bok{background:rgba(16,185,129,.13);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.bbl{background:rgba(59,130,246,.13);color:#bfdbfe;border:1px solid rgba(59,130,246,.2)}
+.brd{background:rgba(239,68,68,.11);color:#fca5a5;border:1px solid rgba(239,68,68,.2)}
+.bpu{background:rgba(139,92,246,.12);color:#ddd6fe;border:1px solid rgba(139,92,246,.2)}
+.bam{background:rgba(245,158,11,.11);color:#fde68a;border:1px solid rgba(245,158,11,.2)}
+.bcy{background:rgba(6,182,212,.11);color:#a5f3fc;border:1px solid rgba(6,182,212,.2)}
+
+.T{width:100%;border-collapse:collapse;font-size:12px}
+.T th{background:var(--bg3);padding:7px 11px;font-weight:700;color:var(--mt);
+  border-bottom:1px solid var(--br);text-align:left;font-size:10px;
+  text-transform:uppercase;letter-spacing:.04em;font-family:'JetBrains Mono',monospace}
+.T td{padding:7px 11px;border-bottom:1px solid var(--br);color:var(--t);vertical-align:top}
+.T tr:last-child td{border:none}
+.T tr:hover td{background:rgba(255,255,255,.01)}
+.CAT{background:rgba(59,130,246,.07)!important;font-weight:700!important;color:var(--a)!important;
+  font-size:10px!important;text-transform:uppercase!important;
+  font-family:'JetBrains Mono',monospace!important;letter-spacing:.05em!important}
+
+.note{border-radius:9px;padding:11px 14px;margin:8px 0;font-size:12px;line-height:1.65;border-left:3px solid}
+.ng{background:rgba(16,185,129,.06);border-color:var(--g);color:#a7f3d0}
+.nb{background:rgba(59,130,246,.06);border-color:var(--a);color:#bfdbfe}
+.ny{background:rgba(245,158,11,.06);border-color:var(--o);color:#fde68a}
+.nr{background:rgba(239,68,68,.06);border-color:var(--r);color:#fecaca}
+.np{background:rgba(139,92,246,.06);border-color:var(--p);color:#e9d5ff}
+.note strong{color:#fff;font-weight:700}
+
+/* CODE BLOCK */
+.code{
+  background:rgba(0,0,0,.5);border:1px solid var(--br);border-radius:9px;
+  padding:13px 15px;font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:#a5f3fc;line-height:1.85;overflow-x:auto;margin:8px 0;position:relative;
+}
+.code .cm{color:#374151}.code .kw{color:#c084fc}.code .str{color:#86efac}
+.code .key{color:#fde68a}.code .nu{color:#fb923c}
+.copy-btn{
+  position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;
+  padding:3px 9px;border-radius:5px;background:rgba(59,130,246,.2);
+  color:#93c5fd;border:1px solid rgba(59,130,246,.2);cursor:pointer;
+  transition:.15s;font-family:'Inter',sans-serif;
+}
+.copy-btn:hover{background:rgba(59,130,246,.35)}
+.copy-btn.copied{background:rgba(16,185,129,.2);color:#6ee7b7;border-color:rgba(16,185,129,.2)}
+
+/* STEP LIST */
+.steps{counter-reset:s}
+.step{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--br);align-items:flex-start}
+.step:last-child{border:none}
+.step-num{
+  counter-increment:s;min-width:28px;height:28px;border-radius:8px;
+  background:rgba(59,130,246,.15);color:var(--a);font-size:12px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;
+  font-family:'JetBrains Mono',monospace;
+}
+.step-body{flex:1}
+.step-title{font-size:13px;font-weight:700;color:#fff;margin-bottom:3px}
+.step-desc{font-size:11px;color:var(--mt);line-height:1.6}
+.step-ai{font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;margin-top:5px;display:inline-block}
+
+/* TODAY TASK */
+.today-task{
+  display:flex;align-items:flex-start;gap:10px;padding:9px 13px;
+  border-bottom:1px solid var(--br);font-size:12px;
+}
+.today-task:last-child{border:none}
+.chk{
+  width:20px;height:20px;border-radius:6px;border:2px solid var(--br2);
+  cursor:pointer;flex-shrink:0;margin-top:1px;display:flex;align-items:center;
+  justify-content:center;transition:.15s;background:transparent;
+}
+.chk:hover{border-color:var(--g)}
+.chk.done{background:var(--g);border-color:var(--g)}
+.chk.done::after{content:'✓';color:#fff;font-size:11px;font-weight:700}
+.tt-main{flex:1}
+.tt-title{font-size:12px;font-weight:600;color:#fff;margin-bottom:2px}
+.tt-desc{font-size:11px;color:var(--mt);line-height:1.5}
+.tt-time{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--o);margin-top:3px}
+
+/* TENANT DIAGRAM */
+.tenant-box{
+  border-radius:11px;padding:14px;border:1px solid;margin-bottom:8px;
+}
+.tb-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.tb-icon{font-size:22px}
+.tb-name{font-size:14px;font-weight:800;color:#fff}
+.tb-sub{font-size:10px;color:var(--mt);font-family:'JetBrains Mono',monospace}
+.tb-children{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tb-child{font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700}
+
+/* ARCH DIAGRAM */
+.arch{display:flex;flex-direction:column;gap:6px}
+.arch-row{display:flex;align-items:center;gap:8px}
+.arch-box{
+  flex:1;padding:10px 14px;border-radius:9px;border:1px solid;
+  font-size:11px;font-weight:600;color:#fff;text-align:center;
+}
+.arch-arr{font-size:18px;color:var(--mt);flex-shrink:0;text-align:center;min-width:24px}
+
+/* PROGRESS */
+.pb{height:6px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;margin:4px 0}
+.pf{height:100%;border-radius:99px}
+
+.verdict{border-radius:14px;padding:18px 22px;border:2px solid}
+.VT{font-size:17px;font-weight:900;margin-bottom:12px;letter-spacing:-.01em}
+.VR{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--br);font-size:12px;color:var(--t)}
+.VR:last-child{border:none}
+.VN{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;margin-top:1px}
+.VR b{color:#fff}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">Savdo<span>Tizim</span> — Bugun Boshlaymiz!</div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mt)">2026-03-25</div>
+  <div class="today-badge">✅ Bugun: Muhit + Diler arxitekturasi</div>
+</div>
+
+<div class="tab-row">
+  <button class="tab on" onclick="sp('p1',this)">🚀 Bugun nima qilamiz</button>
+  <button class="tab" onclick="sp('p2',this)">🏢 Diler / Filial tizimi</button>
+  <button class="tab" onclick="sp('p3',this)">⚙️ Muhit sozlash</button>
+  <button class="tab" onclick="sp('p4',this)">📱 Flutter server ulanish</button>
+  <button class="tab" onclick="sp('p5',this)">🗄️ Database schema</button>
+  <button class="tab" onclick="sp('p6',this)">📋 To'liq yangilangan reja</button>
+</div>
+
+<div class="wrap">
+
+<!-- ═══════════════════════
+     P1: BUGUN NIMA QILAMIZ
+═══════════════════════ -->
+<div class="panel on" id="p1">
+
+<div class="note nb" style="margin-bottom:14px">
+  <strong>Rasmni ko'rdim:</strong> Sales Doctor dashbordi — Диллеры dropdown menyu bilan (Andijon, Namangan, Farg'ona, Qoqon, Xorazm, Nukus). Bu <strong>Multi-tenant (Diler) tizimi</strong>. Har viloyat/shahar — alohida "tenant" (diler). Bitta tizim, lekin ma'lumotlar to'liq ajratilgan. Bu juda kuchli arxitektura.
+</div>
+
+<div class="g4" style="margin-bottom:14px">
+  <div class="kpi"><div class="KN" style="color:var(--g)">8:00</div><div class="KL">BOSHLANADI</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--a)">4</div><div class="KL">ASOSIY VAZIFA</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--o)">6 soat</div><div class="KL">BUGUNGI REJ</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--p)">Kecha</div><div class="KL">NATIJA</div></div>
+</div>
+
+<div class="S">Bugungi vazifalar — soat bo'yicha</div>
+
+<div class="card">
+  <div class="CH" style="background:rgba(16,185,129,.06)">
+    <div class="CI" style="background:rgba(16,185,129,.15)">📋</div>
+    <div><div class="CN">Bugun bajaramiz (2026-03-25, Chorshanba)</div><div class="CS">Kuniga 6 soat · 08:00 – 18:00 (tushlik 13:00–14:00)</div></div>
+    <div id="today-pct" style="margin-left:auto;font-size:18px;font-weight:900;color:var(--g);font-family:'JetBrains Mono',monospace">0%</div>
+  </div>
+  <div style="padding:0">
+
+    <div class="today-task">
+      <div class="chk" onclick="toggleToday(this)"></div>
+      <div class="tt-main">
+        <div class="tt-title">08:00–09:00 · Cursor Pro sotib olish va sozlash</div>
+        <div class="tt-desc">cursor.com → Pro plan ($20/oy). VS Code dan Cursor ga o'tish. Claude Sonnet 4.5 modelini tanlash. Loyiha papkasini ochish: <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-family:'JetBrains Mono',monospace">~/projects/savdo-tizim</code></div>
+        <div class="tt-time">⏱ 1 soat · 🔗 cursor.com</div>
+      </div>
+    </div>
+
+    <div class="today-task">
+      <div class="chk" onclick="toggleToday(this)"></div>
+      <div class="tt-main">
+        <div class="tt-title">09:00–11:00 · Node.js + PostgreSQL muhitini o'rnatish</div>
+        <div class="tt-desc">Node.js 20 LTS, PostgreSQL 16, Git, VS Code extensions. <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-family:'JetBrains Mono',monospace">npm init</code>, TypeScript sozlash, ESLint, Prettier. Bu qism <strong>P3 tabida</strong> to'liq buyruqlar bilan.</div>
+        <div class="tt-time">⏱ 2 soat · Cursor: muhit setup</div>
+      </div>
+    </div>
+
+    <div class="today-task">
+      <div class="chk" onclick="toggleToday(this)"></div>
+      <div class="tt-main">
+        <div class="tt-title">11:00–13:00 · Diler (Multi-tenant) arxitekturasini tushunish va schema loyihalash</div>
+        <div class="tt-desc">Claude.ai ga <strong>P2 tabidagi prompt</strong>ni paste qiling. "tenants" jadvalini loyihalang. Slug tushunchasi (andijon, namangan...). Har tenant uchun unikal URL: <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-family:'JetBrains Mono',monospace">andijon.sizningapp.uz</code></div>
+        <div class="tt-time">⏱ 2 soat · 🧠 Claude.ai bepul</div>
+      </div>
+    </div>
+
+    <div class="today-task">
+      <div class="chk" onclick="toggleToday(this)"></div>
+      <div class="tt-main">
+        <div class="tt-title">14:00–16:00 · GitHub repo + Prisma schema boshlash</div>
+        <div class="tt-desc">GitHub'da yangi repo: <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-family:'JetBrains Mono',monospace">savdo-tizim</code>. Monorepo: /backend, /frontend, /mobile. Prisma init. <strong>P5 tabidagi</strong> to'liq schema — Cursor bilan generatsiya.</div>
+        <div class="tt-time">⏱ 2 soat · ⚡ Cursor Pro</div>
+      </div>
+    </div>
+
+    <div class="today-task">
+      <div class="chk" onclick="toggleToday(this)"></div>
+      <div class="tt-main">
+        <div class="tt-title">16:00–18:00 · Hetzner VPS buyurtma + Flutter SDK o'rnatish</div>
+        <div class="tt-desc">hetzner.com → CX22 ($8/oy) → Ubuntu 22.04. SSH key generate. Flutter SDK o'rnatish (lokal). <strong>P4 tabida</strong> Flutter server URL sozlash hujjati.</div>
+        <div class="tt-time">⏱ 2 soat · 💳 $8/oy</div>
+      </div>
+    </div>
+
+    <div style="padding:10px 13px;background:rgba(16,185,129,.04);border-top:1px solid var(--br)">
+      <div style="font-size:11px;color:var(--mt)">Jami progress: <span id="done-text" style="color:var(--g);font-weight:700">0 / 5 vazifa</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="S">Ertaga — 2-kun rejasi</div>
+<div class="note ng">
+  <strong>2-kun (Payshanba):</strong> Hetzner serverga Docker + PostgreSQL + Node.js o'rnatish. Prisma migration ishga tushirish. Auth endpoint (login). Birinchi test: Postman bilan API so'rovi.
+</div>
+
+</div>
+
+<!-- ═══════════════════════
+     P2: DILER / FILIAL TIZIMI
+═══════════════════════ -->
+<div class="panel" id="p2">
+
+<div class="note nb" style="margin-bottom:14px">
+  <strong>Rasmdan ko'ringan "Диллеры" bo'limi nima:</strong> Bu Sales Doctor'dagi <strong>Multi-tenant (Ko'p ijarachilik)</strong> tizimi. Har bir diler (Andijon, Namangan...) — alohida kompaniya ma'lumotlari bilan. Bitta tizim kodi, lekin har dilerning ma'lumotlari to'liq ajratilgan.
+</div>
+
+<div class="S">Diler tizimi qanday ishlaydi</div>
+
+<!-- ARXITEKTURA -->
+<div class="card" style="border-color:rgba(59,130,246,.3)">
+  <div class="CH"><div class="CI" style="background:rgba(59,130,246,.15)">🏗️</div><div><div class="CN">Ko'p ijarachilik (Multi-tenant) arxitekturasi</div><div class="CS">Bitta kod, ko'p diler — ma'lumotlar alohida</div></div></div>
+  <div class="CB">
+    <div class="arch">
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(59,130,246,.3);background:rgba(59,130,246,.06)">
+          🌐 <strong>andijon.sizapp.uz</strong><br><span style="font-size:10px;color:var(--mt)">Andijon Diler paneli</span>
+        </div>
+        <div class="arch-box" style="border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)">
+          🌐 <strong>namangan.sizapp.uz</strong><br><span style="font-size:10px;color:var(--mt)">Namangan Diler paneli</span>
+        </div>
+        <div class="arch-box" style="border-color:rgba(139,92,246,.3);background:rgba(139,92,246,.06)">
+          🌐 <strong>fargona.sizapp.uz</strong><br><span style="font-size:10px;color:var(--mt)">Farg'ona Diler paneli</span>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--mt);font-size:18px">↓</div>
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06);max-width:400px;margin:0 auto">
+          ⚙️ <strong>API Server</strong> (1 ta kod)<br>
+          <span style="font-size:10px;color:var(--mt)">Subdomain → tenant_id aniqlanadi → faqat o'z ma'lumotlarini beradi</span>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--mt);font-size:18px">↓</div>
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.06);max-width:400px;margin:0 auto">
+          🗄️ <strong>PostgreSQL</strong> (1 ta database)<br>
+          <span style="font-size:10px;color:var(--mt)">Har jadvalda tenant_id ustuni — ma'lumotlar filter orqali ajratiladi</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="S">Diler tizimining afzalliklari</div>
+<div class="g3">
+  <div class="card" style="border-color:rgba(16,185,129,.3)">
+    <div class="CB">
+      <div style="font-size:22px;margin-bottom:8px">💰</div>
+      <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:6px">Xarajat tejash</div>
+      <div style="font-size:11px;color:var(--mt);line-height:1.6">1 ta server barcha dilerlarga. Har diler uchun alohida server = 10× qimmat. Bitta yangilanish — hammasi yangilanadi.</div>
+    </div>
+  </div>
+  <div class="card" style="border-color:rgba(59,130,246,.3)">
+    <div class="CB">
+      <div style="font-size:22px;margin-bottom:8px">🔒</div>
+      <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:6px">Ma'lumot xavfsizligi</div>
+      <div style="font-size:11px;color:var(--mt);line-height:1.6">Andijon dileri Namangan ma'lumotini ko'ra olmaydi. tenant_id bilan to'liq izolyatsiya. Har API so'rovida tekshiriladi.</div>
+    </div>
+  </div>
+  <div class="card" style="border-color:rgba(139,92,246,.3)">
+    <div class="CB">
+      <div style="font-size:22px;margin-bottom:8px">⚙️</div>
+      <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:6px">Moslashuvchan shartlar</div>
+      <div style="font-size:11px;color:var(--mt);line-height:1.6">Bir dilerga bonus tizimi, boshqasiga emas. Bir dilerga GPS, boshqasiga cheklangan. Har diler uchun alohida sozlamalar.</div>
+    </div>
+  </div>
+</div>
+
+<div class="S">Diler tizimi qanday ishlaydi — texnik</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(245,158,11,.15)">🔑</div><div><div class="CN">Slug va URL tizimi</div><div class="CS">Har dilerga unikal identifikator va havola</div></div></div>
+  <div class="CB">
+    <div class="note nb">
+      <strong>Slug nima:</strong> Har dilerning qisqa nomi — URL da ishlatiladi. Masalan: <code style="font-family:'JetBrains Mono',monospace">andijon</code>, <code style="font-family:'JetBrains Mono',monospace">namangan</code>, <code style="font-family:'JetBrains Mono',monospace">diler-abc</code>
+    </div>
+    <table class="T">
+      <tr><th>Diler</th><th>Slug</th><th>Web URL</th><th>Flutter Server URL</th><th>Unikal Link</th></tr>
+      <tr><td>Andijon MChJ</td><td><code style="font-family:'JetBrains Mono',monospace">andijon</code></td><td>andijon.sizapp.uz</td><td>api.sizapp.uz/andijon</td><td>✅ Faqat ularga</td></tr>
+      <tr><td>Namangan Savdo</td><td><code style="font-family:'JetBrains Mono',monospace">namangan</code></td><td>namangan.sizapp.uz</td><td>api.sizapp.uz/namangan</td><td>✅ Faqat ularga</td></tr>
+      <tr><td>Farg'ona Diler</td><td><code style="font-family:'JetBrains Mono',monospace">fargona</code></td><td>fargona.sizapp.uz</td><td>api.sizapp.uz/fargona</td><td>✅ Faqat ularga</td></tr>
+      <tr><td>Xorazm Optom</td><td><code style="font-family:'JetBrains Mono',monospace">xorazm</code></td><td>xorazm.sizapp.uz</td><td>api.sizapp.uz/xorazm</td><td>✅ Faqat ularga</td></tr>
+    </table>
+    <div class="note ny" style="margin-top:10px">
+      <strong>Flutter ilovada:</strong> Agent ilovani o'rnatadi. Birinchi kirishda: "Server manzilingiz?" → <code style="font-family:'JetBrains Mono',monospace">https://api.sizapp.uz/andijon</code> kiritadi. Shundan keyin login/parol. Shu manzil Hive'da saqlanadi.
+    </div>
+  </div>
+</div>
+
+<div class="S">Diler sozlamalari — nimalarni alohida qilish mumkin</div>
+<div class="card"><div class="CB" style="padding:8px 0">
+  <table class="T">
+    <tr><th>Sozlama</th><th>Diler 1 (Andijon)</th><th>Diler 2 (Namangan)</th><th>Qanday ishlaydi</th></tr>
+    <tr><td><b>Bonus tizimi</b></td><td>✅ Yoqilgan (6+1)</td><td>❌ O'chirilgan</td><td>tenant_settings.bonus_enabled</td></tr>
+    <tr><td><b>GPS monitoring</b></td><td>✅ Bor</td><td>✅ Bor</td><td>tenant_settings.gps_enabled</td></tr>
+    <tr><td><b>Kredit limit</b></td><td>✅ 5 mln limit</td><td>✅ 2 mln limit</td><td>default_credit_limit ustuni</td></tr>
+    <tr><td><b>Valyuta</b></td><td>UZS</td><td>UZS</td><td>tenant.currency</td></tr>
+    <tr><td><b>Nakladnoy logo</b></td><td>Andijon MChJ logosi</td><td>Namangan Savdo logosi</td><td>tenant.logo_url</td></tr>
+    <tr><td><b>Foydalanuvchilar</b></td><td>Faqat Andijon agentlari</td><td>Faqat Namangan agentlari</td><td>users.tenant_id FK</td></tr>
+    <tr><td><b>Mahsulotlar</b></td><td>Umumiy + o'z mahsulotlari</td><td>Faqat umumiy</td><td>products.tenant_id (null=umumiy)</td></tr>
+    <tr><td><b>Hisobotlar</b></td><td>Faqat o'z savdolari</td><td>Faqat o'z savdolari</td><td>Har query'da WHERE tenant_id=?</td></tr>
+    <tr><td><b>Yangi modul ochish</b></td><td>Audit moduli bor</td><td>Audit yo'q</td><td>tenant_features jadval</td></tr>
+    <tr><td><b>Tarif/narx</b></td><td>Premium (barcha funksiya)</td><td>Basic (cheklangan)</td><td>tenant.plan: basic/pro/enterprise</td></tr>
+  </table>
+</div></div>
+
+<div class="S">Claude promti — Diler schema uchun</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(245,158,11,.15)">🧠</div><div><div class="CN">Bu promptni claude.ai ga paste qiling</div><div class="CS">Diler arxitekturasi schema</div></div></div>
+  <div class="CB">
+    <div class="code" style="max-height:300px;overflow-y:auto">
+<span class="cm">// Claude.ai ga paste qiling</span>
+
+Distribyutsiya savdo tizimi uchun multi-tenant (diler/filial) 
+arxitekturasi bilan Prisma schema yoz.
+
+KONTEKST:
+- Biz distribyutsiya kompaniyalari uchun SaaS tizim yasayapmiz
+- Har diler (kompaniya) = bitta tenant
+- Bir diler ma'lumotlarini boshqa diler ko'ra olmaydi
+- Bitta PostgreSQL database, shared schema
+- Har jadvalda tenant_id ustuni bo'ladi
+
+KERAKLI JADVALLAR:
+
+1. tenants (dilerlar ro'yxati):
+   id, slug (unique: 'andijon', 'namangan'...), 
+   name, phone, address, logo_url,
+   plan (enum: basic/pro/enterprise),
+   is_active, created_at,
+   settings JSON (bonus_enabled, gps_enabled, max_users, default_credit_limit)
+
+2. tenant_features (har dilerga alohida modul):
+   id, tenant_id, feature_name, is_enabled
+
+3. users (foydalanuvchilar):
+   id, tenant_id, name, login, password_hash, 
+   role (enum: admin/supervisor/agent/warehouse/delivery),
+   is_active, last_login
+
+4. clients (mijozlar):
+   id, tenant_id, name, address, phone, territory_id,
+   agent_id, category, credit_limit, initial_balance, 
+   gps_lat, gps_lng, is_active
+
+5. products (mahsulotlar):
+   id, tenant_id (null = barcha dilerlarga umumiy), 
+   sku, name, category_id, unit, barcode, is_active
+
+6. orders (zakazlar):
+   id, tenant_id, number (tenant ichida unikal), 
+   client_id, agent_id, warehouse_id, status,
+   total_sum, bonus_sum, discount_sum, payment_type,
+   created_at
+
+7. warehouses (omborlar):
+   id, tenant_id, name, type, address, is_active
+
+8. stock (qoldiqlar):
+   id, tenant_id, warehouse_id, product_id, qty, reserved_qty
+
+9. payments (to'lovlar):
+   id, tenant_id, client_id, order_id, amount, 
+   payment_type, is_confirmed, created_at
+
+10. gps_logs (GPS):
+    id, tenant_id, user_id, lat, lng, recorded_at
+
+Har jadvalda tenant_id majburiy (null bo'lmasin).
+Composite index: (tenant_id, ...) — tez so'rov uchun.
+Prisma schema formatida yoz. Relations to'liq.
+    </div>
+    <button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+  </div>
+</div>
+
+</div>
+
+<!-- ═══════════════════════
+     P3: MUHIT SOZLASH
+═══════════════════════ -->
+<div class="panel" id="p3">
+
+<div class="note nb" style="margin-bottom:14px">
+  <strong>Kerakli dasturlar:</strong> Windows yoki Mac — buyruqlar biroz farqlanadi. Quyida Windows (WSL2) va Mac uchun buyruqlar.
+</div>
+
+<div class="S">1. Node.js 20 LTS o'rnatish</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(16,185,129,.15)">⬇️</div><div><div class="CN">Node.js 20 LTS</div><div class="CS">nodejs.org/en/download → LTS versiyasini oling</div></div></div>
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># Mac (Homebrew orqali):</span>
+brew install node@20
+node --version  <span class="cm"># v20.x.x chiqishi kerak</span>
+npm --version   <span class="cm"># 10.x.x</span>
+
+<span class="cm"># Windows (winget orqali):</span>
+winget install OpenJS.NodeJS.LTS
+
+<span class="cm"># Yoki to'g'ridan: nodejs.org → Download → 20.x LTS</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">2. PostgreSQL 16 o'rnatish</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># Mac:</span>
+brew install postgresql@16
+brew services start postgresql@16
+
+<span class="cm"># Windows: postgresql.org/download/windows/</span>
+<span class="cm"># O'rnatishda parol belgilang: postgres → Test123!</span>
+
+<span class="cm"># Test qilish:</span>
+psql -U postgres
+<span class="cm"># password so'rasa kiritadi</span>
+
+<span class="cm"># Database yaratish:</span>
+CREATE DATABASE savdo_db;
+\q
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">3. Loyiha tuzilmasi yaratish</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># Terminal/CMD da:</span>
+mkdir savdo-tizim
+cd savdo-tizim
+
+<span class="cm"># Monorepo tuzilmasi:</span>
+mkdir backend frontend mobile
+
+<span class="cm"># Backend boshlash:</span>
+cd backend
+npm init -y
+npm install express typescript ts-node @types/node @types/express
+npm install prisma @prisma/client
+npm install jsonwebtoken bcrypt cors dotenv
+npm install -D nodemon jest @types/jest supertest
+
+<span class="cm"># TypeScript sozlash:</span>
+npx tsc --init
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">4. tsconfig.json sozlash</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm">// backend/tsconfig.json</span>
+{
+  <span class="key">"compilerOptions"</span>: {
+    <span class="key">"target"</span>: <span class="str">"ES2020"</span>,
+    <span class="key">"module"</span>: <span class="str">"commonjs"</span>,
+    <span class="key">"lib"</span>: [<span class="str">"ES2020"</span>],
+    <span class="key">"outDir"</span>: <span class="str">"./dist"</span>,
+    <span class="key">"rootDir"</span>: <span class="str">"./src"</span>,
+    <span class="key">"strict"</span>: <span class="kw">true</span>,
+    <span class="key">"esModuleInterop"</span>: <span class="kw">true</span>,
+    <span class="key">"skipLibCheck"</span>: <span class="kw">true</span>,
+    <span class="key">"forceConsistentCasingInFileNames"</span>: <span class="kw">true</span>,
+    <span class="key">"resolveJsonModule"</span>: <span class="kw">true</span>
+  },
+  <span class="key">"include"</span>: [<span class="str">"src/**/*"</span>],
+  <span class="key">"exclude"</span>: [<span class="str">"node_modules"</span>, <span class="str">"dist"</span>]
+}
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">5. .env fayli</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># backend/.env</span>
+<span class="key">DATABASE_URL</span>=<span class="str">"postgresql://postgres:Test123!@localhost:5432/savdo_db"</span>
+<span class="key">JWT_SECRET</span>=<span class="str">"super-secret-key-min-32-chars-required-here"</span>
+<span class="key">JWT_REFRESH_SECRET</span>=<span class="str">"another-secret-32-chars-for-refresh-token"</span>
+<span class="key">PORT</span>=<span class="nu">4000</span>
+<span class="key">NODE_ENV</span>=<span class="str">"development"</span>
+<span class="key">CORS_ORIGIN</span>=<span class="str">"http://localhost:3000"</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">6. Prisma sozlash</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># backend/ papkasida:</span>
+npx prisma init
+
+<span class="cm"># Bu yaratadi: prisma/schema.prisma</span>
+<span class="cm"># .env ga DATABASE_URL allaqachon yozdingiz</span>
+
+<span class="cm"># Schema yozib bo'lgach migration:</span>
+npx prisma migrate dev --name init
+npx prisma generate
+
+<span class="cm"># Prisma Studio (DB vizual ko'rish):</span>
+npx prisma studio
+<span class="cm"># http://localhost:5555 — browser da ochiladi</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">7. package.json scripts</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm">// backend/package.json da scripts qismini to'ldiring:</span>
+{
+  <span class="key">"scripts"</span>: {
+    <span class="key">"dev"</span>: <span class="str">"nodemon src/index.ts"</span>,
+    <span class="key">"build"</span>: <span class="str">"tsc"</span>,
+    <span class="key">"start"</span>: <span class="str">"node dist/index.js"</span>,
+    <span class="key">"test"</span>: <span class="str">"jest --watchAll"</span>,
+    <span class="key">"db:migrate"</span>: <span class="str">"prisma migrate dev"</span>,
+    <span class="key">"db:studio"</span>: <span class="str">"prisma studio"</span>,
+    <span class="key">"db:seed"</span>: <span class="str">"ts-node prisma/seed.ts"</span>
+  }
+}
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">8. GitHub repo yaratish</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># github.com → New Repository → savdo-tizim → Private</span>
+cd savdo-tizim
+git init
+git add .
+git commit -m "chore: initial project setup"
+git branch -M main
+git remote add origin https://github.com/SIZNING/savdo-tizim.git
+git push -u origin main
+
+<span class="cm"># .gitignore — MUHIM (secrets himoya):</span>
+node_modules/
+dist/
+.env
+.env.local
+*.log
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">9. Cursor da ochish va birinchi AI prompt</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># Cursor'da papkani ochish:</span>
+cursor savdo-tizim/
+
+<span class="cm"># Yoki Cursor ichidan: File → Open Folder</span>
+
+<span class="cm"># Cursor da birinchi prompt (Cmd+K yoki Ctrl+K):</span>
+<span class="str">"""
+src/index.ts faylini yaratib ber.
+Express server, PORT 4000.
+Middleware: cors, express.json, morgan(logger).
+/health endpoint: { status: 'ok', time: new Date() }
+TypeScript strict mode.
+"""</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ═══════════════════════
+     P4: FLUTTER SERVER ULANISH
+═══════════════════════ -->
+<div class="panel" id="p4">
+
+<div class="note nb" style="margin-bottom:14px">
+  <strong>Flutter + Multi-tenant qanday ishlaydi:</strong> Flutter ilovasi birinchi ochilganda foydalanuvchi server manzilini kiritadi (diler slug bilan). Bu manzil Hive'da saqlanadi. Keyingi kirish — avto. Sales Doctor rasmida ham xuddi shu mexanizm.
+</div>
+
+<div class="S">Flutter login jarayoni — multi-tenant bilan</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(16,185,129,.15)">📱</div><div><div class="CN">Flutter Agent ilova — Birinchi kirish</div><div class="CS">Diler URL → Login → Token → Hive saqlanadi</div></div></div>
+  <div class="CB">
+    <div class="arch">
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(59,130,246,.3);background:rgba(59,130,246,.06)">
+          <strong>1. Server URL kiritish</strong><br>
+          <span style="font-size:10px;color:var(--mt)">https://api.sizapp.uz/andijon<br>yoki QR kod orqali skanerlash</span>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--mt)">↓</div>
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)">
+          <strong>2. Login / Parol</strong><br>
+          <span style="font-size:10px;color:var(--mt)">Agent: sardor01 / ****<br>JWT token oladi</span>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--mt)">↓</div>
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(139,92,246,.3);background:rgba(139,92,246,.06)">
+          <strong>3. Hive'ga saqlash</strong><br>
+          <span style="font-size:10px;color:var(--mt)">serverUrl + token<br>Keyingi kirishda avto</span>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--mt)">↓</div>
+      <div class="arch-row">
+        <div class="arch-box" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)">
+          <strong>4. Dashboard ochiladi</strong><br>
+          <span style="font-size:10px;color:var(--mt)">Faqat Andijon ma'lumotlari<br>tenant_id bilan filtrlangan</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="S">Flutter kodi — Server URL va Auth</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(59,130,246,.15)">💻</div><div><div class="CN">lib/services/api_service.dart</div><div class="CS">Birinchi yoziladigan fayl — Cursor bilan</div></div></div>
+  <div class="CB">
+    <div class="code" style="position:relative;max-height:320px;overflow-y:auto">
+<span class="cm">// Cursor prompti:</span>
+<span class="str">"""
+Flutter Dart uchun ApiService yoz.
+
+Xususiyatlar:
+1. Hive'da serverUrl saqlash:
+   - HiveStorage.get('serverUrl') → 'https://api.sizapp.uz/andijon'
+   - Foydalanuvchi birinchi kirishda kiritadi
+
+2. Dio bilan HTTP client:
+   - baseUrl: serverUrl + '/api'
+   - Header: Authorization: Bearer token
+   - Interceptor: 401 → refresh token → retry
+
+3. Metodlar:
+   Future<String?> getStoredServerUrl()
+   Future<void> setServerUrl(String url)
+   Future<LoginResponse> login(String login, String password)
+   Future<void> logout()
+   bool get isLoggedIn
+
+4. LoginResponse model:
+   accessToken, refreshToken, user (id, name, role, tenantId)
+
+Hive, Dio, Riverpod ishlatib yoz.
+"""</span>
+
+<span class="cm">// Natija — Cursor generatsiya qiladi:</span>
+<span class="kw">import</span> <span class="str">'package:dio/dio.dart'</span>;
+<span class="kw">import</span> <span class="str">'package:hive_flutter/hive_flutter.dart'</span>;
+<span class="kw">import</span> <span class="str">'package:riverpod_annotation/riverpod_annotation.dart'</span>;
+
+<span class="kw">class</span> ApiService {
+  Dio? _dio;
+  
+  <span class="kw">String</span>? get serverUrl => 
+    Hive.box(<span class="str">'settings'</span>).get(<span class="str">'serverUrl'</span>);
+  
+  <span class="kw">bool</span> get isConfigured => serverUrl != <span class="kw">null</span>;
+  
+  <span class="kw">Future</span>&lt;<span class="kw">void</span>&gt; setServerUrl(<span class="kw">String</span> url) <span class="kw">async</span> {
+    <span class="kw">await</span> Hive.box(<span class="str">'settings'</span>).put(<span class="str">'serverUrl'</span>, url);
+    _initDio(url);
+  }
+  
+  <span class="kw">void</span> _initDio(<span class="kw">String</span> baseUrl) {
+    _dio = Dio(BaseOptions(
+      baseUrl: <span class="str">'$baseUrl/api'</span>,
+      connectTimeout: <span class="kw">const</span> Duration(seconds: <span class="nu">30</span>),
+    ));
+    _dio!.interceptors.add(<span class="cm">/* Auth interceptor */</span>);
+  }
+}
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">Flutter — Birinchi ekran: Server URL kiritish</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative;max-height:280px;overflow-y:auto">
+<span class="cm">// v0.dev ga paste qiling — UI generatsiya uchun:</span>
+<span class="str">"""
+Create a Flutter-style server setup screen (first launch).
+
+Dark theme. Professional.
+
+Content:
+- App logo (distribution truck icon) at top center
+- Title: "Serverga ulanish"
+- Subtitle: "Tizim administratoringizdan URL manzilni oling"
+
+Input field:
+- Label: "Server manzili"
+- Placeholder: "https://api.misol.uz/andijon"
+- Hint text below: "Masalan: https://api.misol.uz/andijon"
+- Validation: must start with https://
+
+QR Code button below input:
+- "QR kod orqali skanerlash" with qr_code icon
+- Secondary style button
+
+Primary button:
+- "Ulanish" 
+- Shows loading spinner when pressed
+- Disabled if URL empty
+
+Error state: red text below input if connection fails
+Success: navigates to login screen
+
+Flutter/Dart code with proper widgets.
+"""</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="S">Backend — Tenant middleware</div>
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(245,158,11,.15)">⚙️</div><div><div class="CN">Cursor prompti — tenant.middleware.ts</div><div class="CS">Har API so'rovida tenant aniqlanadi</div></div></div>
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm">// Cursor prompti:</span>
+<span class="str">"""
+Express TypeScript middleware yoz: tenantMiddleware.
+
+Ishlash logikasi:
+1. URL'dan tenant slug olish:
+   Variant A: /api/andijon/orders → slug = 'andijon'
+   Variant B: Header 'X-Tenant-Slug: andijon'
+   Variant C: JWT token payload da tenant_id
+
+2. Prisma dan tenant toping (slug bo'yicha)
+3. tenant.is_active tekshiring
+4. req.tenant = tenant obyektini set qiling
+5. Aks holda: 403 Forbidden
+
+Keyin barcha controller da:
+const tenant = req.tenant  // faqat shu diler ma'lumotlari
+const orders = await prisma.order.findMany({
+  where: { tenant_id: tenant.id, ... }
+})
+"""</span>
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="note ng">
+  <strong>Tavsiyam:</strong> Variant A (URL path) + Variant C (JWT) kombinatsiyasini ishlating. URL dan slug → middleware → tenant_id. JWT tokenida ham tenant_id saqlang. Bu ikki kavatli himoya.
+</div>
+
+</div>
+
+<!-- ═══════════════════════
+     P5: DATABASE SCHEMA
+═══════════════════════ -->
+<div class="panel" id="p5">
+
+<div class="S">To'liq Prisma schema — bugun yoziladi</div>
+
+<div class="card">
+  <div class="CH"><div class="CI" style="background:rgba(59,130,246,.15)">🗄️</div><div><div class="CN">prisma/schema.prisma — To'liq schema</div><div class="CS">Multi-tenant + barcha modullar + GPS</div></div></div>
+  <div class="CB">
+    <div class="code" style="position:relative;max-height:450px;overflow-y:auto">
+<span class="cm">// prisma/schema.prisma</span>
+generator client {
+  provider = <span class="str">"prisma-client-js"</span>
+}
+
+datasource db {
+  provider = <span class="str">"postgresql"</span>
+  url      = env(<span class="str">"DATABASE_URL"</span>)
+}
+
+<span class="cm">// ═══════════════════════════════
+// TENANT (DILER) — ASOSIY
+// ═══════════════════════════════</span>
+model Tenant {
+  id          Int      @id @default(autoincrement())
+  slug        String   @unique  <span class="cm">// 'andijon', 'namangan'</span>
+  name        String
+  phone       String?
+  address     String?
+  logo_url    String?
+  plan        TenantPlan @default(basic)
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  
+  <span class="cm">// Sozlamalar (JSON)</span>
+  bonus_enabled        Boolean @default(true)
+  gps_enabled          Boolean @default(true)
+  max_users            Int     @default(20)
+  default_credit_limit BigInt  @default(0)
+  currency             String  @default("UZS")
+
+  <span class="cm">// Relations</span>
+  users       User[]
+  clients     Client[]
+  orders      Order[]
+  warehouses  Warehouse[]
+  products    Product[]
+  payments    Payment[]
+  gps_logs    GpsLog[]
+  
+  @@map("tenants")
+}
+
+enum TenantPlan {
+  basic
+  pro
+  enterprise
+}
+
+<span class="cm">// ═══════════════════════════════
+// USERS (FOYDALANUVCHILAR)
+// ═══════════════════════════════</span>
+model User {
+  id              Int      @id @default(autoincrement())
+  tenant_id       Int
+  tenant          Tenant   @relation(fields: [tenant_id], references: [id])
+  name            String
+  login           String
+  password_hash   String
+  role            UserRole
+  territory_id    Int?
+  is_active       Boolean  @default(true)
+  last_login      DateTime?
+  created_at      DateTime @default(now())
+
+  orders          Order[]
+  visits          Visit[]
+  gps_logs        GpsLog[]
+
+  @@unique([tenant_id, login])
+  @@index([tenant_id, role])
+  @@map("users")
+}
+
+enum UserRole {
+  admin
+  supervisor
+  agent
+  warehouse
+  delivery
+}
+
+<span class="cm">// ═══════════════════════════════
+// CLIENTS (MIJOZLAR)
+// ═══════════════════════════════</span>
+model Client {
+  id              Int      @id @default(autoincrement())
+  tenant_id       Int
+  tenant          Tenant   @relation(fields: [tenant_id], references: [id])
+  name            String
+  address         String?
+  phone           String?
+  territory_id    Int?
+  agent_id        Int?
+  category        String?  <span class="cm">// A, B, C, SM, HoReCa</span>
+  credit_limit    BigInt   @default(0)
+  initial_balance BigInt   @default(0)
+  gps_lat         Float?
+  gps_lng         Float?
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  orders          Order[]
+  payments        Payment[]
+  visits          Visit[]
+
+  @@index([tenant_id, agent_id])
+  @@index([tenant_id, category])
+  @@map("clients")
+}
+
+<span class="cm">// ═══════════════════════════════
+// PRODUCTS (MAHSULOTLAR)
+// ═══════════════════════════════</span>
+model Product {
+  id          Int     @id @default(autoincrement())
+  tenant_id   Int?    <span class="cm">// null = barcha dilerlarga umumiy</span>
+  tenant      Tenant? @relation(fields: [tenant_id], references: [id])
+  sku         String
+  name        String
+  category_id Int?
+  unit        String  @default("dona")
+  barcode     String?
+  case_type   String?
+  is_active   Boolean @default(true)
+  created_at  DateTime @default(now())
+
+  order_items OrderItem[]
+  prices      Price[]
+  stock       Stock[]
+
+  @@index([tenant_id])
+  @@map("products")
+}
+
+<span class="cm">// ═══════════════════════════════
+// ORDERS (ZAKAZLAR)
+// ═══════════════════════════════</span>
+model Order {
+  id            Int         @id @default(autoincrement())
+  tenant_id     Int
+  tenant        Tenant      @relation(fields: [tenant_id], references: [id])
+  number        String
+  client_id     Int
+  client        Client      @relation(fields: [client_id], references: [id])
+  agent_id      Int
+  agent         User        @relation(fields: [agent_id], references: [id])
+  warehouse_id  Int
+  warehouse     Warehouse   @relation(fields: [warehouse_id], references: [id])
+  status        OrderStatus @default(new)
+  total_sum     BigInt      @default(0)
+  bonus_sum     BigInt      @default(0)
+  discount_sum  BigInt      @default(0)
+  payment_type  String      @default("cash")
+  delivery_date DateTime?
+  note          String?
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+
+  items         OrderItem[]
+  status_logs   OrderStatusLog[]
+  payments      Payment[]
+
+  @@unique([tenant_id, number])
+  @@index([tenant_id, status])
+  @@index([tenant_id, agent_id])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  new
+  confirmed
+  picking
+  delivering
+  delivered
+  returned
+  cancelled
+}
+
+model OrderItem {
+  id            Int     @id @default(autoincrement())
+  order_id      Int
+  order         Order   @relation(fields: [order_id], references: [id])
+  product_id    Int
+  product       Product @relation(fields: [product_id], references: [id])
+  qty           Float
+  price         BigInt
+  discount_pct  Float   @default(0)
+  total         BigInt
+  is_bonus      Boolean @default(false)
+  bonus_rule_id Int?
+  @@map("order_items")
+}
+
+model OrderStatusLog {
+  id          Int         @id @default(autoincrement())
+  order_id    Int
+  order       Order       @relation(fields: [order_id], references: [id])
+  from_status OrderStatus?
+  to_status   OrderStatus
+  user_id     Int
+  note        String?
+  created_at  DateTime    @default(now())
+  @@map("order_status_logs")
+}
+
+<span class="cm">// ═══════════════════════════════
+// WAREHOUSE + STOCK (OMBOR)
+// ═══════════════════════════════</span>
+model Warehouse {
+  id          Int     @id @default(autoincrement())
+  tenant_id   Int
+  tenant      Tenant  @relation(fields: [tenant_id], references: [id])
+  name        String
+  type        String  @default("main")
+  address     String?
+  is_active   Boolean @default(true)
+  
+  stock       Stock[]
+  orders      Order[]
+  @@index([tenant_id])
+  @@map("warehouses")
+}
+
+model Stock {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  warehouse_id  Int
+  warehouse     Warehouse @relation(fields: [warehouse_id], references: [id])
+  product_id    Int
+  product       Product   @relation(fields: [product_id], references: [id])
+  qty           Float     @default(0)
+  reserved_qty  Float     @default(0)
+  min_qty       Float     @default(0)
+
+  @@unique([warehouse_id, product_id])
+  @@index([tenant_id])
+  @@map("stock")
+}
+
+<span class="cm">// ═══════════════════════════════
+// PAYMENTS (TO'LOVLAR)
+// ═══════════════════════════════</span>
+model Payment {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id])
+  client_id     Int
+  client        Client   @relation(fields: [client_id], references: [id])
+  order_id      Int?
+  order         Order?   @relation(fields: [order_id], references: [id])
+  amount        BigInt
+  payment_type  String   @default("cash")
+  is_confirmed  Boolean  @default(false)
+  is_advance    Boolean  @default(false)
+  note          String?
+  created_at    DateTime @default(now())
+
+  @@index([tenant_id, client_id])
+  @@map("payments")
+}
+
+<span class="cm">// ═══════════════════════════════
+// GPS LOGS
+// ═══════════════════════════════</span>
+model GpsLog {
+  id          Int      @id @default(autoincrement())
+  tenant_id   Int
+  tenant      Tenant   @relation(fields: [tenant_id], references: [id])
+  user_id     Int
+  user        User     @relation(fields: [user_id], references: [id])
+  lat         Float
+  lng         Float
+  accuracy    Float?
+  recorded_at DateTime @default(now())
+
+  @@index([tenant_id, user_id, recorded_at])
+  @@map("gps_logs")
+}
+
+<span class="cm">// ═══════════════════════════════
+// VISITS (TASHRIFLAR)
+// ═══════════════════════════════</span>
+model Visit {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  agent_id      Int
+  agent         User     @relation(fields: [agent_id], references: [id])
+  client_id     Int
+  client        Client   @relation(fields: [client_id], references: [id])
+  visited_at    DateTime @default(now())
+  left_at       DateTime?
+  gps_lat       Float?
+  gps_lng       Float?
+  gps_ok        Boolean  @default(false)
+  with_order    Boolean  @default(false)
+  reject_reason String?
+  photo_count   Int      @default(0)
+
+  @@index([tenant_id, agent_id])
+  @@map("visits")
+}
+
+<span class="cm">// ═══════════════════════════════
+// PRICES (NARXLAR)
+// ═══════════════════════════════</span>
+model Price {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  product_id    Int
+  product       Product  @relation(fields: [product_id], references: [id])
+  price_type    String   <span class="cm">// optom, roznitsa, diler</span>
+  value         BigInt
+  valid_from    DateTime @default(now())
+  valid_to      DateTime?
+  min_qty       Float    @default(1)
+
+  @@index([tenant_id, product_id])
+  @@map("prices")
+}
+
+<span class="cm">// ═══════════════════════════════
+// BONUS RULES (BONUS QOIDALARI)
+// ═══════════════════════════════</span>
+model BonusRule {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  name          String
+  type          String   <span class="cm">// qty, sum, category</span>
+  buy_qty       Float?
+  free_qty      Float?
+  min_sum       BigInt?
+  discount_pct  Float?
+  product_id    Int?
+  priority      Int      @default(1)
+  valid_from    DateTime @default(now())
+  valid_to      DateTime?
+  is_active     Boolean  @default(true)
+
+  @@index([tenant_id, is_active])
+  @@map("bonus_rules")
+}
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ═══════════════════════
+     P6: TO'LIQ YANGILANGAN REJA
+═══════════════════════ -->
+<div class="panel" id="p6">
+
+<div class="note ng" style="margin-bottom:14px">
+  <strong>Diler (Multi-tenant) tizimi qo'shildi.</strong> Bu qo'shimcha 1 hafta vaqt oladi, lekin kelajakda siz bir necha dilerlarga sotishingiz mumkin — bu katta ustunlik.
+</div>
+
+<div class="g4" style="margin-bottom:14px">
+  <div class="kpi"><div class="KN" style="color:var(--a)">19</div><div class="KL">HAFTA JAMI</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--g)">4.75 oy</div><div class="KL">VAQT</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--o)">$231</div><div class="KL">MIN XARAJAT</div></div>
+  <div class="kpi"><div class="KN" style="color:var(--p)">Bugun</div><div class="KL">BOSHLANADI</div></div>
+</div>
+
+<div class="card"><div class="CB" style="padding:8px 0">
+  <table class="T">
+    <tr><th>Hafta</th><th>Nima</th><th>Muhim qo'shimcha</th><th>AI vosita</th><th>Soat</th></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 1: POYDEVOR (1-2 hafta)</td></tr>
+    <tr><td>1–2</td><td>Server + DB + Auth + <b>Diler tizimi</b></td><td>tenants jadval + slug + middleware</td><td>Claude + Cursor</td><td>70</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 2: SOZLAMALAR (3-4 hafta)</td></tr>
+    <tr><td>3–4</td><td>Spravochniklar + Next.js + Diler admin paneli</td><td>Har dilerga alohida sozlama UI</td><td>v0 + Cursor</td><td>70</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 3: KLIENTLAR (5 hafta)</td></tr>
+    <tr><td>5</td><td>Mijozlar + Kredit limit + Diler filter</td><td>Har API da tenant_id filter</td><td>Cursor + v0</td><td>35</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 4: ZAKAZ + BONUS (6-9 hafta)</td></tr>
+    <tr><td>6–9</td><td>Zakaz + Bonus + Status + WebSocket</td><td>Bonus tenant'ga xos yoqish/o'chirish</td><td>Claude + Cursor</td><td>120</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 5: OMBOR + NAKLADNOY (10-12 hafta)</td></tr>
+    <tr><td>10–12</td><td>Ombor + Picking + 518/210 nakladnoy + Ko'chirish</td><td>Nakladnoydа diler logosi</td><td>Claude + Cursor</td><td>90</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 6: MOLIYA (13 hafta)</td></tr>
+    <tr><td>13</td><td>To'lov + Avans + Akt-sverka + Debitorlik</td><td>Tenant balans izolyatsiyasi</td><td>Cursor + v0</td><td>35</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 7: GPS (14 hafta)</td></tr>
+    <tr><td>14</td><td>GPS backend + Leaflet.js xarita + Tashrif logi</td><td>Tenant GPS monitoring</td><td>Cursor</td><td>30</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 8: HISOBOTLAR (15 hafta)</td></tr>
+    <tr><td>15</td><td>5 hisobot + Dashboard + Excel</td><td>Tenant hisobot izolyatsiyasi</td><td>Cursor + v0</td><td>30</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 9: FLUTTER ILOVALAR (16-18 hafta)</td></tr>
+    <tr><td>16–18</td><td>Flutter Agent + Dostavka + Server URL + GPS</td><td><b>Server URL kiritish ekrani (diler slug)</b></td><td>Cursor + Claude</td><td>140</td></tr>
+    <tr><td class="CAT" colspan="5">BOSQICH 10: TEST + DEPLOY (19 hafta)</td></tr>
+    <tr><td>19</td><td>E2E test + Hetzner deploy + SSL + Play Store</td><td>Wildcard SSL (*.sizapp.uz)</td><td>Cursor + Gemini</td><td>35</td></tr>
+    <tr style="background:rgba(16,185,129,.05)">
+      <td><b>JAMI</b></td>
+      <td colspan="2"><b>19 hafta ≈ 4.75 oy (Diler tizimi bilan)</b></td>
+      <td>Cursor + bepul AI</td>
+      <td><b style="color:var(--g)">655 soat</b></td>
+    </tr>
+  </table>
+</div></div>
+
+<div class="S">Diler tizimi qo'shganda server setup</div>
+<div class="card">
+  <div class="CB">
+    <div class="code" style="position:relative">
+<span class="cm"># Nginx wildcard subdomain (*.sizapp.uz) sozlash:</span>
+<span class="cm"># /etc/nginx/sites-available/sizapp</span>
+
+server {
+  listen <span class="nu">443</span> ssl;
+  server_name ~^(?&lt;tenant&gt;.+)\.sizapp\.uz$;
+  
+  ssl_certificate /etc/letsencrypt/live/sizapp.uz/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/sizapp.uz/privkey.pem;
+  
+  location /api/ {
+    proxy_pass http://localhost:<span class="nu">4000</span>;
+    proxy_set_header X-Tenant-Slug $tenant;  <span class="cm"># tenant slug header'da</span>
+    proxy_set_header Host $host;
+  }
+}
+
+<span class="cm"># Wildcard SSL (*.sizapp.uz) uchun:</span>
+certbot certonly --manual --preferred-challenges dns \
+  -d sizapp.uz -d *.sizapp.uz
+<button class="copy-btn" onclick="copyCode(this)">📋 Nusxa</button>
+    </div>
+  </div>
+</div>
+
+<div class="verdict" style="background:linear-gradient(135deg,rgba(16,185,129,.07),rgba(59,130,246,.05));border-color:rgba(16,185,129,.3)">
+  <div class="VT" style="color:#6ee7b7">🚀 Bugun boshlab, 19 haftadan keyin quyidagiga ega bo'lasiz:</div>
+  <div class="VR"><div class="VN" style="background:var(--g)">1</div><div><b>Diler tizimi:</b> Har dilerga unikal URL (andijon.sizapp.uz). Ma'lumotlar to'liq ajratilgan. Bir dilerni boshqasi ko'ra olmaydi.</div></div>
+  <div class="VR"><div class="VN" style="background:var(--g)">2</div><div><b>Flutter ilovalar:</b> Bitta APK faylni barcha agentlar yuklab oladi. Server URL kiriting → login. Har diler o'z serveriga ulanadi.</div></div>
+  <div class="VR"><div class="VN" style="background:var(--g)">3</div><div><b>4 ta rol to'liq:</b> Agent + Dastavchi (Flutter), Omborchi + Menejer (Web). Nakladnoy 518/210 format PDF chiqadi.</div></div>
+  <div class="VR"><div class="VN" style="background:var(--g)">4</div><div><b>Xarajat:</b> Jami $231 (Cursor $90 + Server $36 + Play Store $25 + Domain $15 + Template $60 + Backup $5).</div></div>
+  <div class="VR"><div class="VN" style="background:var(--a)">!</div><div><b>Ertaga:</b> Hetzner server buyurtma → Ubuntu 22.04 → SSH ulanish → Docker + PostgreSQL → Birinchi migration.</div></div>
+</div>
+
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+function sp(id,el){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+  el.classList.add('on');
+  window.scrollTo({top:95,behavior:'smooth'});
+}
+
+let doneCount=0;const total=5;
+function toggleToday(el){
+  el.classList.toggle('done');
+  doneCount=document.querySelectorAll('.chk.done').length;
+  const pct=Math.round(doneCount/total*100);
+  document.getElementById('today-pct').textContent=pct+'%';
+  document.getElementById('done-text').textContent=doneCount+' / '+total+' vazifa';
+}
+
+function copyCode(btn){
+  const code=btn.closest('.code').cloneNode(true);
+  code.querySelectorAll('button').forEach(b=>b.remove());
+  const txt=code.textContent||'';
+  navigator.clipboard.writeText(txt.trim()).then(()=>{
+    btn.textContent='✅ Nusxa olindi';
+    btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='📋 Nusxa';btn.classList.remove('copied')},2000);
+  });
+}
+</script>
+</body>
+</html>
