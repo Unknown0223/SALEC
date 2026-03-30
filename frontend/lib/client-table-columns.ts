@@ -1,0 +1,85 @@
+/**
+ * Ustunlar tartibi va ruscha sarlavhalar.
+ * Mantiqiy bog‘lash: `lib/client-column-display.ts`
+ */
+export type ClientColumnId = string;
+
+export type ClientColumnDef = {
+  id: ClientColumnId;
+  label: string;
+};
+
+const agentCols: ClientColumnDef[] = [];
+for (let i = 1; i <= 10; i++) {
+  agentCols.push(
+    { id: `agent_${i}`, label: `Агент ${i}` },
+    { id: `agent_${i}_day`, label: `Агент ${i} день` },
+    { id: `expeditor_${i}`, label: `Экспедитор ${i}` }
+  );
+}
+
+/** Klientlar jadvali — siz bergan ustunlar tartibi */
+export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
+  { id: "name", label: "Наименование" },
+  { id: "legal_name", label: "Юридическое название" },
+  { id: "address", label: "Адрес" },
+  { id: "phone", label: "Телефон" },
+  { id: "contact_person", label: "Контактное лицо" },
+  { id: "landmark", label: "Ориентир" },
+  { id: "inn", label: "ИНН" },
+  { id: "pinfl", label: "ПИНФЛ" },
+  { id: "trade_channel_code", label: "Торговый канал (код)" },
+  { id: "client_category_code", label: "Категория клиента (код)" },
+  { id: "client_type_code", label: "Тип клиента (код)" },
+  { id: "format_code", label: "Формат (код)" },
+  { id: "city_code", label: "Город (код)" },
+  { id: "latitude", label: "Широта" },
+  { id: "longitude", label: "Долгота" },
+  ...agentCols,
+  { id: "_actions", label: "Действия" }
+];
+
+/** Eski saqlangan ustunlar (v1) bilan aralashmasin */
+const LS_KEY = "salesdoc.clients.table.columns.v2";
+
+export function getDefaultColumnVisibility(): Record<string, boolean> {
+  const m: Record<string, boolean> = {};
+  for (const c of CLIENT_TABLE_COLUMNS) {
+    m[c.id] = [
+      "name",
+      "address",
+      "phone",
+      "contact_person",
+      "inn",
+      "city_code",
+      "agent_1",
+      "_actions"
+    ].includes(c.id);
+  }
+  return m;
+}
+
+export function loadColumnVisibility(): Record<string, boolean> {
+  if (typeof window === "undefined") return getDefaultColumnVisibility();
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return getDefaultColumnVisibility();
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    const base = getDefaultColumnVisibility();
+    for (const col of CLIENT_TABLE_COLUMNS) {
+      if (typeof parsed[col.id] === "boolean") base[col.id] = parsed[col.id];
+    }
+    return base;
+  } catch {
+    return getDefaultColumnVisibility();
+  }
+}
+
+export function saveColumnVisibility(v: Record<string, boolean>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
+}

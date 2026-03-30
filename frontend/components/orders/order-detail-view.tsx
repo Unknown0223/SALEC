@@ -1,0 +1,850 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
+import type { ProductRow } from "@/components/products/product-form-dialog";
+import axios, { type AxiosError } from "axios";
+import { useEffectiveRole } from "@/lib/auth-store";
+import { ORDER_STATUS_LABELS, orderStatusTransitionDirection } from "@/lib/order-status";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+export type OrderListRow = {
+  id: number;
+  number: string;
+  client_id: number;
+  client_name: string;
+  warehouse_id: number | null;
+  status: string;
+  total_sum: string;
+  bonus_sum: string;
+  created_at: string;
+};
+
+export type OrderItemRow = {
+  id: number;
+  product_id: number;
+  sku: string;
+  name: string;
+  qty: string;
+  price: string;
+  total: string;
+  is_bonus: boolean;
+};
+
+export type OrderStatusLogRow = {
+  id: number;
+  from_status: string;
+  to_status: string;
+  user_login: string | null;
+  created_at: string;
+};
+
+export type OrderChangeLogRow = {
+  id: number;
+  action: string;
+  payload: unknown;
+  user_login: string | null;
+  created_at: string;
+};
+
+export type OrderDetailRow = OrderListRow & {
+  agent_id: number | null;
+  warehouse_name: string | null;
+  agent_display: string | null;
+  items: OrderItemRow[];
+  allowed_next_statuses: string[];
+  status_logs: OrderStatusLogRow[];
+  change_logs: OrderChangeLogRow[];
+};
+
+type Props = {
+  tenantSlug: string | null;
+  orderId: number;
+};
+
+type Line = { key: string; productId: string; qty: string };
+
+function newLine(): Line {
+  return { key: crypto.randomUUID(), productId: "", qty: "1" };
+}
+
+function paidItemsToLines(items: OrderItemRow[]): Line[] {
+  const paid = items.filter((i) => !i.is_bonus);
+  if (paid.length === 0) return [newLine()];
+  return paid.map((i) => ({
+    key: crypto.randomUUID(),
+    productId: String(i.product_id),
+    qty: i.qty
+  }));
+}
+
+const ORDER_LINES_EDITABLE_STATUSES = new Set(["new", "confirmed"]);
+
+function formatIdDelta(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  return String(v);
+}
+
+function formatOrderChangeSummary(action: string, payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "—";
+  const p = payload as Record<string, unknown>;
+  if (action === "meta") {
+    const wh = p.warehouse_id as { from?: unknown; to?: unknown } | undefined;
+    const ag = p.agent_id as { from?: unknown; to?: unknown } | undefined;
+    const parts: string[] = [];
+    if (wh) parts.push(`Ombor ID: ${formatIdDelta(wh.from)} → ${formatIdDelta(wh.to)}`);
+    if (ag) parts.push(`Agent ID: ${formatIdDelta(ag.from)} → ${formatIdDelta(ag.to)}`);
+    return parts.join("; ") || "—";
+  }
+  if (action === "lines") {
+    const ts = p.total_sum as { from?: string; to?: string } | undefined;
+    const bs = p.bonus_sum as { from?: string; to?: string } | undefined;
+    const parts: string[] = [];
+    if (ts) parts.push(`To‘lov jami: ${ts.from ?? "—"} → ${ts.to ?? "—"}`);
+    if (bs) parts.push(`Bonus: ${bs.from ?? "—"} → ${bs.to ?? "—"}`);
+    return parts.join("; ") || "To‘lov qatorlari yangilandi";
+  }
+  return JSON.stringify(payload);
+}
+
+function changeLogActionLabel(action: string): string {
+  if (action === "lines") return "To‘lov qatorlari";
+  if (action === "meta") return "Ombor / agent";
+  return action;
+}
+
+function statusOptionPrefix(from: string, to: string): string {
+  const d = orderStatusTransitionDirection(from, to);
+  if (d === "backward") return "← ";
+  if (d === "forward") return "→ ";
+  return "";
+}
+
+function patchOrderLinesErrorMessage(err: unknown): string | null {
+  if (!axios.isAxiosError(err)) return null;
+  const ax = err as AxiosError<{
+    error?: string;
+    product_id?: number;
+    credit_limit?: string;
+    outstanding?: string;
+    order_total?: string;
+  }>;
+  const code = ax.response?.data?.error;
+  const d = ax.response?.data;
+  if (code === "OrderNotEditable") {
+    return "Bu holatda qatorlarni tahrirlab bo‘lmaydi (faqat «Новый» yoki «Подтверждён»).";
+  }
+  if (code === "ForbiddenOperatorOrderLinesEdit") {
+    return "To‘lov qatorlarini tahrirlash faqat admin uchun.";
+  }
+  if (code === "NoRetailPrice") {
+    const id = d?.product_id;
+    return id != null
+      ? `Mahsulot #${id} uchun chakana narxi yo‘q. Avval narx qo‘ying.`
+      : "Chakana narxi yo‘q.";
+  }
+  if (code === "BadClient") return "Klient (zakaz) topilmadi yoki faol emas.";
+  if (code === "BadProduct") return "Mahsulot topilmadi yoki faol emas.";
+  if (code === "BadQty") return "Miqdor noto‘g‘ri.";
+  if (code === "EmptyItems") return "Kamida bitta to‘lov qatori kerak.";
+  if (code === "CreditLimitExceeded" && d) {
+    return `Kredit limiti yetmaydi. Limit: ${d.credit_limit ?? "—"}, boshqa zakazlar: ${d.outstanding ?? "—"}, bu zakaz to‘lovi: ${d.order_total ?? "—"}.`;
+  }
+  if (ax.response?.status === 403) {
+    return "Tahrirlash huquqi yo‘q (faqat admin / operator).";
+  }
+  return null;
+}
+
+export function OrderDetailView({ tenantSlug, orderId }: Props) {
+  const qc = useQueryClient();
+  const role = useEffectiveRole();
+  const canOperate = role === "admin" || role === "operator";
+  const [editingLines, setEditingLines] = useState(false);
+  const [lines, setLines] = useState<Line[]>([newLine()]);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [statusDraft, setStatusDraft] = useState("");
+  const [metaWarehouse, setMetaWarehouse] = useState("");
+  const [metaAgent, setMetaAgent] = useState("");
+  const [metaError, setMetaError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEditingLines(false);
+    setEditError(null);
+    setLines([newLine()]);
+    setStatusDraft("");
+    setMetaWarehouse("");
+    setMetaAgent("");
+    setMetaError(null);
+  }, [orderId]);
+
+  const enabled = Boolean(tenantSlug) && orderId > 0;
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["order", tenantSlug, orderId],
+    enabled,
+    staleTime: 45 * 1000,
+    queryFn: async () => {
+      const { data: body } = await api.get<OrderDetailRow>(
+        `/api/${tenantSlug}/orders/${orderId}`
+      );
+      return body;
+    }
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    setMetaWarehouse(data.warehouse_id != null ? String(data.warehouse_id) : "");
+    setMetaAgent(data.agent_id != null ? String(data.agent_id) : "");
+    setMetaError(null);
+  }, [data]);
+
+  const warehousesQ = useQuery({
+    queryKey: ["warehouses", tenantSlug],
+    enabled: enabled && canOperate,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const { data: body } = await api.get<{ data: { id: number; name: string }[] }>(
+        `/api/${tenantSlug}/warehouses`
+      );
+      return body.data;
+    }
+  });
+
+  const usersQ = useQuery({
+    queryKey: ["users", tenantSlug, "order-meta"],
+    enabled: enabled && canOperate,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const { data: body } = await api.get<{
+        data: { id: number; login: string; name: string; role: string }[];
+      }>(`/api/${tenantSlug}/users`);
+      return body.data;
+    }
+  });
+
+  const canPatchMeta =
+    canOperate && data != null && ORDER_LINES_EDITABLE_STATUSES.has(data.status);
+
+  const canEditOrderLines =
+    role === "admin" && data != null && ORDER_LINES_EDITABLE_STATUSES.has(data.status);
+
+  const productsQ = useQuery({
+    queryKey: ["products", tenantSlug, "order-edit"],
+    enabled: enabled && editingLines && canEditOrderLines,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data: body } = await api.get<{ data: ProductRow[] }>(
+        `/api/${tenantSlug}/products?page=1&limit=200&is_active=true`
+      );
+      return body.data;
+    }
+  });
+
+  const statusMut = useMutation({
+    mutationFn: async (next: string) => {
+      const { data: body } = await api.patch<OrderDetailRow>(
+        `/api/${tenantSlug}/orders/${orderId}/status`,
+        { status: next }
+      );
+      return body;
+    },
+    onSuccess: (body) => {
+      void qc.setQueryData(["order", tenantSlug, orderId], body);
+      void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      setStatusDraft("");
+    }
+  });
+
+  const metaMut = useMutation({
+    mutationFn: async (payload: { warehouse_id: number | null; agent_id: number | null }) => {
+      const { data: body } = await api.patch<OrderDetailRow>(
+        `/api/${tenantSlug}/orders/${orderId}/meta`,
+        payload
+      );
+      return body;
+    },
+    onSuccess: (body) => {
+      void qc.setQueryData(["order", tenantSlug, orderId], body);
+      void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      setMetaError(null);
+    },
+    onError: (e: Error) => {
+      if (axios.isAxiosError(e)) {
+        const code = (e.response?.data as { error?: string } | undefined)?.error;
+        if (code === "OrderNotEditable") {
+          setMetaError("Bu holatda ombor/agentni o‘zgartirib bo‘lmaydi.");
+          return;
+        }
+        if (code === "BadWarehouse") {
+          setMetaError("Ombor topilmadi.");
+          return;
+        }
+        if (code === "BadAgent") {
+          setMetaError("Foydalanuvchi (agent) topilmadi yoki faol emas.");
+          return;
+        }
+      }
+      setMetaError("Saqlab bo‘lmadi.");
+    }
+  });
+
+  const patchLinesMut = useMutation({
+    mutationFn: async (items: { product_id: number; qty: number }[]) => {
+      const { data: body } = await api.patch<OrderDetailRow>(
+        `/api/${tenantSlug}/orders/${orderId}`,
+        { items }
+      );
+      return body;
+    },
+    onSuccess: (body) => {
+      void qc.setQueryData(["order", tenantSlug, orderId], body);
+      void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      setEditingLines(false);
+      setEditError(null);
+    },
+    onError: (e: Error) => {
+      const msg = patchOrderLinesErrorMessage(e);
+      if (msg) {
+        setEditError(msg);
+        return;
+      }
+      if (axios.isAxiosError(e)) {
+        const code = (e.response?.data as { error?: string } | undefined)?.error;
+        setEditError(code ?? e.message ?? "Saqlab bo‘lmadi.");
+        return;
+      }
+      setEditError(e.message ?? "Saqlab bo‘lmadi.");
+    }
+  });
+
+  function updateLine(key: string, patch: Partial<Pick<Line, "productId" | "qty">>) {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  function addLine() {
+    setLines((prev) => [...prev, newLine()]);
+  }
+
+  function removeLine(key: string) {
+    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));
+  }
+
+  function startEditLines() {
+    if (!data) return;
+    setLines(paidItemsToLines(data.items));
+    setEditError(null);
+    setEditingLines(true);
+  }
+
+  function cancelEditLines() {
+    setEditingLines(false);
+    setEditError(null);
+  }
+
+  const products = productsQ.data ?? [];
+  const loadingProducts = productsQ.isLoading;
+
+  const saveLines = () => {
+    setEditError(null);
+    const items: { product_id: number; qty: number }[] = [];
+    for (const line of lines) {
+      const pid = Number.parseInt(line.productId, 10);
+      const q = Number.parseFloat(line.qty.replace(",", "."));
+      if (!Number.isFinite(pid) || pid < 1) continue;
+      if (!Number.isFinite(q) || q <= 0) {
+        setEditError("Barcha qatorlarda miqdor musbat bo‘lsin.");
+        return;
+      }
+      items.push({ product_id: pid, qty: q });
+    }
+    if (items.length === 0) {
+      setEditError("Kamida bitta to‘liq qator (mahsulot + miqdor) kerak.");
+      return;
+    }
+    patchLinesMut.mutate(items);
+  };
+
+  const readOnlyHint =
+    "Faqat to‘lov qatorlari tahrirlanadi; bonuslar qayta hisoblanadi (avtomatik qoidalar bo‘yicha).";
+
+  const allowedStatuses = data?.allowed_next_statuses ?? [];
+  const sortedStatusOptions = [...allowedStatuses].sort((a, b) => {
+    const da = orderStatusTransitionDirection(data?.status ?? "", a);
+    const db = orderStatusTransitionDirection(data?.status ?? "", b);
+    const order = (x: string) => (x === "forward" ? 0 : x === "unknown" ? 1 : 2);
+    return order(da) - order(db);
+  });
+
+  if (!tenantSlug) {
+    return <p className="text-sm text-destructive">Tenant aniqlanmadi.</p>;
+  }
+
+  if (!enabled) {
+    return <p className="text-sm text-destructive">Noto‘g‘ri zakaz identifikatori.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-8 text-sm">
+      <section className="space-y-2">
+        <h2 className="text-base font-semibold tracking-tight">Asosiy ma’lumotlar</h2>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        ) : isError || !data ? (
+          <p className="text-sm text-destructive">Yuklab bo‘lmadi yoki zakaz topilmadi.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border shadow-sm">
+            <table className="w-full min-w-[520px] border-collapse text-sm">
+              <tbody>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground w-40">
+                    Raqam
+                  </th>
+                  <td className="px-4 py-3 font-mono text-xs">{data.number}</td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Klient
+                  </th>
+                  <td className="px-4 py-3">
+                    {tenantSlug ? (
+                      <Link
+                        href={`/clients/${data.client_id}`}
+                        className="font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        {data.client_name}
+                      </Link>
+                    ) : (
+                      data.client_name
+                    )}
+                  </td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Ombor
+                  </th>
+                  <td className="px-4 py-3">{data.warehouse_name ?? "—"}</td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Agent
+                  </th>
+                  <td className="px-4 py-3">{data.agent_display ?? "—"}</td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Holat
+                  </th>
+                  <td className="px-4 py-3 font-medium">
+                    {ORDER_STATUS_LABELS[data.status] ?? data.status}
+                  </td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    To‘lov (mahsulot)
+                  </th>
+                  <td className="px-4 py-3 tabular-nums font-medium">{data.total_sum}</td>
+                </tr>
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Bonus
+                  </th>
+                  <td className="px-4 py-3 tabular-nums font-medium text-emerald-700 dark:text-emerald-400">
+                    {Number(data.bonus_sum) > 0 ? data.bonus_sum : "—"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {!isLoading && !isError && data ? (
+        <>
+          {canPatchMeta ? (
+            <section className="space-y-2">
+              <h2 className="text-base font-semibold tracking-tight">Ombor va agent</h2>
+              <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+                <p className="text-[11px] text-muted-foreground">
+                  Faqat «Новый» / «Подтверждён» holatida saqlash mumkin (qator tahriri bilan bir xil).
+                </p>
+                {metaError ? (
+                  <p className="text-xs text-destructive" role="alert">
+                    {metaError}
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="order-meta-wh" className="text-xs text-muted-foreground">
+                      Ombor
+                    </Label>
+                    <select
+                      id="order-meta-wh"
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={metaWarehouse}
+                      onChange={(e) => setMetaWarehouse(e.target.value)}
+                      disabled={metaMut.isPending || warehousesQ.isLoading}
+                    >
+                      <option value="">— tanlanmagan —</option>
+                      {(warehousesQ.data ?? []).map((w) => (
+                        <option key={w.id} value={String(w.id)}>
+                          {w.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="order-meta-agent" className="text-xs text-muted-foreground">
+                      Agent (foydalanuvchi)
+                    </Label>
+                    <select
+                      id="order-meta-agent"
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={metaAgent}
+                      onChange={(e) => setMetaAgent(e.target.value)}
+                      disabled={metaMut.isPending || usersQ.isLoading}
+                    >
+                      <option value="">— tanlanmagan —</option>
+                      {(usersQ.data ?? []).map((u) => (
+                        <option key={u.id} value={String(u.id)}>
+                          {u.login} · {u.name} ({u.role})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9"
+                  disabled={metaMut.isPending || warehousesQ.isLoading || usersQ.isLoading}
+                  onClick={() => {
+                    const warehouse_id =
+                      metaWarehouse === "" ? null : Number.parseInt(metaWarehouse, 10);
+                    const agent_id = metaAgent === "" ? null : Number.parseInt(metaAgent, 10);
+                    if (metaWarehouse !== "" && !Number.isFinite(warehouse_id)) return;
+                    if (metaAgent !== "" && !Number.isFinite(agent_id)) return;
+                    metaMut.mutate({ warehouse_id: warehouse_id ?? null, agent_id: agent_id ?? null });
+                  }}
+                >
+                  {metaMut.isPending ? "Saqlanmoqda…" : "Ombor va agentni saqlash"}
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
+          {canOperate && sortedStatusOptions.length > 0 ? (
+            <section className="space-y-2">
+              <h2 className="text-base font-semibold tracking-tight">Holatni o‘zgartirish</h2>
+              <div className="rounded-lg border border-border bg-muted/15 p-4 space-y-3">
+                <Label htmlFor="order-status-next" className="text-xs text-muted-foreground">
+                  Выберите новый статус
+                </Label>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap">
+                  <select
+                    id="order-status-next"
+                    className="h-10 min-w-[240px] flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                    value={statusDraft}
+                    onChange={(e) => setStatusDraft(e.target.value)}
+                    disabled={statusMut.isPending}
+                  >
+                    <option value="">— tanlang —</option>
+                    {sortedStatusOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {statusOptionPrefix(data.status, s)}
+                        {ORDER_STATUS_LABELS[s] ?? s}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-10"
+                    disabled={statusMut.isPending || !statusDraft}
+                    onClick={() => {
+                      if (statusDraft) statusMut.mutate(statusDraft);
+                    }}
+                  >
+                    Holatni o‘zgartirish
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed max-w-2xl">
+                  ← orqaga bir qadam (masalan, «Доставлен» dan to‘g‘ridan-to‘g‘ri «Новый» ga —
+                  tizimda yo‘q); → oldinga yoki maxsus holat (отмена, возврат).
+                  {data.status === "cancelled" && role === "admin"
+                    ? " «Отменён» dan «Новый» ga qayta ochish faqat admin uchun."
+                    : null}
+                  {role === "operator" && (data.status === "picking" || data.status === "delivering")
+                    ? " «Отменён» (komplektatsiya / отгрузка) faqat admin uchun."
+                    : null}
+                </p>
+                {statusMut.isError ? (
+                  <p className="text-xs text-destructive">
+                    {axios.isAxiosError(statusMut.error) &&
+                    (statusMut.error.response?.data as { error?: string } | undefined)?.error ===
+                      "ForbiddenRevert"
+                      ? "Orqaga qadam (holatni qaytarish) faqat admin uchun."
+                      : axios.isAxiosError(statusMut.error) &&
+                          (statusMut.error.response?.data as { error?: string } | undefined)
+                            ?.error === "ForbiddenReopenCancelled"
+                        ? "Bekor qilingan zakazni qayta ochish faqat admin uchun."
+                        : axios.isAxiosError(statusMut.error) &&
+                            (statusMut.error.response?.data as { error?: string } | undefined)
+                              ?.error === "ForbiddenOperatorCancelLate"
+                          ? "Komplektatsiya yoki отгрузка bosqichida bekor qilish faqat admin uchun."
+                          : "Holatni o‘zgartirib bo‘lmadi."}
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {(data.status_logs ?? []).length > 0 ? (
+            <section className="space-y-2">
+              <h2 className="text-base font-semibold tracking-tight">Holat tarixi</h2>
+              <div className="overflow-x-auto rounded-lg border max-h-48 overflow-y-auto shadow-sm">
+                <table className="w-full min-w-[560px] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-muted-foreground sticky top-0">
+                      <th className="px-3 py-2 font-medium">Oldin</th>
+                      <th className="px-3 py-2 font-medium">Keyin</th>
+                      <th className="px-3 py-2 font-medium">Foydalanuvchi</th>
+                      <th className="px-3 py-2 font-medium">Vaqt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.status_logs ?? []).map((log) => (
+                      <tr key={log.id} className="border-b border-border last:border-0">
+                        <td className="px-3 py-2">
+                          {ORDER_STATUS_LABELS[log.from_status] ?? log.from_status}
+                        </td>
+                        <td className="px-3 py-2">
+                          {ORDER_STATUS_LABELS[log.to_status] ?? log.to_status}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{log.user_login ?? "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
+
+          {(data.change_logs ?? []).length > 0 ? (
+            <section className="space-y-2">
+              <h2 className="text-base font-semibold tracking-tight">Tahrir jurnali</h2>
+              <p className="text-[11px] text-muted-foreground max-w-2xl">
+                To‘lov qatorlari va ombor/agent o‘zgarishlari (kim va qachon). Holat o‘tishlari — yuqoridagi
+                tarixda.
+              </p>
+              <div className="overflow-x-auto rounded-lg border max-h-48 overflow-y-auto shadow-sm">
+                <table className="w-full min-w-[640px] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-muted-foreground sticky top-0">
+                      <th className="px-3 py-2 font-medium">Vaqt</th>
+                      <th className="px-3 py-2 font-medium">Foydalanuvchi</th>
+                      <th className="px-3 py-2 font-medium">Amal</th>
+                      <th className="px-3 py-2 font-medium">Qisqacha</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.change_logs ?? []).map((log) => (
+                      <tr key={log.id} className="border-b border-border last:border-0">
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{log.user_login ?? "—"}</td>
+                        <td className="px-3 py-2">{changeLogActionLabel(log.action)}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {formatOrderChangeSummary(log.action, log.payload)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold tracking-tight">Zakaz qatorlari</h2>
+                <p className="mt-1 text-[11px] text-muted-foreground max-w-2xl">{readOnlyHint}</p>
+                {role === "operator" && data && ORDER_LINES_EDITABLE_STATUSES.has(data.status) ? (
+                  <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200/90">
+                    To‘lov qatorlarini tahrirlash faqat admin uchun.
+                  </p>
+                ) : null}
+              </div>
+              {canEditOrderLines && !editingLines ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-9 text-xs shrink-0"
+                  onClick={startEditLines}
+                >
+                  Tahrirlash
+                </Button>
+              ) : null}
+            </div>
+
+            {canEditOrderLines && editingLines ? (
+              <div className="space-y-2 rounded-lg border border-border bg-muted/10 p-3">
+                {editError ? (
+                  <p className="text-xs text-destructive px-1" role="alert">
+                    {editError}
+                  </p>
+                ) : null}
+                {loadingProducts ? (
+                  <p className="text-xs text-muted-foreground px-1">Mahsulotlar yuklanmoqda…</p>
+                ) : null}
+                <div className="overflow-x-auto rounded-md border bg-background">
+                  <table className="w-full min-w-[560px] border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Mahsulot</th>
+                        <th className="px-3 py-2 font-medium w-28">Miqdor</th>
+                        <th className="px-3 py-2 font-medium w-24 text-right">Amallar</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((line) => (
+                        <tr key={line.key} className="border-b border-border last:border-0">
+                          <td className="px-3 py-2 align-middle">
+                            <select
+                              className="h-9 w-full max-w-xl rounded-md border border-input bg-background px-2 text-xs"
+                              value={line.productId}
+                              onChange={(e) => updateLine(line.key, { productId: e.target.value })}
+                              disabled={patchLinesMut.isPending || loadingProducts}
+                            >
+                              <option value="">— tanlang —</option>
+                              {products.map((p) => (
+                                <option key={p.id} value={String(p.id)}>
+                                  {p.sku} — {p.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2 align-middle">
+                            <Input
+                              type="number"
+                              min={0.001}
+                              step="any"
+                              className="h-9 text-xs"
+                              value={line.qty}
+                              onChange={(e) => updateLine(line.key, { qty: e.target.value })}
+                              disabled={patchLinesMut.isPending}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-middle text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 text-xs"
+                              disabled={patchLinesMut.isPending || lines.length <= 1}
+                              onClick={() => removeLine(line.key)}
+                            >
+                              O‘chirish
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 px-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-xs"
+                    onClick={addLine}
+                    disabled={patchLinesMut.isPending}
+                  >
+                    + Qator
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 text-xs"
+                    disabled={patchLinesMut.isPending || loadingProducts}
+                    onClick={saveLines}
+                  >
+                    {patchLinesMut.isPending ? "Saqlanmoqda…" : "Saqlash"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-xs"
+                    disabled={patchLinesMut.isPending}
+                    onClick={cancelEditLines}
+                  >
+                    Bekor
+                  </Button>
+                </div>
+                {data.items.some((i) => i.is_bonus) ? (
+                  <p className="text-[11px] text-muted-foreground px-1">
+                    Joriy bonus qatorlari saqlagach yangilanadi.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="overflow-x-auto rounded-lg border shadow-sm">
+              <table className="w-full min-w-[720px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
+                    <th className="px-4 py-3">SKU</th>
+                    <th className="px-4 py-3">Mahsulot</th>
+                    <th className="px-4 py-3">Tur</th>
+                    <th className="px-4 py-3 text-right">Miqdor</th>
+                    <th className="px-4 py-3 text-right">Narx</th>
+                    <th className="px-4 py-3 text-right">Jami</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((i) => (
+                    <tr
+                      key={i.id}
+                      className={
+                        i.is_bonus
+                          ? "border-b border-border bg-emerald-500/5 last:border-0"
+                          : "border-b border-border last:border-0"
+                      }
+                    >
+                      <td className="px-4 py-3 font-mono text-xs">{i.sku}</td>
+                      <td className="px-4 py-3">{i.name}</td>
+                      <td className="px-4 py-3">
+                        {i.is_bonus ? (
+                          <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-800 dark:text-emerald-200">
+                            Bonus
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">To‘lov</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{i.qty}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{i.price}</td>
+                      <td className="px-4 py-3 text-right tabular-nums font-medium">{i.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : null}
+    </div>
+  );
+}

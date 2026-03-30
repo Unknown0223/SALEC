@@ -1,0 +1,119 @@
+/**
+ * Jadval ustunlari ↔ `Client` / API maydonlari (Prisma).
+ *
+ * - Наименование → `name`
+ * - Юридическое название → hozircha alohida maydon yo‘q → kelajakda `legal_name` API; bo‘sh → —
+ * - Адрес → `address`, bo‘sh bo‘lsa manzil qismlaridan yig‘iladi
+ * - Телефон → `phone`
+ * - Контактное лицо → `responsible_person`
+ * - Ориентир → `landmark`
+ * - ИНН → `inn`
+ * - ПИНФЛ → `pdl` (jismoniy shaxs identifikatori)
+ * - Торговый канал (код) → `logistics_service`
+ * - Категория клиента (код) → `category`
+ * - Тип клиента (код) → alohida maydon yo‘q (keyinroq API/DB)
+ * - Формат (код) → `client_format`
+ * - Город (код) → `district` / `region` (tuman, viloyat)
+ * - Широта / Долгота → `gps_text` dan parse yoki kelajakda alohida maydonlar
+ * - Агент 1 → `agent_name` (User)
+ * - Агент 2…10 → hozircha birovchi agent yo‘q → —
+ * - Агент N день → tashrif sanasi: faqat `visit_date` ni «Агент 1 день» ga qisqa ko‘rinishda (boshqalari —)
+ * - Экспедитор N → `contact_persons[N-1].phone` (kontakt telefoni)
+ */
+
+import type { ClientRow } from "@/lib/client-types";
+
+function nonEmpty(s: string | null | undefined): string | null {
+  const t = s?.trim();
+  return t ? t : null;
+}
+
+/** To‘liq manzil: avvalo `address`, bo‘sh bo‘lsa qismlardan. */
+export function displayAddress(row: ClientRow): string | null {
+  const direct = nonEmpty(row.address);
+  if (direct) return direct;
+  const parts = [
+    nonEmpty(row.street),
+    nonEmpty(row.house_number) ? `д.${row.house_number}` : null,
+    nonEmpty(row.apartment) ? `кв.${row.apartment}` : null,
+    nonEmpty(row.neighborhood),
+    nonEmpty(row.district),
+    nonEmpty(row.region)
+  ].filter(Boolean) as string[];
+  return parts.length ? parts.join(", ") : null;
+}
+
+/** Shahar / hudud: tuman + viloyat */
+export function displayCityCode(row: ClientRow): string | null {
+  const d = nonEmpty(row.district);
+  const r = nonEmpty(row.region);
+  if (d && r) return `${d}, ${r}`;
+  return d ?? r ?? null;
+}
+
+export function parseGpsText(gps: string | null): { lat: string | null; lng: string | null } {
+  const s = nonEmpty(gps);
+  if (!s) return { lat: null, lng: null };
+  const m = s.match(/(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  return { lat: null, lng: null };
+}
+
+/** Qisqa sana (DD.MM.YYYY) — «день» ustuni uchun */
+export function displayVisitDateShort(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${dd}.${mm}.${yy}`;
+}
+
+/** Faqat birovchi savdo vakili — `agent_name` */
+export function displayAgentName(row: ClientRow, slot: number): string | null {
+  if (slot < 1 || slot > 10) return null;
+  if (slot === 1) return nonEmpty(row.agent_name);
+  return null;
+}
+
+/**
+ * «Агент N день» — hozircha alohida jadval yo‘q.
+ * Faqat N=1 va `visit_date` bo‘lsa, tashrif sanasi ko‘rsatiladi.
+ */
+export function displayAgentDay(row: ClientRow, slot: number): string | null {
+  if (slot !== 1) return null;
+  return displayVisitDateShort(row.visit_date);
+}
+
+/** Экспедитор N → shu qatordagi kontakt telefoni */
+export function displayExpeditorPhone(row: ClientRow, slot: number): string | null {
+  if (slot < 1 || slot > 10) return null;
+  const p = row.contact_persons[slot - 1]?.phone;
+  return nonEmpty(p);
+}
+
+export function displayLegalName(row: ClientRow): string | null {
+  return nonEmpty(row.legal_name as string | null | undefined);
+}
+
+export function displayPinfl(row: ClientRow): string | null {
+  return nonEmpty(row.pdl);
+}
+
+export function displayTradeChannel(row: ClientRow): string | null {
+  return nonEmpty(row.logistics_service);
+}
+
+export function displayClientCategory(row: ClientRow): string | null {
+  return nonEmpty(row.category);
+}
+
+export function displayClientType(row: ClientRow): string | null {
+  /* DB da alohida «тип» yo‘q — keyin `client_type_code` API qo‘shilgacha — */
+  return nonEmpty(row.client_type_code as string | null | undefined);
+}
+
+export function displayFormatCode(row: ClientRow): string | null {
+  return nonEmpty(row.client_format);
+}
