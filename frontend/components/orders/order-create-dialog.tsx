@@ -221,10 +221,23 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
     warehousesQ.isLoading ||
     usersQ.isLoading ||
     categoriesQ.isLoading;
+  const selectedItemsCount = filteredProducts.reduce((acc, p) => {
+    const raw = qtyByProductId[p.id];
+    const q = Number.parseFloat((raw ?? "").replace(",", "."));
+    return Number.isFinite(q) && q > 0 ? acc + 1 : acc;
+  }, 0);
+  const selectedTotalQty = filteredProducts
+    .reduce((acc, p) => {
+      const raw = qtyByProductId[p.id];
+      const q = Number.parseFloat((raw ?? "").replace(",", "."));
+      return Number.isFinite(q) && q > 0 ? acc + q : acc;
+    }, 0)
+    .toFixed(3)
+    .replace(/\.?0+$/, "");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-[96vw] w-[1200px] max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Yangi zakaz</DialogTitle>
         </DialogHeader>
@@ -234,74 +247,76 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
               {localError}
             </p>
           ) : null}
-          <div className="space-y-2">
-            <Label htmlFor="oc-client">Klient</Label>
-            <select
-              id="oc-client"
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              disabled={mutation.isPending || loadingLists}
-            >
-              <option value="">— tanlang —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={String(c.id)}>
-                  {c.name}
-                  {c.phone ? ` · ${c.phone}` : ""}
-                </option>
-              ))}
-            </select>
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="space-y-2 md:col-span-3">
+                <Label htmlFor="oc-client">Klient</Label>
+                <select
+                  id="oc-client"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  disabled={mutation.isPending || loadingLists}
+                >
+                  <option value="">— tanlang —</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                      {c.phone ? ` · ${c.phone}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oc-warehouse">Ombor</Label>
+                <select
+                  id="oc-warehouse"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={warehouseId}
+                  onChange={(e) => setWarehouseId(e.target.value)}
+                  disabled={mutation.isPending || loadingLists}
+                >
+                  <option value="">— tanlang —</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={String(w.id)}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oc-agent">Agent</Label>
+                <select
+                  id="oc-agent"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  disabled={mutation.isPending || loadingLists}
+                >
+                  <option value="">— tanlang —</option>
+                  {agentUsers.map((u) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.login} · {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end">
+                <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={applyBonus}
+                    onChange={(e) => setApplyBonus(e.target.checked)}
+                    disabled={mutation.isPending}
+                  />
+                  Bonus qoidalarini qo‘llash
+                </label>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="oc-warehouse">Ombor</Label>
-              <select
-                id="oc-warehouse"
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={warehouseId}
-                onChange={(e) => setWarehouseId(e.target.value)}
-                disabled={mutation.isPending || loadingLists}
-              >
-                <option value="">— tanlang —</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={String(w.id)}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="oc-agent">Agent</Label>
-              <select
-                id="oc-agent"
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                disabled={mutation.isPending || loadingLists}
-              >
-                <option value="">— tanlang —</option>
-                {agentUsers.map((u) => (
-                  <option key={u.id} value={String(u.id)}>
-                    {u.login} · {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={applyBonus}
-              onChange={(e) => setApplyBonus(e.target.checked)}
-              disabled={mutation.isPending}
-            />
-            Bonus qoidalarini qo‘llash
-          </label>
-
           <div className="space-y-2">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="oc-category">Kategoriya</Label>
                 <select
@@ -319,9 +334,17 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
                   ))}
                 </select>
               </div>
+              <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
+                <p className="text-xs text-muted-foreground">Tanlangan pozitsiyalar</p>
+                <p className="font-medium">{selectedItemsCount} ta</p>
+              </div>
+              <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
+                <p className="text-xs text-muted-foreground">Jami miqdor</p>
+                <p className="font-medium tabular-nums">{selectedTotalQty}</p>
+              </div>
             </div>
             <div className="rounded-md border border-border">
-              <div className="max-h-[280px] overflow-auto">
+              <div className="max-h-[420px] overflow-auto">
                 <table className="w-full min-w-[640px] border-collapse text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
@@ -374,6 +397,7 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
 
           <p className="text-xs text-muted-foreground">
             Qator qo‘shish yo‘q: miqdorni jadvaldan kiriting. Ombor tanlanganda qoldiqi 0 bo‘lganlar ko‘rinmaydi.
+            {loadingLists ? " Ma’lumotlar yuklanmoqda..." : ""}
           </p>
         </div>
         <DialogFooter>
