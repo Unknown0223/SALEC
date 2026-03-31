@@ -1,10 +1,11 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -17,17 +18,6 @@ export default function SpravochnikPage() {
   const qc = useQueryClient();
   const [newCatName, setNewCatName] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
-
-  const warehouses = useQuery({
-    queryKey: ["ref-warehouses", tenantSlug],
-    enabled: Boolean(tenantSlug),
-    queryFn: async () => {
-      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
-        `/api/${tenantSlug}/warehouses`
-      );
-      return data.data;
-    }
-  });
 
   const users = useQuery({
     queryKey: ["ref-users", tenantSlug],
@@ -100,7 +90,7 @@ export default function SpravochnikPage() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <div>
         <h1 className="text-lg font-semibold">Spravochniklar</h1>
-        <p className="text-sm text-muted-foreground">Omborlar, foydalanuvchilar, kategoriyalar, narx turlari</p>
+        <p className="text-sm text-muted-foreground">Foydalanuvchilar, kategoriyalar, narx turlari</p>
         <Link className="text-sm text-primary underline-offset-4 hover:underline" href="/dashboard">
           ← Dashboard
         </Link>
@@ -111,22 +101,25 @@ export default function SpravochnikPage() {
       ) : (
         <>
           <section className="space-y-2 rounded-lg border p-4">
-            <h2 className="text-sm font-semibold">Omborlar</h2>
-            {warehouses.isLoading ? (
-              <p className="text-xs text-muted-foreground">Yuklanmoqda</p>
-            ) : (
-              <ul className="list-disc pl-5 text-sm">
-                {(warehouses.data ?? []).map((w) => (
-                  <li key={w.id}>
-                    {w.name} <span className="font-mono text-xs text-muted-foreground">#{w.id}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <h2 className="text-sm font-semibold">Ombor boshqaruvi</h2>
+            <p className="text-xs text-muted-foreground">
+              Omborga oid sozlamalar alohida bo‘limga ko‘chirildi.
+            </p>
+            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/warehouses">
+              Omborlar sahifasini ochish
+            </Link>
           </section>
 
           <section className="space-y-2 rounded-lg border p-4">
             <h2 className="text-sm font-semibold">Foydalanuvchilar</h2>
+            <div className="flex flex-wrap gap-2">
+              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/settings/spravochnik/agents">
+                Agentlar bo‘limi
+              </Link>
+              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/settings/spravochnik/expeditors">
+                Ekspeditorlar bo‘limi
+              </Link>
+            </div>
             {users.isLoading ? (
               <p className="text-xs text-muted-foreground">Yuklanmoqda</p>
             ) : (

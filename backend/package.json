@@ -4,6 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "postinstall": "prisma generate",
+    "predev": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
@@ -24,8 +26,10 @@
     "exceljs": "^4.4.0",
     "fastify": "^4.28.1",
     "fastify-plugin": "^5.0.1",
+    "ioredis": "^5.10.1",
     "pino-pretty": "^13.0.0",
     "salesdoc": "file:..",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

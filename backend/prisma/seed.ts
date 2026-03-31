@@ -68,6 +68,10 @@ async function ensureClient(
 }
 
 async function main() {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PROD_SEED !== "true") {
+    throw new Error("SeedBlockedInProduction");
+  }
+
   const password_hash = await bcrypt.hash("secret123", 10);
 
   const test1 = await prisma.tenant.upsert({

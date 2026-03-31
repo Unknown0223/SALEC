@@ -9,6 +9,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { QueryErrorState } from "@/components/common/query-error-state";
+import { getUserFacingError } from "@/lib/error-utils";
 import {
   ORDER_STATUS_FILTER_OPTIONS,
   ORDER_STATUS_LABELS,
@@ -163,23 +165,44 @@ function OrdersPageContent() {
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
       ) : isError ? (
-        <p className="text-sm text-destructive">
-          {error instanceof Error ? error.message : "Xato"}
-        </p>
+        <QueryErrorState message={getUserFacingError(error, "Zakazlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">Hozircha zakaz yo‘q.</p>
       ) : (
         <Card className="overflow-hidden shadow-panel">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] border-collapse text-sm">
+              <table className="w-full min-w-[2200px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-muted/60 text-left text-xs font-medium text-muted-foreground">
-                <th className="px-3 py-2">Raqam</th>
-                <th className="px-3 py-2">Klient</th>
+                <th className="px-3 py-2">№</th>
+                <th className="px-3 py-2">Тип</th>
+                <th className="px-3 py-2">Дата заказа</th>
+                <th className="px-3 py-2">Ожидаемая дата отгрузки</th>
+                <th className="px-3 py-2">Дата отгрузки</th>
+                <th className="px-3 py-2">Дата доставки</th>
                 <th className="px-3 py-2">Holat</th>
-                <th className="px-3 py-2 text-right">Jami</th>
-                <th className="px-3 py-2">Sana</th>
+                <th className="px-3 py-2">Клиент</th>
+                <th className="px-3 py-2">Юр. наз. клиента</th>
+                <th className="px-3 py-2">Ид клиента</th>
+                <th className="px-3 py-2 text-right">Кол-во</th>
+                <th className="px-3 py-2 text-right">Сумма</th>
+                <th className="px-3 py-2">Bonus</th>
+                <th className="px-3 py-2">Баланс</th>
+                <th className="px-3 py-2">Долг</th>
+                <th className="px-3 py-2">Тип цены</th>
+                <th className="px-3 py-2">Склад</th>
+                <th className="px-3 py-2">Агент</th>
+                <th className="px-3 py-2">Код агента</th>
+                <th className="px-3 py-2">Экспедиторы</th>
+                <th className="px-3 py-2">Область</th>
+                <th className="px-3 py-2">Город</th>
+                <th className="px-3 py-2">Зона</th>
+                <th className="px-3 py-2">Консигнация</th>
+                <th className="px-3 py-2">День</th>
+                <th className="px-3 py-2">Кто создал</th>
+                <th className="px-3 py-2">Комментарий</th>
+                <th className="px-3 py-2">Роль(кто создал)</th>
                 <th className="px-3 py-2 w-24" />
               </tr>
             </thead>
@@ -187,6 +210,12 @@ function OrdersPageContent() {
               {rows.map((o) => (
                 <tr key={o.id} className="border-b border-border last:border-0">
                   <td className="px-3 py-2 font-mono text-xs">{o.number}</td>
+                  <td className="px-3 py-2">{o.order_type ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{new Date(o.created_at).toLocaleString()}</td>
+                  <td className="px-3 py-2">{o.expected_ship_date ? new Date(o.expected_ship_date).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-2">{o.shipped_at ? new Date(o.shipped_at).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-2">{o.delivered_at ? new Date(o.delivered_at).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-2">{ORDER_STATUS_LABELS[o.status] ?? o.status}</td>
                   <td className="px-3 py-2">
                     <Link
                       href={`/clients/${o.client_id}`}
@@ -195,11 +224,26 @@ function OrdersPageContent() {
                       {o.client_name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">{ORDER_STATUS_LABELS[o.status] ?? o.status}</td>
+                  <td className="px-3 py-2">{o.client_legal_name ?? "—"}</td>
+                  <td className="px-3 py-2">#{o.client_id}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{o.qty}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{o.total_sum}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(o.created_at).toLocaleString()}
-                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums">{o.bonus_sum}</td>
+                  <td className="px-3 py-2">{o.balance ?? "—"}</td>
+                  <td className="px-3 py-2">{o.debt ?? "—"}</td>
+                  <td className="px-3 py-2">{o.price_type ?? "—"}</td>
+                  <td className="px-3 py-2">{o.warehouse_name ?? "—"}</td>
+                  <td className="px-3 py-2">{o.agent_name ?? "—"}</td>
+                  <td className="px-3 py-2">{o.agent_code ?? "—"}</td>
+                  <td className="px-3 py-2">{o.expeditors ?? "—"}</td>
+                  <td className="px-3 py-2">{o.region ?? "—"}</td>
+                  <td className="px-3 py-2">{o.city ?? "—"}</td>
+                  <td className="px-3 py-2">{o.zone ?? "—"}</td>
+                  <td className="px-3 py-2">{o.consignment == null ? "—" : o.consignment ? "Ha" : "Yo‘q"}</td>
+                  <td className="px-3 py-2">{o.day ?? "—"}</td>
+                  <td className="px-3 py-2">{o.created_by ?? "—"}</td>
+                  <td className="px-3 py-2">{o.comment ?? "—"}</td>
+                  <td className="px-3 py-2">{o.created_by_role ?? "—"}</td>
                   <td className="px-3 py-2">
                     <Link
                       href={`/orders/${o.id}`}

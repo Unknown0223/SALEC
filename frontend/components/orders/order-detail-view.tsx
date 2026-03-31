@@ -15,12 +15,33 @@ import { useEffect, useState } from "react";
 export type OrderListRow = {
   id: number;
   number: string;
+  order_type: string | null;
   client_id: number;
   client_name: string;
+  client_legal_name: string | null;
   warehouse_id: number | null;
+  warehouse_name: string | null;
+  agent_name: string | null;
+  agent_code: string | null;
+  expeditors: string | null;
+  region: string | null;
+  city: string | null;
+  zone: string | null;
+  consignment: boolean | null;
+  day: string | null;
+  created_by: string | null;
+  created_by_role: string | null;
+  expected_ship_date: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
   status: string;
+  qty: string;
   total_sum: string;
   bonus_sum: string;
+  balance: string | null;
+  debt: string | null;
+  price_type: string | null;
+  comment: string | null;
   created_at: string;
 };
 
@@ -55,6 +76,7 @@ export type OrderDetailRow = OrderListRow & {
   agent_id: number | null;
   warehouse_name: string | null;
   agent_display: string | null;
+  apply_bonus: boolean;
   items: OrderItemRow[];
   allowed_next_statuses: string[];
   status_logs: OrderStatusLogRow[];
@@ -150,6 +172,7 @@ function patchOrderLinesErrorMessage(err: unknown): string | null {
   if (code === "BadClient") return "Klient (zakaz) topilmadi yoki faol emas.";
   if (code === "BadProduct") return "Mahsulot topilmadi yoki faol emas.";
   if (code === "BadQty") return "Miqdor noto‘g‘ri.";
+  if (code === "DuplicateProduct") return "Bir xil mahsulotni bir nechta qatorga qo‘shib bo‘lmaydi.";
   if (code === "EmptyItems") return "Kamida bitta to‘lov qatori kerak.";
   if (code === "CreditLimitExceeded" && d) {
     return `Kredit limiti yetmaydi. Limit: ${d.credit_limit ?? "—"}, boshqa zakazlar: ${d.outstanding ?? "—"}, bu zakaz to‘lovi: ${d.order_total ?? "—"}.`;
@@ -225,6 +248,10 @@ export function OrderDetailView({ tenantSlug, orderId }: Props) {
       }>(`/api/${tenantSlug}/users`);
       return body.data;
     }
+  });
+  const agentUsers = (usersQ.data ?? []).filter((u) => {
+    const role = u.role.trim().toLowerCase();
+    return role.includes("agent") && !role.includes("expeditor");
   });
 
   const canPatchMeta =
@@ -352,10 +379,16 @@ export function OrderDetailView({ tenantSlug, orderId }: Props) {
   const saveLines = () => {
     setEditError(null);
     const items: { product_id: number; qty: number }[] = [];
+    const selected = new Set<number>();
     for (const line of lines) {
       const pid = Number.parseInt(line.productId, 10);
       const q = Number.parseFloat(line.qty.replace(",", "."));
       if (!Number.isFinite(pid) || pid < 1) continue;
+      if (selected.has(pid)) {
+        setEditError("Bir xil mahsulotni bir nechta qatorga qo‘shib bo‘lmaydi.");
+        return;
+      }
+      selected.add(pid);
       if (!Number.isFinite(q) || q <= 0) {
         setEditError("Barcha qatorlarda miqdor musbat bo‘lsin.");
         return;
@@ -437,6 +470,12 @@ export function OrderDetailView({ tenantSlug, orderId }: Props) {
                 </tr>
                 <tr className="border-b border-border">
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Bonus rejimi
+                  </th>
+                  <td className="px-4 py-3">{data.apply_bonus ? "Bonus bilan" : "Bonussiz"}</td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                     Holat
                   </th>
                   <td className="px-4 py-3 font-medium">
@@ -509,7 +548,7 @@ export function OrderDetailView({ tenantSlug, orderId }: Props) {
                       disabled={metaMut.isPending || usersQ.isLoading}
                     >
                       <option value="">— tanlanmagan —</option>
-                      {(usersQ.data ?? []).map((u) => (
+                      {agentUsers.map((u) => (
                         <option key={u.id} value={String(u.id)}>
                           {u.login} · {u.name} ({u.role})
                         </option>

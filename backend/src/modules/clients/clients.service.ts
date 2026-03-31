@@ -1,4 +1,6 @@
+import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
+import * as XLSX from "xlsx";
 import { prisma } from "../../config/database";
 import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 
@@ -786,4 +788,488 @@ export async function mergeClientsIntoOne(
     merged: uniqueMerge,
     orders_reassigned: orderUpdate
   };
+}
+
+/** Shablon va import uchun ruxsat etilgan ustun kalitlari (1-varaq, 1-qator sarlavha). */
+export const CLIENT_IMPORT_COLUMN_KEYS = [
+  "name",
+  "phone",
+  "address",
+  "category",
+  "credit_limit",
+  "is_active",
+  "responsible_person",
+  "landmark",
+  "inn",
+  "pdl",
+  "logistics_service",
+  "license_until",
+  "working_hours",
+  "region",
+  "district",
+  "neighborhood",
+  "street",
+  "house_number",
+  "apartment",
+  "gps_text",
+  "visit_date",
+  "notes",
+  "client_format",
+  "agent_id",
+  "contact1_firstName",
+  "contact1_lastName",
+  "contact1_phone",
+  "contact2_firstName",
+  "contact2_lastName",
+  "contact2_phone",
+  "contact3_firstName",
+  "contact3_lastName",
+  "contact3_phone"
+] as const;
+
+const HEADER_ALIASES: Record<string, string> = {
+  nom: "name",
+  nomi: "name",
+  mijoz: "name",
+  mijoz_nomi: "name",
+  telefon: "phone",
+  tel: "phone",
+  manzil: "address",
+  kategoriya: "category",
+  kredit: "credit_limit",
+  kredit_limiti: "credit_limit",
+  faol: "is_active",
+  masul: "responsible_person",
+  masul_shaxs: "responsible_person",
+  orientir: "landmark",
+  stir: "inn",
+  logistika: "logistics_service",
+  litsenziya_muddati: "license_until",
+  ish_vaqti: "working_hours",
+  viloyat: "region",
+  tuman: "district",
+  mahalla: "neighborhood",
+  kocha: "street",
+  uy: "house_number",
+  xonadon: "apartment",
+  gps: "gps_text",
+  tashrif: "visit_date",
+  izoh: "notes",
+  format: "client_format",
+  agent: "agent_id",
+  agent_id: "agent_id",
+  // Ruscha sarlavhalar (Excel / 1C / CRM eksport)
+  имя: "name",
+  название: "name",
+  наименование: "name",
+  наименование_полное: "name",
+  наименование_клиента: "name",
+  наименование_контрагента: "name",
+  контрагент: "name",
+  организация: "name",
+  покупатель: "name",
+  клиент: "name",
+  фио: "name",
+  телефон: "phone",
+  адрес: "address",
+  категория: "category",
+  категория_клиента: "category",
+  кредит: "credit_limit",
+  кредитный_лимит: "credit_limit",
+  активен: "is_active",
+  ответственный: "responsible_person",
+  ориентир: "landmark",
+  инн: "inn",
+  регион: "region",
+  область: "region",
+  район: "district",
+  улица: "street",
+  дом: "house_number",
+  квартира: "apartment",
+  примечание: "notes",
+  комментарий: "notes"
+};
+
+const VALID_IMPORT_KEYS = new Set<string>(CLIENT_IMPORT_COLUMN_KEYS);
+
+function normalizeHeaderLabel(h: string): string {
+  return h
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .replace(/\u00a0/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[''`«»]/g, "");
+}
+
+function headerToClientImportKey(h: string): string | null {
+  const n = normalizeHeaderLabel(h);
+  if (HEADER_ALIASES[n]) return HEADER_ALIASES[n];
+  if (VALID_IMPORT_KEYS.has(n)) return n;
+  return null;
+}
+
+function isPlaceholderCell(s: string): boolean {
+  const t = s.trim();
+  return t === "" || t === "---" || t === "—" || t === "-" || t.toLowerCase() === "n/a";
+}
+
+function parseOptionalDate(raw: string | null): Date | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const s = raw.trim();
+  const iso = new Date(s);
+  if (!Number.isNaN(iso.getTime())) return iso;
+  const m = /^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/.exec(s);
+  if (m) {
+    const d = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    const dt = new Date(y, mo, d);
+    if (!Number.isNaN(dt.getTime())) return dt;
+  }
+  return null;
+}
+
+function parseIsActive(raw: string | null): boolean {
+  if (raw == null || isPlaceholderCell(raw)) return true;
+  const t = raw.trim().toLowerCase();
+  if (["yoq", "false", "0", "no", "off"].includes(t)) return false;
+  return true;
+}
+
+function parseCreditLimit(raw: string | null): Prisma.Decimal {
+  if (raw == null || isPlaceholderCell(raw)) return new Prisma.Decimal(0);
+  const n = Number.parseFloat(raw.replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return new Prisma.Decimal(0);
+  return new Prisma.Decimal(n);
+}
+
+/** SheetJS (`xlsx`) qatori — ExcelJS `readCellText` o‘rnini bosadi. */
+function xlsxCellToString(cell: unknown): string | null {
+  if (cell == null || cell === "") return null;
+  if (cell instanceof Date) return cell.toISOString().slice(0, 10);
+  const s = typeof cell === "number" ? String(cell) : String(cell).trim();
+  if (isPlaceholderCell(s)) return null;
+  return s;
+}
+
+function readArrayCell(row: unknown[] | undefined, colIdx: number | undefined): string | null {
+  if (row == null || colIdx == null || colIdx < 0) return null;
+  return xlsxCellToString(row[colIdx]);
+}
+
+function headerLabelFromCell(cell: unknown): string {
+  if (cell == null) return "";
+  return String(cell).trim();
+}
+
+export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Mijozlar", {
+    views: [{ state: "frozen", ySplit: 1 }]
+  });
+  const headers = [...CLIENT_IMPORT_COLUMN_KEYS];
+  ws.addRow(headers);
+  const r1 = ws.getRow(1);
+  r1.font = { bold: true };
+  r1.eachCell((c) => {
+    c.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE8F4F8" }
+    };
+  });
+  const example: string[] = headers.map((key) => {
+    if (key === "name") return "Misol MCHJ yoki FIO";
+    if (key === "phone") return "+998901112233";
+    if (key === "credit_limit") return "0";
+    if (key === "is_active") return "ha";
+    if (key === "region") return "Toshkent";
+    if (key.startsWith("contact1_")) {
+      if (key === "contact1_firstName") return "Ali";
+      if (key === "contact1_lastName") return "Valiyev";
+      if (key === "contact1_phone") return "+998901112233";
+    }
+    return "---";
+  });
+  ws.addRow(example);
+  ws.columns = headers.map(() => ({ width: 18 }));
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+const IMPORT_MAX_ERRORS_RETURNED = 100;
+/** Birinchi qatorlardan qaysi birida sarlavha ekanini qidiramiz (sarlavha 3–10-qatorda bo‘lishi mumkin). */
+const IMPORT_HEADER_SCAN_ROWS = 50;
+/** Bitta varaqdan yuklab olinadigan maksimal qator (xotira / vaqt). */
+const IMPORT_MAX_DATA_ROWS = 200_000;
+
+function buildColIndexFromHeaderRow(headerCells: unknown): Record<string, number> | null {
+  if (!Array.isArray(headerCells)) return null;
+  const colIndexByKey: Record<string, number> = {};
+  headerCells.forEach((cell, idx) => {
+    const label = headerLabelFromCell(cell);
+    if (!label) return;
+    const key = headerToClientImportKey(label);
+    if (key) colIndexByKey[key] = idx;
+  });
+  return Object.prototype.hasOwnProperty.call(colIndexByKey, "name") ? colIndexByKey : null;
+}
+
+function sheetToRowsMatrix(ws: XLSX.WorkSheet): unknown[][] {
+  return XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    defval: null,
+    raw: true,
+    blankrows: true
+  }) as unknown[][];
+}
+
+/** Bir nechta varaq va sarlavha offsetini qo‘llab-quvvatlaydi; eng ko‘p ma’lumot qatori bo‘lgan blokni tanlaydi. */
+function findImportTableInWorkbook(wb: XLSX.WorkBook): {
+  sheetName: string;
+  rows: unknown[][];
+  headerRowIdx: number;
+  colIndexByKey: Record<string, number>;
+} | null {
+  let best: {
+    sheetName: string;
+    rows: unknown[][];
+    headerRowIdx: number;
+    colIndexByKey: Record<string, number>;
+    dataRows: number;
+  } | null = null;
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const rows = sheetToRowsMatrix(ws);
+    if (rows.length === 0) continue;
+
+    const scanLimit = Math.min(IMPORT_HEADER_SCAN_ROWS, rows.length);
+    for (let hr = 0; hr < scanLimit; hr++) {
+      const colIndexByKey = buildColIndexFromHeaderRow(rows[hr]);
+      if (!colIndexByKey) continue;
+      const dataRows = rows.length - hr - 1;
+      if (
+        best == null ||
+        dataRows > best.dataRows ||
+        (dataRows === best.dataRows && rows.length > best.rows.length)
+      ) {
+        best = { sheetName, rows, headerRowIdx: hr, colIndexByKey, dataRows };
+      }
+    }
+  }
+
+  if (!best) return null;
+  return {
+    sheetName: best.sheetName,
+    rows: best.rows,
+    headerRowIdx: best.headerRowIdx,
+    colIndexByKey: best.colIndexByKey
+  };
+}
+
+export async function importClientsFromXlsx(
+  tenantId: number,
+  buffer: Buffer | Uint8Array
+): Promise<{ created: number; errors: string[] }> {
+  const errors: string[] = [];
+  let totalRowErrors = 0;
+  const pushErr = (msg: string) => {
+    totalRowErrors += 1;
+    if (errors.length < IMPORT_MAX_ERRORS_RETURNED) errors.push(msg);
+  };
+
+  const raw = Buffer.from(buffer);
+  if (raw.length < 4) {
+    return { created: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
+  }
+  // Haqiqiy .xlsx — zip (PK\x03\x04). Eski .xls yoki boshqa tur boshqacha bo‘ladi.
+  if (raw[0] !== 0x50 || raw[1] !== 0x4b) {
+    return {
+      created: 0,
+      errors: [
+        "Bu fayl standart .xlsx (zip) ko‘rinishida emas. Ehtimol .xls yoki boshqa dastur eksporti. Excelda «Fayl → Saqlash tur» dan .xlsx tanlang."
+      ]
+    };
+  }
+
+  let wb: XLSX.WorkBook;
+  try {
+    wb = XLSX.read(raw, { type: "buffer", cellDates: true, dense: false });
+  } catch (e) {
+    const hint = e instanceof Error ? e.message : String(e);
+    return {
+      created: 0,
+      errors: [
+        "Fayl o‘qilmadi. Buzilgan .xlsx yoki noto‘g‘ri format. Excelda qayta saqlang (.xlsx) yoki loyiha shablonidan foydalaning.",
+        `Texnik: ${hint.slice(0, 200)}`
+      ]
+    };
+  }
+
+  if (!wb.SheetNames.length) {
+    return { created: 0, errors: ["Jadvalda varaq yo‘q."] };
+  }
+
+  const table = findImportTableInWorkbook(wb);
+  if (!table) {
+    const first = wb.SheetNames[0];
+    const ws0 = first ? wb.Sheets[first] : undefined;
+    const rows0 = ws0 ? sheetToRowsMatrix(ws0) : [];
+    const headerTry = rows0[0];
+    const sample = (Array.isArray(headerTry) ? headerTry : [])
+      .map((c) => headerLabelFromCell(c))
+      .filter(Boolean)
+      .slice(0, 12);
+    const preview = sample.join(" | ");
+    return {
+      created: 0,
+      errors: [
+        `Hech bir varaqning dastlabki ${IMPORT_HEADER_SCAN_ROWS} qatorida majburiy ustun (name / наименование va hokazo) topilmadi.`,
+        preview
+          ? `Birinchi varaq, 1-qator (namuna): ${preview}`
+          : "Birinchi varaq bo‘sh yoki o‘qilmadi."
+      ]
+    };
+  }
+
+  const { rows, headerRowIdx, colIndexByKey } = table;
+
+  let created = 0;
+  let skippedEmpty = 0;
+
+  const firstDataRow = headerRowIdx + 1;
+  const lastRowIdx = Math.min(rows.length - 1, headerRowIdx + IMPORT_MAX_DATA_ROWS);
+
+  if (firstDataRow > rows.length - 1) {
+    return {
+      created: 0,
+      errors: [
+        `Sarlavha ${headerRowIdx + 1}-qatorda topildi («${table.sheetName}»), lekin undan keyin ma’lumot qatori yo‘q.`
+      ]
+    };
+  }
+
+  for (let r = firstDataRow; r <= lastRowIdx; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) {
+      skippedEmpty += 1;
+      continue;
+    }
+
+    const nameRaw = readArrayCell(row, colIndexByKey.name);
+    if (nameRaw == null) {
+      skippedEmpty += 1;
+      continue;
+    }
+
+    const phone = readArrayCell(row, colIndexByKey.phone);
+    const address = readArrayCell(row, colIndexByKey.address);
+    const category = readArrayCell(row, colIndexByKey.category);
+    const credit_limit = parseCreditLimit(readArrayCell(row, colIndexByKey.credit_limit));
+    const is_active = parseIsActive(readArrayCell(row, colIndexByKey.is_active));
+    const responsible_person = readArrayCell(row, colIndexByKey.responsible_person);
+    const landmark = readArrayCell(row, colIndexByKey.landmark);
+    const inn = readArrayCell(row, colIndexByKey.inn);
+    const pdl = readArrayCell(row, colIndexByKey.pdl);
+    const logistics_service = readArrayCell(row, colIndexByKey.logistics_service);
+    const license_until = parseOptionalDate(readArrayCell(row, colIndexByKey.license_until));
+    const working_hours = readArrayCell(row, colIndexByKey.working_hours);
+    const region = readArrayCell(row, colIndexByKey.region);
+    const district = readArrayCell(row, colIndexByKey.district);
+    const neighborhood = readArrayCell(row, colIndexByKey.neighborhood);
+    const street = readArrayCell(row, colIndexByKey.street);
+    const house_number = readArrayCell(row, colIndexByKey.house_number);
+    const apartment = readArrayCell(row, colIndexByKey.apartment);
+    const gps_text = readArrayCell(row, colIndexByKey.gps_text);
+    const visit_date = parseOptionalDate(readArrayCell(row, colIndexByKey.visit_date));
+    const notes = readArrayCell(row, colIndexByKey.notes);
+    const client_format = readArrayCell(row, colIndexByKey.client_format);
+
+    let agent_id: number | null = null;
+    const agentStr = readArrayCell(row, colIndexByKey.agent_id);
+    if (agentStr != null) {
+      const aid = Number.parseInt(agentStr, 10);
+      if (Number.isFinite(aid) && aid > 0) {
+        const u = await prisma.user.findFirst({
+          where: { id: aid, tenant_id: tenantId, is_active: true }
+        });
+        if (u) agent_id = aid;
+      }
+    }
+
+    const slots: ContactPersonSlot[] = Array.from({ length: CONTACT_SLOTS }, () => ({
+      firstName: null,
+      lastName: null,
+      phone: null
+    }));
+    for (let i = 0; i < 3; i++) {
+      const p = i + 1;
+      const fn = readArrayCell(row, colIndexByKey[`contact${p}_firstName`]);
+      const ln = readArrayCell(row, colIndexByKey[`contact${p}_lastName`]);
+      const ph = readArrayCell(row, colIndexByKey[`contact${p}_phone`]);
+      slots[i] = { firstName: fn, lastName: ln, phone: ph };
+    }
+
+    try {
+      await prisma.client.create({
+        data: {
+          tenant_id: tenantId,
+          name: nameRaw.trim(),
+          phone,
+          phone_normalized: normalizePhoneDigits(phone),
+          address,
+          category,
+          credit_limit,
+          is_active,
+          responsible_person,
+          landmark,
+          inn,
+          pdl,
+          logistics_service,
+          license_until,
+          working_hours,
+          region,
+          district,
+          neighborhood,
+          street,
+          house_number,
+          apartment,
+          gps_text,
+          visit_date,
+          notes,
+          client_format,
+          agent_id,
+          contact_persons: contactPersonsToJson(slots)
+        }
+      });
+      created += 1;
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : "xato";
+      const short =
+        raw.includes("Unique constraint") || raw.includes("unique constraint")
+          ? "bu tenantda telefon yoki boshqa noyob maydon takrorlanmoqda"
+          : raw.length > 180
+            ? `${raw.slice(0, 180)}…`
+            : raw;
+      pushErr(`Qator ${r + 1} (Excel): ${short}`);
+    }
+  }
+
+  const out = [...errors];
+  if (created === 0 && errors.length === 0 && skippedEmpty > 0) {
+    out.push(
+      `Hech kim qo‘shilmadi: Excel ${headerRowIdx + 2}–${rows.length} qatorlarda «name» bo‘sh yoki --- (${skippedEmpty} qator o‘tkazildi).`
+    );
+  }
+  if (totalRowErrors > IMPORT_MAX_ERRORS_RETURNED) {
+    out.push(
+      `… va yana ${totalRowErrors - IMPORT_MAX_ERRORS_RETURNED} ta qator xatosi (faqat birinchi ${IMPORT_MAX_ERRORS_RETURNED} matn qaytarildi).`
+    );
+  }
+
+  return { created, errors: out };
 }

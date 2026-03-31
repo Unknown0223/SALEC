@@ -1,6 +1,8 @@
 # Docker Postgres ma’lumoti (infrastructure/docker-compose bind mount)
 SALES/postgres-data/
 
+.git copy/
+
 .claude/
 
 backend/.env

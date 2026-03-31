@@ -11,6 +11,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/bonus-rules") ||
     pathname.startsWith("/clients") ||
     pathname.startsWith("/orders") ||
+    pathname.startsWith("/stock") ||
     pathname.startsWith("/settings");
 
   if (protectedPath && !hasFlag) {
@@ -38,6 +39,8 @@ export const config = {
     "/clients/:path*",
     "/orders",
     "/orders/:path*",
+    "/stock",
+    "/stock/:path*",
     "/settings",
     "/settings/:path*",
     "/login",

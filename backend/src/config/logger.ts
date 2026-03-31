@@ -1,7 +1,7 @@
 import pino from "pino";
 import { env } from "./env";
 
-export const logger = pino({
+export const loggerOptions = {
   level: env.NODE_ENV === "production" ? "info" : "debug",
   transport:
     env.NODE_ENV === "production"
@@ -9,4 +9,8 @@ export const logger = pino({
       : {
           target: "pino-pretty"
         }
+};
+
+export const logger = pino({
+  ...loggerOptions
 });

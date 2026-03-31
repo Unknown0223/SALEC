@@ -9,32 +9,59 @@ import { registerOrderRoutes } from "./modules/orders/orders.route";
 import { registerOrderStreamRoutes } from "./modules/orders/order-stream.route";
 import { registerReferenceRoutes } from "./modules/reference/reference.route";
 import { registerTenantSettingsRoutes } from "./modules/tenant-settings/tenant-settings.route";
+import { registerStockRoutes } from "./modules/stock/stock.route";
 import { registerProductPriceRoutes } from "./modules/products/product-prices.route";
 import { registerProductRoutes } from "./modules/products/products.route";
+import { registerStaffRoutes } from "./modules/staff/staff.route";
+import { env } from "./config/env";
+import { prisma } from "./config/database";
+import { loggerOptions } from "./config/logger";
 import { jwtPlugin } from "./plugins/jwt.plugin";
 import { tenantPlugin } from "./plugins/tenant.plugin";
+import { isOrderEventBusRedisEnabled } from "./lib/order-event-bus";
 
 export function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: loggerOptions });
 
   app.register(cors, { origin: true });
-  app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
+  app.register(multipart, { limits: { fileSize: env.MULTIPART_MAX_FILE_BYTES } });
   app.register(jwtPlugin);
   app.register(tenantPlugin);
   app.register(registerAuthRoutes);
   app.register(registerClientRoutes);
   app.register(registerProductPriceRoutes);
   app.register(registerProductRoutes);
+  app.register(registerStaffRoutes);
   app.register(registerBonusRuleRoutes);
   app.register(registerOrderRoutes);
   app.register(registerOrderStreamRoutes);
   app.register(registerReferenceRoutes);
   app.register(registerTenantSettingsRoutes);
+  app.register(registerStockRoutes);
 
   app.get("/health", async () => ({
     status: "ok",
     time: new Date().toISOString()
   }));
+
+  app.get("/ready", async (_, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return reply.send({
+        status: "ready",
+        database: "ok",
+        redis: isOrderEventBusRedisEnabled() ? "ok" : "degraded",
+        time: new Date().toISOString()
+      });
+    } catch {
+      return reply.status(503).send({
+        status: "not_ready",
+        database: "down",
+        redis: isOrderEventBusRedisEnabled() ? "ok" : "degraded",
+        time: new Date().toISOString()
+      });
+    }
+  });
 
   app.get("/api/:slug/protected", {
     preHandler: [jwtAccessVerify]
@@ -57,10 +84,35 @@ export function buildApp() {
   app.setErrorHandler((error, request, reply) => {
     const requestId = request.id;
     app.log.error({ err: error, requestId }, error.message);
+    const code = (error as { code?: string }).code;
+    if (code === "FST_REQ_FILE_TOO_LARGE") {
+      return reply.status(413).send({
+        error: "PayloadTooLarge",
+        message: `Fayl juda katta. Maksimal hajm: ${Math.round(env.MULTIPART_MAX_FILE_BYTES / (1024 * 1024))} MB. Kichikroq .xlsx yoki .env da MULTIPART_MAX_FILE_BYTES ni oshiring.`,
+        maxBytes: env.MULTIPART_MAX_FILE_BYTES,
+        requestId
+      });
+    }
     if ((error as { statusCode?: number }).statusCode) {
       return reply.status((error as { statusCode: number }).statusCode).send({
         error: error.name,
         message: error.message,
+        requestId
+      });
+    }
+    const prismaCode =
+      error !== null &&
+      typeof error === "object" &&
+      (error as { name?: string }).name === "PrismaClientKnownRequestError" &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+    if (prismaCode === "P2022" || prismaCode === "P2021") {
+      return reply.status(503).send({
+        error: "DatabaseSchemaMismatch",
+        message:
+          "Baza migratsiyalari to‘liq qo‘llanmagan (jadval/ustun yetishmayapti). Backend papkasida: npm run db:deploy",
+        prismaCode,
         requestId
       });
     }

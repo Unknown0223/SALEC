@@ -36,7 +36,11 @@ export function decodeAccessTokenRole(accessToken: string | null | undefined): s
 export function useEffectiveRole(): string | null {
   const accessToken = useAuthStore((s) => s.accessToken);
   const stored = useAuthStore((s) => s.role);
-  return stored ?? decodeAccessTokenRole(accessToken);
+  const trimmed = typeof stored === "string" ? stored.trim() : "";
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+  return decodeAccessTokenRole(accessToken);
 }
 
 function setSessionCookie() {
@@ -58,7 +62,8 @@ export const useAuthStore = create<AuthState>()(
       role: null,
       setSession: ({ accessToken, refreshToken, tenantSlug, role: roleIn }) => {
         setSessionCookie();
-        const role = roleIn ?? decodeAccessTokenRole(accessToken);
+        const trimmedIn = roleIn != null && String(roleIn).trim() !== "" ? String(roleIn).trim() : null;
+        const role = trimmedIn ?? decodeAccessTokenRole(accessToken);
         set({ accessToken, refreshToken, tenantSlug, role });
       },
       clearSession: () => {

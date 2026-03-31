@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { getErrorCode } from "../../lib/app-error";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
@@ -15,6 +16,7 @@ const createBodySchema = z.object({
   client_id: z.number().int().positive(),
   warehouse_id: z.number().int().positive().nullable().optional(),
   agent_id: z.number().int().positive().nullable().optional(),
+  apply_bonus: z.boolean().optional(),
   items: z
     .array(
       z.object({
@@ -34,6 +36,7 @@ const patchStatusBodySchema = z.object({
 const patchOrderLinesBodySchema = z.object({
   warehouse_id: z.number().int().positive().nullable().optional(),
   agent_id: z.number().int().positive().nullable().optional(),
+  apply_bonus: z.boolean().optional(),
   items: z
     .array(
       z.object({
@@ -127,7 +130,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         );
         return reply.send(row);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
+        const msg = getErrorCode(e) ?? "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "ORDER_NOT_EDITABLE") {
           return reply.status(400).send({ error: "OrderNotEditable" });
@@ -168,7 +171,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         );
         return reply.send(row);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
+        const msg = getErrorCode(e) ?? "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "ORDER_NOT_EDITABLE") {
           return reply.status(400).send({ error: "OrderNotEditable" });
@@ -181,6 +184,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         if (msg === "BAD_AGENT") return reply.status(400).send({ error: "BadAgent" });
         if (msg === "BAD_PRODUCT") return reply.status(400).send({ error: "BadProduct" });
         if (msg === "BAD_QTY") return reply.status(400).send({ error: "BadQty" });
+        if (msg === "DUPLICATE_PRODUCT") return reply.status(400).send({ error: "DuplicateProduct" });
         if (msg === "EMPTY_ITEMS") return reply.status(400).send({ error: "EmptyItems" });
         if (msg === "NO_PRICE") {
           const pid = (e as Error & { product_id?: number }).product_id;
@@ -226,7 +230,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         );
         return reply.send(row);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
+        const msg = getErrorCode(e) ?? "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "FORBIDDEN_REVERT") {
           return reply.status(403).send({ error: "ForbiddenRevert" });
@@ -265,12 +269,13 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         const row = await createOrder(request.tenant!.id, parsed.data, viewer.role);
         return reply.status(201).send(row);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "";
+        const msg = getErrorCode(e) ?? "";
         if (msg === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_AGENT") return reply.status(400).send({ error: "BadAgent" });
         if (msg === "BAD_PRODUCT") return reply.status(400).send({ error: "BadProduct" });
         if (msg === "BAD_QTY") return reply.status(400).send({ error: "BadQty" });
+        if (msg === "DUPLICATE_PRODUCT") return reply.status(400).send({ error: "DuplicateProduct" });
         if (msg === "EMPTY_ITEMS") return reply.status(400).send({ error: "EmptyItems" });
         if (msg === "NO_PRICE") {
           const pid = (e as Error & { product_id?: number }).product_id;

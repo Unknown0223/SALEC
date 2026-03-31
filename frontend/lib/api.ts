@@ -2,7 +2,13 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "@/lib/auth-store";
 import { readPersistedAuth } from "@/lib/persisted-auth";
 
-const baseURL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
+const inferredDefault =
+  process.env.NODE_ENV === "development"
+    ? "http://127.0.0.1:4000"
+    : typeof window !== "undefined"
+      ? window.location.origin
+      : "";
+const baseURL = process.env.NEXT_PUBLIC_API_URL ?? inferredDefault;
 
 export const api = axios.create({
   baseURL,

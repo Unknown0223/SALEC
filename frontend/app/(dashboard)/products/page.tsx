@@ -9,6 +9,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { QueryErrorState } from "@/components/common/query-error-state";
+import { getUserFacingError } from "@/lib/error-utils";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -85,7 +87,7 @@ function ProductsPageContent() {
     return m;
   }, [categories]);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["products", tenantSlug, search, page, categoryIdFromUrl],
     enabled: Boolean(tenantSlug),
     placeholderData: keepPreviousData,
@@ -306,9 +308,10 @@ function ProductsPageContent() {
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
       ) : isError ? (
-        <p className="text-sm text-destructive">
-          Xato: {error instanceof Error ? error.message : "API ga ulanib bo‘lmadi (kirganmisiz?)"}
-        </p>
+        <QueryErrorState
+          message={getUserFacingError(error, "Mahsulotlarni yuklab bo'lmadi.")}
+          onRetry={() => void refetch()}
+        />
       ) : (
         <Card className="overflow-hidden shadow-panel">
           <CardContent className="p-0">

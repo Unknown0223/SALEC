@@ -1,9 +1,6 @@
-import { config } from "dotenv";
-import { resolve } from "path";
+/** Zod defaultlar + `process.env.DATABASE_URL` — `PrismaClient` dan oldin. */
+import "./env";
 import { PrismaClient } from "@prisma/client";
-
-// `index.ts` imports `./app` before `./config/env`; auth loads prisma early. Load `.env` here so DATABASE_URL is set before PrismaClient is constructed.
-config({ path: resolve(__dirname, "../../.env") });
 
 declare global {
   var __prisma__: PrismaClient | undefined;

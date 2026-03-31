@@ -24,6 +24,7 @@ export type CreateOrderInput = {
   client_id: number;
   warehouse_id?: number | null;
   agent_id?: number | null;
+  apply_bonus?: boolean;
   items: OrderLineInput[];
 };
 
@@ -31,6 +32,7 @@ export type UpdateOrderLinesInput = {
   items: OrderLineInput[];
   warehouse_id?: number | null;
   agent_id?: number | null;
+  apply_bonus?: boolean;
 };
 
 export type OrderItemRow = {
@@ -47,12 +49,33 @@ export type OrderItemRow = {
 export type OrderListRow = {
   id: number;
   number: string;
+  order_type: string | null;
   client_id: number;
   client_name: string;
+  client_legal_name: string | null;
   warehouse_id: number | null;
+  warehouse_name: string | null;
+  agent_name: string | null;
+  agent_code: string | null;
+  expeditors: string | null;
+  region: string | null;
+  city: string | null;
+  zone: string | null;
+  consignment: boolean | null;
+  day: string | null;
+  created_by: string | null;
+  created_by_role: string | null;
+  expected_ship_date: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
   status: string;
+  qty: string;
   total_sum: string;
   bonus_sum: string;
+  balance: string | null;
+  debt: string | null;
+  price_type: string | null;
+  comment: string | null;
   created_at: string;
 };
 
@@ -76,6 +99,7 @@ export type OrderDetailRow = OrderListRow & {
   agent_id: number | null;
   warehouse_name: string | null;
   agent_display: string | null;
+  apply_bonus: boolean;
   items: OrderItemRow[];
   allowed_next_statuses: string[];
   status_logs: OrderStatusLogRow[];
@@ -90,7 +114,7 @@ export type UpdateOrderMetaInput = {
 const orderDetailInclude: Prisma.OrderInclude = {
   client: { select: { name: true } },
   warehouse: { select: { id: true, name: true } },
-  agent: { select: { id: true, login: true, name: true } },
+  agent: { select: { id: true, login: true, name: true, code: true, consignment: true } },
   items: {
     orderBy: { id: "asc" },
     include: { product: { select: { sku: true, name: true } } }
@@ -118,10 +142,11 @@ export type OrderDetailLoaded = {
   status: string;
   total_sum: Prisma.Decimal;
   bonus_sum: Prisma.Decimal;
+  applied_auto_bonus_rule_ids: number[];
   created_at: Date;
   client: { name: string };
   warehouse: { id: number; name: string } | null;
-  agent: { id: number; login: string; name: string } | null;
+  agent: { id: number; login: string; name: string; code: string | null; consignment: boolean } | null;
   items: Array<{
     id: number;
     product_id: number;
@@ -164,15 +189,39 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
   return {
     id: o.id,
     number: o.number,
+    order_type: null,
     client_id: o.client_id,
     client_name: o.client.name,
+    client_legal_name: null,
     warehouse_id: o.warehouse_id,
-    agent_id: o.agent_id,
     warehouse_name: o.warehouse?.name ?? null,
+    agent_name: o.agent?.name ?? null,
+    agent_code: o.agent?.code ?? null,
+    expeditors: null,
+    region: null,
+    city: null,
+    zone: null,
+    consignment: o.agent?.consignment ?? null,
+    day: null,
+    created_by: null,
+    created_by_role: null,
+    expected_ship_date: null,
+    shipped_at: null,
+    delivered_at: null,
+    qty: o.items
+      .filter((i) => !i.is_bonus)
+      .reduce((acc, i) => acc.add(i.qty), new Prisma.Decimal(0))
+      .toString(),
+    agent_id: o.agent_id,
     agent_display: agentDisplay,
+    apply_bonus: o.applied_auto_bonus_rule_ids.length > 0,
     status: o.status,
     total_sum: o.total_sum.toString(),
     bonus_sum: o.bonus_sum.toString(),
+    balance: null,
+    debt: null,
+    price_type: null,
+    comment: null,
     created_at: o.created_at.toISOString(),
     items: mapItems(o.items),
     allowed_next_statuses: allowedNextForRole(o.status, viewerRole),
@@ -291,6 +340,9 @@ export async function createOrder(
     qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) ?? 0) + it.qty);
     orderedProductIds.add(it.product_id);
   }
+  if (orderedProductIds.size !== input.items.length) {
+    throw new Error("DUPLICATE_PRODUCT");
+  }
 
   const number = `O-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
 
@@ -301,9 +353,19 @@ export async function createOrder(
   const stackPolicy = parseBonusStackPolicy(tenantRow?.settings);
 
   const order = await prisma.$transaction(async (tx) => {
-    const usedRuleIds = await fetchClientUsedAutoBonusRuleIds(tx, tenantId, client.id);
-    const { lines: paidAfterDisc, total: paidTotal, bonusDrafts, appliedAutoBonusRuleIds } =
-      await resolveOrderBonusesForCreate(
+    const applyBonus = input.apply_bonus ?? true;
+    let paidAfterDisc = lineData;
+    let paidTotal = totalSum;
+    let bonusDrafts: Array<{
+      product_id: number;
+      qty: Prisma.Decimal;
+      price: Prisma.Decimal;
+      total: Prisma.Decimal;
+    }> = [];
+    let appliedAutoBonusRuleIds: number[] = [];
+    if (applyBonus) {
+      const usedRuleIds = await fetchClientUsedAutoBonusRuleIds(tx, tenantId, client.id);
+      const resolved = await resolveOrderBonusesForCreate(
         tx,
         tenantId,
         { id: client.id, category: client.category },
@@ -316,6 +378,11 @@ export async function createOrder(
         stackPolicy,
         usedRuleIds
       );
+      paidAfterDisc = resolved.lines;
+      paidTotal = resolved.total;
+      bonusDrafts = resolved.bonusDrafts;
+      appliedAutoBonusRuleIds = resolved.appliedAutoBonusRuleIds;
+    }
 
     let bonusSum = new Prisma.Decimal(0);
     const bonusCreates = bonusDrafts.map((b) => {
@@ -501,6 +568,9 @@ export async function updateOrderLines(
     qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) ?? 0) + it.qty);
     orderedProductIds.add(it.product_id);
   }
+  if (orderedProductIds.size !== input.items.length) {
+    throw new Error("DUPLICATE_PRODUCT");
+  }
 
   const tenantRow = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -509,14 +579,24 @@ export async function updateOrderLines(
   const stackPolicy = parseBonusStackPolicy(tenantRow?.settings);
 
   const updated = await prisma.$transaction(async (tx) => {
-    const usedRuleIds = await fetchClientUsedAutoBonusRuleIdsExcludingOrder(
-      tx,
-      tenantId,
-      client.id,
-      orderId
-    );
-    const { lines: paidAfterDisc, total: paidTotal, bonusDrafts, appliedAutoBonusRuleIds } =
-      await resolveOrderBonusesForCreate(
+    const applyBonus = input.apply_bonus ?? true;
+    let paidAfterDisc = lineData;
+    let paidTotal = totalSum;
+    let bonusDrafts: Array<{
+      product_id: number;
+      qty: Prisma.Decimal;
+      price: Prisma.Decimal;
+      total: Prisma.Decimal;
+    }> = [];
+    let appliedAutoBonusRuleIds: number[] = [];
+    if (applyBonus) {
+      const usedRuleIds = await fetchClientUsedAutoBonusRuleIdsExcludingOrder(
+        tx,
+        tenantId,
+        client.id,
+        orderId
+      );
+      const resolved = await resolveOrderBonusesForCreate(
         tx,
         tenantId,
         { id: client.id, category: client.category },
@@ -529,6 +609,11 @@ export async function updateOrderLines(
         stackPolicy,
         usedRuleIds
       );
+      paidAfterDisc = resolved.lines;
+      paidTotal = resolved.total;
+      bonusDrafts = resolved.bonusDrafts;
+      appliedAutoBonusRuleIds = resolved.appliedAutoBonusRuleIds;
+    }
 
     let bonusSum = new Prisma.Decimal(0);
     const bonusCreates = bonusDrafts.map((b) => {
@@ -812,7 +897,19 @@ export async function listOrdersPaged(
       skip: (q.page - 1) * q.limit,
       take: q.limit,
       orderBy: { created_at: "desc" },
-      include: { client: { select: { name: true } } }
+      include: {
+        client: {
+          select: {
+            name: true,
+            region: true,
+            district: true,
+            neighborhood: true
+          }
+        },
+        warehouse: { select: { name: true } },
+        agent: { select: { name: true, code: true, consignment: true } },
+        items: { select: { qty: true, is_bonus: true } }
+      }
     })
   ]);
 
@@ -820,12 +917,36 @@ export async function listOrdersPaged(
     data: rows.map((o) => ({
       id: o.id,
       number: o.number,
+      order_type: null,
       client_id: o.client_id,
       client_name: o.client.name,
+      client_legal_name: null,
       warehouse_id: o.warehouse_id,
+      warehouse_name: o.warehouse?.name ?? null,
+      agent_name: o.agent?.name ?? null,
+      agent_code: o.agent?.code ?? null,
+      expeditors: null,
+      region: o.client.region ?? null,
+      city: o.client.district ?? null,
+      zone: o.client.neighborhood ?? null,
+      consignment: o.agent?.consignment ?? null,
+      day: null,
+      created_by: null,
+      created_by_role: null,
+      expected_ship_date: null,
+      shipped_at: null,
+      delivered_at: null,
       status: o.status,
+      qty: o.items
+        .filter((i) => !i.is_bonus)
+        .reduce((acc, i) => acc.add(i.qty), new Prisma.Decimal(0))
+        .toString(),
       total_sum: o.total_sum.toString(),
       bonus_sum: o.bonus_sum.toString(),
+      balance: null,
+      debt: null,
+      price_type: null,
+      comment: null,
       created_at: o.created_at.toISOString()
     })),
     total,

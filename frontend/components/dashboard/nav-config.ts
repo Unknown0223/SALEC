@@ -9,6 +9,8 @@ export const dashboardNavGroups: NavGroup[] = [
       { href: "/dashboard", label: "Boshqaruv" },
       { href: "/products", label: "Mahsulotlar" },
       { href: "/orders", label: "Zakazlar" },
+      { href: "/stock", label: "Ombor" },
+      { href: "/stock/warehouses", label: "Omborlar boshqaruvi" },
       { href: "/clients", label: "Klientlar" },
       { href: "/bonus-rules", label: "Bonus qoidalari" }
     ]
@@ -17,6 +19,8 @@ export const dashboardNavGroups: NavGroup[] = [
     title: "Sozlamalar",
     items: [
       { href: "/settings/spravochnik", label: "Spravochniklar" },
+      { href: "/settings/spravochnik/agents", label: "Agentlar" },
+      { href: "/settings/spravochnik/expeditors", label: "Ekspeditorlar" },
       { href: "/settings/company", label: "Kompaniya" }
     ]
   }

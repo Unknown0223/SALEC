@@ -4,12 +4,15 @@ import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
   createProductCategoryRow,
+  createWarehouseRow,
   deleteProductCategoryRow,
+  deleteWarehouseRow,
   listDistinctPriceTypesForTenant,
   listProductCategoriesForTenant,
   listUsersForOrderAgent,
   listWarehousesForTenant,
-  updateProductCategoryRow
+  updateProductCategoryRow,
+  updateWarehouseRow
 } from "./reference.service";
 
 const catalogRoles = ["admin", "operator"] as const;
@@ -27,6 +30,20 @@ const patchCategoryBody = z
   })
   .refine((o) => Object.keys(o).length > 0, { message: "empty" });
 
+const createWarehouseBody = z.object({
+  name: z.string().min(1).max(300),
+  type: z.string().max(200).nullable().optional(),
+  address: z.string().max(500).nullable().optional()
+});
+
+const patchWarehouseBody = z
+  .object({
+    name: z.string().min(1).max(300).optional(),
+    type: z.string().max(200).nullable().optional(),
+    address: z.string().max(500).nullable().optional()
+  })
+  .refine((o) => Object.keys(o).length > 0, { message: "empty" });
+
 export async function registerReferenceRoutes(app: FastifyInstance) {
   app.get(
     "/api/:slug/warehouses",
@@ -35,6 +52,76 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
       if (!ensureTenantContext(request, reply)) return;
       const data = await listWarehousesForTenant(request.tenant!.id);
       return reply.send({ data });
+    }
+  );
+
+  app.post(
+    "/api/:slug/warehouses",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = createWarehouseBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await createWarehouseRow(request.tenant!.id, parsed.data);
+        return reply.status(201).send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "EMPTY_NAME") return reply.status(400).send({ error: "EmptyName" });
+        if (msg === "NAME_EXISTS") return reply.status(409).send({ error: "WarehouseNameExists" });
+        throw e;
+      }
+    }
+  );
+
+  app.patch(
+    "/api/:slug/warehouses/:warehouseId",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { warehouseId: string }).warehouseId, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = patchWarehouseBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await updateWarehouseRow(request.tenant!.id, id, parsed.data);
+        return reply.send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "EMPTY_NAME") return reply.status(400).send({ error: "EmptyName" });
+        if (msg === "NAME_EXISTS") return reply.status(409).send({ error: "WarehouseNameExists" });
+        if (msg === "EMPTY_PATCH") return reply.status(400).send({ error: "EmptyBody" });
+        throw e;
+      }
+    }
+  );
+
+  app.delete(
+    "/api/:slug/warehouses/:warehouseId",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { warehouseId: string }).warehouseId, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        await deleteWarehouseRow(request.tenant!.id, id);
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "HAS_STOCK") return reply.status(409).send({ error: "WarehouseHasStock" });
+        if (msg === "HAS_ORDERS") return reply.status(409).send({ error: "WarehouseHasOrders" });
+        throw e;
+      }
     }
   );
 

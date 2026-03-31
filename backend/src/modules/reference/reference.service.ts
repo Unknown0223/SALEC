@@ -4,8 +4,100 @@ export async function listWarehousesForTenant(tenantId: number) {
   return prisma.warehouse.findMany({
     where: { tenant_id: tenantId },
     orderBy: { name: "asc" },
-    select: { id: true, name: true }
+    select: { id: true, name: true, type: true, address: true }
   });
+}
+
+export async function createWarehouseRow(
+  tenantId: number,
+  input: { name: string; type?: string | null; address?: string | null }
+) {
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error("EMPTY_NAME");
+  }
+  const dup = await prisma.warehouse.findFirst({
+    where: { tenant_id: tenantId, name: { equals: name, mode: "insensitive" } }
+  });
+  if (dup) {
+    throw new Error("NAME_EXISTS");
+  }
+  return prisma.warehouse.create({
+    data: {
+      tenant_id: tenantId,
+      name,
+      type: input.type?.trim() || null,
+      address: input.address?.trim() || null
+    },
+    select: { id: true, name: true, type: true, address: true }
+  });
+}
+
+export async function updateWarehouseRow(
+  tenantId: number,
+  warehouseId: number,
+  patch: { name?: string; type?: string | null; address?: string | null }
+) {
+  const row = await prisma.warehouse.findFirst({
+    where: { id: warehouseId, tenant_id: tenantId }
+  });
+  if (!row) {
+    throw new Error("NOT_FOUND");
+  }
+  const data: { name?: string; type?: string | null; address?: string | null } = {};
+  if (patch.name !== undefined) {
+    const t = patch.name.trim();
+    if (!t) {
+      throw new Error("EMPTY_NAME");
+    }
+    const dup = await prisma.warehouse.findFirst({
+      where: {
+        tenant_id: tenantId,
+        name: { equals: t, mode: "insensitive" },
+        NOT: { id: warehouseId }
+      }
+    });
+    if (dup) {
+      throw new Error("NAME_EXISTS");
+    }
+    data.name = t;
+  }
+  if (patch.type !== undefined) {
+    data.type = patch.type === null || patch.type === "" ? null : patch.type.trim();
+  }
+  if (patch.address !== undefined) {
+    data.address = patch.address === null || patch.address === "" ? null : patch.address.trim();
+  }
+  if (Object.keys(data).length === 0) {
+    throw new Error("EMPTY_PATCH");
+  }
+  return prisma.warehouse.update({
+    where: { id: warehouseId },
+    data,
+    select: { id: true, name: true, type: true, address: true }
+  });
+}
+
+export async function deleteWarehouseRow(tenantId: number, warehouseId: number): Promise<void> {
+  const row = await prisma.warehouse.findFirst({
+    where: { id: warehouseId, tenant_id: tenantId }
+  });
+  if (!row) {
+    throw new Error("NOT_FOUND");
+  }
+  const stockN = await prisma.stock.count({
+    where: { tenant_id: tenantId, warehouse_id: warehouseId }
+  });
+  if (stockN > 0) {
+    throw new Error("HAS_STOCK");
+  }
+  const orderN = await prisma.order.count({
+    where: { tenant_id: tenantId, warehouse_id: warehouseId }
+  });
+  if (orderN > 0) {
+    throw new Error("HAS_ORDERS");
+  }
+  await prisma.warehouse.delete({ where: { id: warehouseId } });
 }
 
 export async function listUsersForOrderAgent(tenantId: number) {

@@ -1,11 +1,12 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function BonusRulesLayout({ children }: { children: React.ReactNode }) {
+export default function BonusRulesLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const showTabs =

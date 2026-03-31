@@ -17,12 +17,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { AxiosError } from "axios";
 
-type Line = { key: string; productId: string; qty: string };
-
-function newLine(): Line {
-  return { key: crypto.randomUUID(), productId: "", qty: "1" };
-}
-
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,7 +27,11 @@ type Props = {
 export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }: Props) {
   const qc = useQueryClient();
   const [clientId, setClientId] = useState("");
-  const [lines, setLines] = useState<Line[]>([newLine()]);
+  const [warehouseId, setWarehouseId] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [applyBonus, setApplyBonus] = useState(true);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [qtyByProductId, setQtyByProductId] = useState<Record<number, string>>({});
   const [localError, setLocalError] = useState<string | null>(null);
 
   const clientsQ = useQuery({
@@ -58,24 +56,58 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
     }
   });
 
+  const warehousesQ = useQuery({
+    queryKey: ["warehouses", tenantSlug, "order-form"],
+    enabled: open && Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
+      return data.data;
+    }
+  });
+
+  const usersQ = useQuery({
+    queryKey: ["users", tenantSlug, "order-form"],
+    enabled: open && Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{ data: { id: number; login: string; name: string; role: string }[] }>(
+        `/api/${tenantSlug}/users`
+      );
+      return data.data;
+    }
+  });
+
+  const stockQ = useQuery({
+    queryKey: ["stock", tenantSlug, warehouseId, "order-form"],
+    enabled: open && Boolean(tenantSlug) && Boolean(warehouseId),
+    queryFn: async () => {
+      const { data } = await api.get<{ data: { product_id: number; qty: string; reserved_qty: string }[] }>(
+        `/api/${tenantSlug}/stock?warehouse_id=${warehouseId}`
+      );
+      return data.data;
+    }
+  });
+
+  const categoriesQ = useQuery({
+    queryKey: ["product-categories", tenantSlug, "order-form"],
+    enabled: open && Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
+        `/api/${tenantSlug}/product-categories`
+      );
+      return data.data;
+    }
+  });
+
   useEffect(() => {
     if (!open) return;
     setLocalError(null);
     setClientId("");
-    setLines([newLine()]);
+    setWarehouseId("");
+    setAgentId("");
+    setApplyBonus(true);
+    setSelectedCategoryId("");
+    setQtyByProductId({});
   }, [open]);
-
-  function updateLine(key: string, patch: Partial<Pick<Line, "productId" | "qty">>) {
-    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  }
-
-  function addLine() {
-    setLines((prev) => [...prev, newLine()]);
-  }
-
-  function removeLine(key: string) {
-    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));
-  }
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -83,17 +115,21 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
       if (!Number.isFinite(cid) || cid < 1) throw new Error("client");
 
       const items: { product_id: number; qty: number }[] = [];
-      for (const line of lines) {
-        const pid = Number.parseInt(line.productId, 10);
-        const q = Number.parseFloat(line.qty);
-        if (!Number.isFinite(pid) || pid < 1) continue;
-        if (!Number.isFinite(q) || q <= 0) throw new Error("qty");
-        items.push({ product_id: pid, qty: q });
+      for (const p of filteredProducts) {
+        const raw = qtyByProductId[p.id];
+        if (!raw || !raw.trim()) continue;
+        const q = Number.parseFloat(raw.replace(",", "."));
+        if (!Number.isFinite(q) || q < 0) throw new Error("qty");
+        if (q === 0) continue;
+        items.push({ product_id: p.id, qty: q });
       }
       if (items.length === 0) throw new Error("nolines");
 
       await api.post(`/api/${tenantSlug}/orders`, {
         client_id: cid,
+        warehouse_id: warehouseId ? Number.parseInt(warehouseId, 10) : null,
+        agent_id: agentId ? Number.parseInt(agentId, 10) : null,
+        apply_bonus: applyBonus,
         items
       });
     },
@@ -141,6 +177,10 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
         setLocalError("Mahsulot topilmadi yoki faol emas.");
         return;
       }
+      if (code === "DuplicateProduct") {
+        setLocalError("Bir xil mahsulotni bir nechta qatorga qo‘shib bo‘lmaydi.");
+        return;
+      }
       if (code === "CreditLimitExceeded" && d) {
         setLocalError(
           `Kredit limiti yetmaydi. Limit: ${d.credit_limit ?? "—"}, ochiq zakazlar yig‘indisi: ${d.outstanding ?? "—"}, bu zakaz: ${d.order_total ?? "—"}.`
@@ -157,7 +197,30 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
 
   const clients = clientsQ.data ?? [];
   const products = productsQ.data ?? [];
-  const loadingLists = clientsQ.isLoading || productsQ.isLoading;
+  const warehouses = warehousesQ.data ?? [];
+  const users = usersQ.data ?? [];
+  const categories = categoriesQ.data ?? [];
+  const agentUsers = users.filter((u) => {
+    const role = u.role.trim().toLowerCase();
+    return role.includes("agent") && !role.includes("expeditor");
+  });
+  const stockByProduct = new Map<number, { qty: string; reserved_qty: string }>(
+    (stockQ.data ?? []).map((s) => [s.product_id, s])
+  );
+  const selectedCategoryNum = selectedCategoryId ? Number.parseInt(selectedCategoryId, 10) : null;
+  const filteredProducts = products.filter((p) => {
+    if (selectedCategoryNum != null && p.category_id !== selectedCategoryNum) return false;
+    if (!warehouseId) return true;
+    const s = stockByProduct.get(p.id);
+    const qty = Number.parseFloat(s?.qty ?? "0");
+    return Number.isFinite(qty) && qty > 0;
+  });
+  const loadingLists =
+    clientsQ.isLoading ||
+    productsQ.isLoading ||
+    warehousesQ.isLoading ||
+    usersQ.isLoading ||
+    categoriesQ.isLoading;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,66 +253,127 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
             </select>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label>Qatorlar</Label>
-              <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={addLine}>
-                + Qator
-              </Button>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="oc-warehouse">Ombor</Label>
+              <select
+                id="oc-warehouse"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={warehouseId}
+                onChange={(e) => setWarehouseId(e.target.value)}
+                disabled={mutation.isPending || loadingLists}
+              >
+                <option value="">— tanlang —</option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={String(w.id)}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="flex flex-col gap-3">
-              {lines.map((line, idx) => (
-                <div
-                  key={line.key}
-                  className="grid grid-cols-1 gap-2 rounded-md border border-border p-3 sm:grid-cols-[1fr_100px_auto]"
+            <div className="space-y-2">
+              <Label htmlFor="oc-agent">Agent</Label>
+              <select
+                id="oc-agent"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                disabled={mutation.isPending || loadingLists}
+              >
+                <option value="">— tanlang —</option>
+                {agentUsers.map((u) => (
+                  <option key={u.id} value={String(u.id)}>
+                    {u.login} · {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={applyBonus}
+              onChange={(e) => setApplyBonus(e.target.checked)}
+              disabled={mutation.isPending}
+            />
+            Bonus qoidalarini qo‘llash
+          </label>
+
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="oc-category">Kategoriya</Label>
+                <select
+                  id="oc-category"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={selectedCategoryId}
+                  onChange={(e) => setSelectedCategoryId(e.target.value)}
+                  disabled={mutation.isPending || loadingLists}
                 >
-                  <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground">Mahsulot #{idx + 1}</span>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                      value={line.productId}
-                      onChange={(e) => updateLine(line.key, { productId: e.target.value })}
-                      disabled={mutation.isPending || loadingLists}
-                    >
-                      <option value="">— tanlang —</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={String(p.id)}>
-                          {p.sku} — {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-muted-foreground">Miqdor</span>
-                    <Input
-                      type="number"
-                      min={0.001}
-                      step="any"
-                      value={line.qty}
-                      onChange={(e) => updateLine(line.key, { qty: e.target.value })}
-                      disabled={mutation.isPending}
-                    />
-                  </div>
-                  <div className="flex items-end justify-end sm:justify-center">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 text-xs text-muted-foreground"
-                      disabled={mutation.isPending || lines.length <= 1}
-                      onClick={() => removeLine(line.key)}
-                    >
-                      O‘chirish
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                  <option value="">— barchasi —</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="rounded-md border border-border">
+              <div className="max-h-[280px] overflow-auto">
+                <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
+                      <th className="px-3 py-2">SKU</th>
+                      <th className="px-3 py-2">Mahsulot</th>
+                      <th className="px-3 py-2 text-right">Qoldiq</th>
+                      <th className="px-3 py-2 text-right">Bron</th>
+                      <th className="px-3 py-2">Miqdor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredProducts.map((p) => {
+                      const stock = stockByProduct.get(p.id);
+                      const qty = stock?.qty ?? "0";
+                      const reserved = stock?.reserved_qty ?? "0";
+                      return (
+                        <tr key={p.id} className="border-b border-border last:border-0">
+                          <td className="px-3 py-2 font-mono text-xs">{p.sku}</td>
+                          <td className="px-3 py-2">{p.name}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{qty}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{reserved}</td>
+                          <td className="px-3 py-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              step="any"
+                              placeholder="0"
+                              value={qtyByProductId[p.id] ?? ""}
+                              onChange={(e) =>
+                                setQtyByProductId((prev) => ({ ...prev, [p.id]: e.target.value }))
+                              }
+                              disabled={mutation.isPending}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                          Mahsulot topilmadi (kategoriya/ombor bo‘yicha).
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Narx: har mahsulot uchun chakana (retail) narxi; bir xil mahsulotni alohida qatorlarda ham
-            yuborishingiz mumkin (backend alohida qator sifatida saqlaydi).
+            Qator qo‘shish yo‘q: miqdorni jadvaldan kiriting. Ombor tanlanganda qoldiqi 0 bo‘lganlar ko‘rinmaydi.
           </p>
         </div>
         <DialogFooter>

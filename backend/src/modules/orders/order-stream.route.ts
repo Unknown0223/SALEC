@@ -30,7 +30,7 @@ async function verifyAccessFromQueryOrHeader(
 
 /**
  * Zakazlar o‘zgarishlari — SSE (EventSource). Token: `?access_token=` yoki `Authorization`.
- * Bir server jarayonida ishlaydi; ko‘p instans — keyin Redis.
+ * Redis yo‘q bo‘lsa — jarayon ichida; Redis bilan — `order-events` kanali (ko‘p instans).
  */
 export async function registerOrderStreamRoutes(app: FastifyInstance) {
   app.get(

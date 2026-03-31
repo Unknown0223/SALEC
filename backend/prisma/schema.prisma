@@ -41,9 +41,32 @@ model User {
   tenant_id     Int
   tenant        Tenant   @relation(fields: [tenant_id], references: [id])
   name          String
+  first_name    String?
+  last_name     String?
+  middle_name   String?
   login         String
   password_hash String
   role          String
+  product       String?
+  agent_type    String?
+  code          String?
+  pinfl         String?
+  consignment   Boolean  @default(false)
+  apk_version   String?
+  device_name   String?
+  last_sync_at  DateTime?
+  phone         String?
+  can_authorize Boolean  @default(true)
+  price_type    String?
+  warehouse_id  Int?
+  warehouse     Warehouse? @relation("UserWarehouse", fields: [warehouse_id], references: [id])
+  trade_direction String?
+  branch        String?
+  position      String?
+  app_access    Boolean  @default(true)
+  territory     String?
+  return_warehouse_id Int?
+  return_warehouse Warehouse? @relation("UserReturnWarehouse", fields: [return_warehouse_id], references: [id])
   is_active     Boolean  @default(true)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
@@ -250,6 +273,8 @@ model Warehouse {
 
   stock  Stock[]
   orders Order[]
+  users_default User[] @relation("UserWarehouse")
+  users_return  User[] @relation("UserReturnWarehouse")
 
   @@index([tenant_id])
   @@map("warehouses")

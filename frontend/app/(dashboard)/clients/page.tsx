@@ -11,10 +11,14 @@ import { cn } from "@/lib/utils";
 import type { ClientRow } from "@/lib/client-types";
 import { getDefaultColumnVisibility, loadColumnVisibility } from "@/lib/client-table-columns";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { CLIENT_IMPORT_MAX_FILE_BYTES } from "@/lib/client-import-limits";
 import { api } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { QueryErrorState } from "@/components/common/query-error-state";
+import { getUserFacingError } from "@/lib/error-utils";
+import { isAxiosError } from "axios";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ClientsResponse = {
   data: ClientRow[];
@@ -26,6 +30,9 @@ type ClientsResponse = {
 export default function ClientsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
+  const qc = useQueryClient();
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
@@ -42,7 +49,59 @@ export default function ClientsPage() {
     setColumnVisibility(loadColumnVisibility());
   }, []);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const importMut = useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post<{ created: number; errors: string[] }>(
+        `/api/${tenantSlug}/clients/import`,
+        fd
+      );
+      return data;
+    },
+    onSuccess: async (data) => {
+      console.info("[clients import] natija", { created: data.created, errors: data.errors });
+      if (data.errors.length > 0) {
+        console.warn("[clients import] qator xatolari", data.errors);
+      }
+      await qc.invalidateQueries({ queryKey: ["clients", tenantSlug] });
+      const errPart =
+        data.errors.length > 0 ? ` Xatolar (${data.errors.length}): ${data.errors.slice(0, 5).join("; ")}` : "";
+      setImportMsg(`Qo‘shildi: ${data.created}.${errPart}`);
+      if (importFileRef.current) importFileRef.current.value = "";
+    },
+    onError: (e: unknown) => {
+      console.error("[clients import] xato", e);
+      if (isAxiosError(e)) {
+        const st = e.response?.status;
+        const data = e.response?.data as
+          | { error?: string; message?: string; maxBytes?: number }
+          | undefined;
+        console.error("[clients import] javob", { status: st, data });
+        if (st === 413) {
+          const mb = data?.maxBytes ? Math.round(data.maxBytes / (1024 * 1024)) : 50;
+          setImportMsg(
+            data?.message ??
+              `Fayl juda katta (server cheklovi ~${mb} MB). Faylni qisqartiring yoki backend .env da MULTIPART_MAX_FILE_BYTES ni oshiring.`
+          );
+          return;
+        }
+        if (st === 403) {
+          setImportMsg("Ruxsat yo‘q (faqat admin yoki operator).");
+          return;
+        }
+        if (data?.message) {
+          setImportMsg(data.message);
+          return;
+        }
+      }
+      setImportMsg(
+        "Import xatosi: .xlsx, 1-varaq, 1-qator sarlavha (name / nomi / RU: imya). Konsol: F12."
+      );
+    }
+  });
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "clients",
       tenantSlug,
@@ -93,6 +152,72 @@ export default function ClientsPage() {
           </>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!tenantSlug}
+          onClick={async () => {
+            if (!tenantSlug) return;
+            setImportMsg(null);
+            try {
+              const res = await api.get(`/api/${tenantSlug}/clients/import/template`, {
+                responseType: "blob"
+              });
+              const blob = new Blob([res.data], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "mijozlar_import_shablon.xlsx";
+              a.click();
+              URL.revokeObjectURL(url);
+            } catch {
+              setImportMsg("Shablonni yuklab bo‘lmadi (ruxsat yoki tarmoq).");
+            }
+          }}
+        >
+          Shablon (.xlsx)
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={importMut.isPending || !tenantSlug}
+          onClick={() => importFileRef.current?.click()}
+        >
+          Excel import
+        </Button>
+        <input
+          ref={importFileRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            if (f.size > CLIENT_IMPORT_MAX_FILE_BYTES) {
+              const mb = Math.round(CLIENT_IMPORT_MAX_FILE_BYTES / (1024 * 1024));
+              console.error("[clients import] fayl juda katta", {
+                name: f.name,
+                bytes: f.size,
+                limit: CLIENT_IMPORT_MAX_FILE_BYTES
+              });
+              setImportMsg(
+                `Fayl ${mb} MB dan katta (${(f.size / (1024 * 1024)).toFixed(1)} MB). Qisqartiring yoki backend .env: MULTIPART_MAX_FILE_BYTES.`
+              );
+              e.target.value = "";
+              return;
+            }
+            console.info("[clients import] yuklanmoqda", { name: f.name, bytes: f.size });
+            importMut.mutate(f);
+          }}
+        />
+        {importMsg ? <span className="text-sm text-muted-foreground">{importMsg}</span> : null}
+      </div>
 
       <ClientsTableToolbar
         search={search}
@@ -148,9 +273,7 @@ export default function ClientsPage() {
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
       ) : isError ? (
-        <p className="text-sm text-destructive">
-          {error instanceof Error ? error.message : "API xatosi"}
-        </p>
+        <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : (
         <Card className="overflow-hidden shadow-panel">
           <CardContent className="p-0">

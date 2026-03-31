@@ -4,9 +4,11 @@ import { ensureTenantContext } from "../../lib/tenant-context";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
   addClientBalanceMovement,
+  buildClientImportTemplateBuffer,
   checkDuplicateCandidates,
   getClientDetail,
   getDuplicatePhoneGroups,
+  importClientsFromXlsx,
   listClientAuditLogs,
   listClientBalanceMovements,
   listClientsForTenantPaged,
@@ -100,6 +102,36 @@ export async function registerClientRoutes(app: FastifyInstance) {
         sort,
         order
       });
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/import/template",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (_request, reply) => {
+      const buf = await buildClientImportTemplateBuffer();
+      reply
+        .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", 'attachment; filename="mijozlar_import_shablon.xlsx"');
+      return reply.send(buf);
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients/import",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const file = await request.file();
+      if (!file) {
+        return reply.status(400).send({ error: "NoFile" });
+      }
+      const buf = await file.toBuffer();
+      if (buf.length === 0) {
+        return reply.status(400).send({ error: "EmptyFile" });
+      }
+      const result = await importClientsFromXlsx(request.tenant!.id, buf);
       return reply.send(result);
     }
   );

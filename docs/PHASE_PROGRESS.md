@@ -23,10 +23,12 @@
 
 ## Keyingi qadam (FAZA 5+)
 
-1. **Ombor:** prixod, picking, FOR UPDATE / stok rezervi.  
-2. **SSE:** Redis pub/sub ko‘p server.  
+1. **Ombor:** ~~prixod (API + panel),~~ picking, FOR UPDATE / stok rezervi zakaz bilan bog‘lash, korrektirovka.  
+2. **SSE:** ~~Redis `order-events` kanali (ko‘p instans); Redis yo‘q bo‘lsa in-process.~~  
 3. **Super-admin** dilerlar paneli.  
 4. **E2E** (Playwright), load smoke, deploy runbook.
+
+**2026-03-30:** `GET /api/:slug/stock`, `POST /api/:slug/stock/receipts` (admin), panel `/stock`; zakazlar SSE Redis orqali sinxron (ioredis).
 
 ---
 
