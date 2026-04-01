@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
 
-type Kind = "agent" | "expeditor";
+type Kind = "agent" | "expeditor" | "supervisor";
 
 type Props = {
   kind: Kind;
@@ -45,6 +45,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
 
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "staff-create"],
+    enabled: kind !== "supervisor",
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data;
@@ -53,37 +54,107 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
 
   const createMut = useMutation({
     mutationFn: async () => {
-      await api.post(`/api/${tenantSlug}/${kind === "agent" ? "agents" : "expeditors"}`, {
+      const path =
+        kind === "agent" ? "agents" : kind === "supervisor" ? "supervisors" : "expeditors";
+      await api.post(`/api/${tenantSlug}/${path}`, {
         first_name: form.first_name,
         last_name: form.last_name || null,
         middle_name: form.middle_name || null,
         phone: form.phone || null,
-        territory: form.territory || null,
-        code: form.code || null,
-        pinfl: form.pinfl || null,
-        branch: form.branch || null,
-        position: form.position || null,
+        territory: kind === "supervisor" ? null : form.territory || null,
+        code: kind === "supervisor" ? null : form.code || null,
+        pinfl: kind === "supervisor" ? null : form.pinfl || null,
+        branch: kind === "supervisor" ? null : form.branch || null,
+        position: kind === "supervisor" ? null : form.position || null,
         login: form.login,
         password: form.password,
-        product: form.product || null,
-        agent_type: form.agent_type || null,
-        price_type: form.price_type || null,
-        trade_direction: form.trade_direction || null,
-        warehouse_id: form.warehouse_id ? Number.parseInt(form.warehouse_id, 10) : null,
-        return_warehouse_id: form.return_warehouse_id ? Number.parseInt(form.return_warehouse_id, 10) : null,
+        product: kind === "supervisor" ? null : form.product || null,
+        agent_type: kind === "supervisor" ? null : form.agent_type || null,
+        price_type: kind === "supervisor" ? null : form.price_type || null,
+        trade_direction: kind === "supervisor" ? null : form.trade_direction || null,
+        warehouse_id:
+          kind === "supervisor" ? null : form.warehouse_id ? Number.parseInt(form.warehouse_id, 10) : null,
+        return_warehouse_id:
+          kind === "supervisor"
+            ? null
+            : form.return_warehouse_id
+              ? Number.parseInt(form.return_warehouse_id, 10)
+              : null,
         can_authorize: form.can_authorize,
-        app_access: form.app_access,
-        consignment: form.consignment
+        app_access: kind === "supervisor" ? true : form.app_access,
+        consignment: kind === "supervisor" ? false : form.consignment
       });
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: [kind, tenantSlug] });
+      if (kind === "supervisor") {
+        await qc.invalidateQueries({ queryKey: ["supervisors", tenantSlug, "clients-toolbar"] });
+      }
       setForm(emptyForm);
       onSuccess();
     }
   });
 
-  const title = kind === "agent" ? "Yangi agent" : "Yangi ekseditor";
+  const title =
+    kind === "agent" ? "Yangi agent" : kind === "supervisor" ? "Yangi supervizor" : "Yangi ekseditor";
+
+  if (kind === "supervisor") {
+    return (
+      <div className="mx-auto flex max-w-md flex-col gap-6 pb-10">
+        <PageHeader
+          title={title}
+          description="Faqat kirish uchun kerakli maydonlar"
+          actions={
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+              Orqaga
+            </Button>
+          }
+        />
+        <div className="grid gap-2">
+          <Input
+            placeholder="Ism *"
+            value={form.first_name}
+            onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
+          />
+          <Input
+            placeholder="Familiya"
+            value={form.last_name}
+            onChange={(e) => setForm((p) => ({ ...p, last_name: e.target.value }))}
+          />
+          <Input
+            placeholder="Telefon"
+            value={form.phone}
+            onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+          />
+          <Input
+            placeholder="Login *"
+            value={form.login}
+            onChange={(e) => setForm((p) => ({ ...p, login: e.target.value }))}
+          />
+          <Input
+            placeholder="Parol * (min. 6)"
+            type="password"
+            value={form.password}
+            onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+          />
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={form.can_authorize}
+              onChange={(e) => setForm((p) => ({ ...p, can_authorize: e.target.checked }))}
+            />
+            Tizimga kirish ruxsati
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Agentlar ro‘yxatida «Супервайзер» ustunidan ushbu foydalanuvchini tanlang.
+          </p>
+          <Button onClick={() => createMut.mutate()} disabled={createMut.isPending}>
+            {createMut.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex max-w-md flex-col gap-6 pb-10">
@@ -183,6 +254,16 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
             Доступ к приложение
           </label>
         </div>
+        {kind === "agent" ? (
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={form.consignment}
+              onChange={(e) => setForm((p) => ({ ...p, consignment: e.target.checked }))}
+            />
+            Консигнация
+          </label>
+        ) : null}
         <Button onClick={() => createMut.mutate()} disabled={createMut.isPending}>
           {createMut.isPending ? "Сохранение..." : "Добавить"}
         </Button>

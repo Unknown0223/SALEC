@@ -83,9 +83,27 @@ export function displayAgentName(row: ClientRow, slot: number): string | null {
   return null;
 }
 
-/** «Агент N день» — slot bo‘yicha `visit_date` */
+const WD_LABEL = ["", "Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"];
+
+/** Slot bo‘yicha tanlangan hafta kunlari (1..7) */
+export function getVisitWeekdaysForSlot(row: ClientRow, slot: number): number[] {
+  if (slot < 1 || slot > 10) return [];
+  const list = row.agent_assignments;
+  if (!Array.isArray(list)) return [];
+  const a = list.find((x) => x.slot === slot);
+  if (!a?.visit_weekdays || !Array.isArray(a.visit_weekdays)) return [];
+  return Array.from(new Set(a.visit_weekdays.filter((x) => x >= 1 && x <= 7))).sort((x, y) => x - y);
+}
+
+/** «День» — avvalo hafta kunlari (teglar uchun matn), keyin `visit_date` */
 export function displayAgentDay(row: ClientRow, slot: number): string | null {
   if (slot < 1 || slot > 10) return null;
+  const wd = getVisitWeekdaysForSlot(row, slot);
+  if (wd.length > 0) {
+    const shown = wd.slice(0, 4).map((k) => WD_LABEL[k] ?? String(k));
+    const more = wd.length > 4 ? ` +${wd.length - 4}` : "";
+    return `${shown.join(", ")}${more}`;
+  }
   const list = row.agent_assignments;
   if (Array.isArray(list)) {
     const a = list.find((x) => x.slot === slot);
@@ -103,6 +121,8 @@ export function displayExpeditorPhone(row: ClientRow, slot: number): string | nu
     const a = list.find((x) => x.slot === slot);
     const ex = nonEmpty(a?.expeditor_phone);
     if (ex) return ex;
+    const en = nonEmpty(a?.expeditor_name);
+    if (en) return en;
   }
   const p = row.contact_persons[slot - 1]?.phone;
   return nonEmpty(p);
@@ -113,11 +133,11 @@ export function displayLegalName(row: ClientRow): string | null {
 }
 
 export function displayPinfl(row: ClientRow): string | null {
-  return nonEmpty(row.pdl);
+  return nonEmpty(row.client_pinfl) ?? nonEmpty(row.pdl);
 }
 
 export function displayTradeChannel(row: ClientRow): string | null {
-  return nonEmpty(row.logistics_service);
+  return nonEmpty(row.sales_channel) ?? nonEmpty(row.logistics_service);
 }
 
 export function displayClientCategory(row: ClientRow): string | null {

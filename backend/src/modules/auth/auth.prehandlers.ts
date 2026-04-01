@@ -15,6 +15,12 @@ export async function jwtAccessVerify(request: FastifyRequest, _reply: FastifyRe
   await request.jwtVerify<AccessJwtUser>();
 }
 
+/**
+ * Foydalanuvchi / agent / ekspeditor / supervizor ro‘yxatlarini o‘qish (filtrlar, mijoz tahriri).
+ * POST va tahrirlar odatda `admin` / `operator` da qoladi.
+ */
+export const DIRECTORY_READ_ROLES = ["admin", "operator", "supervisor", "agent", "expeditor"] as const;
+
 /** JWT allaqachon `jwtAccessVerify` orqali tekshirilgan bo‘lishi kerak. */
 export function requireRoles(...allowed: string[]) {
   return async (request: FastifyRequest, reply: FastifyReply) => {

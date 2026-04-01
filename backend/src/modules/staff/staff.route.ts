@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
-import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
-import { createStaff, listStaff } from "./staff.service";
+import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { createStaff, listStaff, patchAgentSupervisor } from "./staff.service";
 
 const catalogRoles = ["admin", "operator"] as const;
 
@@ -32,8 +32,12 @@ const createBodySchema = z.object({
   is_active: z.boolean().optional()
 });
 
+const patchAgentSupervisorBody = z.object({
+  supervisor_user_id: z.number().int().positive().nullable()
+});
+
 export async function registerStaffRoutes(app: FastifyInstance) {
-  app.get("/api/:slug/agents", { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] }, async (request, reply) => {
+  app.get("/api/:slug/agents", { preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)] }, async (request, reply) => {
     if (!ensureTenantContext(request, reply)) return;
     const data = await listStaff(request.tenant!.id, "agent");
     return reply.send({ data });
@@ -60,9 +64,74 @@ export async function registerStaffRoutes(app: FastifyInstance) {
     }
   });
 
+  app.patch(
+    "/api/:slug/agents/:id",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = patchAgentSupervisorBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await patchAgentSupervisor(
+          request.tenant!.id,
+          id,
+          parsed.data.supervisor_user_id
+        );
+        return reply.send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "SELF_SUPERVISOR") return reply.status(400).send({ error: "SelfSupervisor" });
+        if (msg === "BAD_SUPERVISOR") return reply.status(400).send({ error: "BadSupervisor" });
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/supervisors",
+    { preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const data = await listStaff(request.tenant!.id, "supervisor");
+      return reply.send({ data });
+    }
+  );
+
+  app.post(
+    "/api/:slug/supervisors",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = createBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await createStaff(request.tenant!.id, "supervisor", parsed.data);
+        return reply.status(201).send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "BAD_LOGIN") return reply.status(400).send({ error: "BadLogin" });
+        if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
+        if (msg === "BAD_FIRST_NAME") return reply.status(400).send({ error: "BadFirstName" });
+        if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
+        if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
+        if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        throw e;
+      }
+    }
+  );
+
   app.get(
     "/api/:slug/expeditors",
-    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    { preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const data = await listStaff(request.tenant!.id, "expeditor");

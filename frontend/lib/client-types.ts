@@ -11,6 +11,10 @@ export type ClientAgentAssignmentRow = {
   agent_name: string | null;
   visit_date: string | null;
   expeditor_phone: string | null;
+  /** 1=Du … 7=Ya */
+  visit_weekdays: number[];
+  expeditor_user_id: number | null;
+  expeditor_name: string | null;
 };
 
 export type ClientRow = {
@@ -41,21 +45,22 @@ export type ClientRow = {
   visit_date: string | null;
   notes: string | null;
   client_format: string | null;
+  client_code: string | null;
+  sales_channel: string | null;
+  product_category_ref: string | null;
+  bank_name: string | null;
+  bank_account: string | null;
+  bank_mfo: string | null;
+  client_pinfl: string | null;
+  oked: string | null;
+  contract_number: string | null;
+  vat_reg_code: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  zone: string | null;
   agent_id: number | null;
   agent_name: string | null;
   agent_assignments: ClientAgentAssignmentRow[];
   contact_persons: ContactPersonSlot[];
   created_at: string;
-
-  // User requested columns (placeholders until fully wired in backend).
-  pinfl?: string | null;
-  trade_channel_code?: string | null;
-  client_category_code?: string | null;
-  format_code?: string | null;
-  city_code?: string | null;
-  latitude?: string | null;
-  longitude?: string | null;
-
-  /** Kelajakdagi API: agent_1 … agent_10, agent_N_day, expeditor_N */
-  [key: string]: unknown;
 };

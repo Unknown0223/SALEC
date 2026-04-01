@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
-type Kind = "agent" | "expeditor";
+export type StaffKind = "agent" | "expeditor" | "supervisor";
 
 type StaffRow = {
   id: number;
@@ -34,12 +34,21 @@ type StaffRow = {
   login: string;
   is_active: boolean;
   client_count: number;
+  supervisor_user_id: number | null;
+  supervisor_name: string | null;
+  supervisee_count: number;
 };
 
 type Props = {
-  kind: Kind;
+  kind: StaffKind;
   tenantSlug: string;
 };
+
+function listSegment(kind: StaffKind): string {
+  if (kind === "agent") return "agents";
+  if (kind === "supervisor") return "supervisors";
+  return "expeditors";
+}
 
 const agentColumns = [
   "Ф.И.О",
@@ -60,7 +69,8 @@ const agentColumns = [
   "Должность",
   "Дата создания",
   "Доступ к приложение",
-  "Клиенты"
+  "Клиенты",
+  "Супервайзер"
 ];
 
 const expeditorColumns = [
@@ -79,18 +89,48 @@ const expeditorColumns = [
   "Доступ к приложение"
 ];
 
+const supervisorColumns = ["Ф.И.О", "Логин", "Телефон", "Агентлар", "Holat"];
+
 export function StaffManageView({ kind, tenantSlug }: Props) {
   const [search, setSearch] = useState("");
+  const qc = useQueryClient();
+  const seg = listSegment(kind);
 
-  const newHref = kind === "agent" ? "/settings/spravochnik/agents/new" : "/settings/spravochnik/expeditors/new";
+  const newHref =
+    kind === "agent"
+      ? "/settings/spravochnik/agents/new"
+      : kind === "supervisor"
+        ? "/settings/spravochnik/supervisors/new"
+        : "/settings/spravochnik/expeditors/new";
 
   const listQ = useQuery({
     queryKey: [kind, tenantSlug],
     queryFn: async () => {
-      const { data } = await api.get<{ data: StaffRow[] }>(
-        `/api/${tenantSlug}/${kind === "agent" ? "agents" : "expeditors"}`
-      );
+      const { data } = await api.get<{ data: StaffRow[] }>(`/api/${tenantSlug}/${seg}`);
       return data.data;
+    }
+  });
+
+  const supervisorsQ = useQuery({
+    queryKey: ["supervisors", tenantSlug, "staff-agent-dropdown"],
+    enabled: kind === "agent" && Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{ data: StaffRow[] }>(`/api/${tenantSlug}/supervisors`);
+      return data.data;
+    }
+  });
+
+  const supervisorMut = useMutation({
+    mutationFn: async (vars: { agentId: number; supervisor_user_id: number | null }) => {
+      const { data } = await api.patch<StaffRow>(
+        `/api/${tenantSlug}/agents/${vars.agentId}`,
+        { supervisor_user_id: vars.supervisor_user_id }
+      );
+      return data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: [kind, tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["supervisors", tenantSlug, "clients-toolbar"] });
     }
   });
 
@@ -103,6 +143,11 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
     );
   }, [listQ.data, search]);
 
+  const columns = kind === "agent" ? agentColumns : kind === "supervisor" ? supervisorColumns : expeditorColumns;
+
+  const addLabel =
+    kind === "agent" ? "Добавить агент" : kind === "supervisor" ? "Добавить супервайзер" : "Добавить";
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -113,15 +158,17 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
           className="max-w-xs"
         />
         <Link href={newHref} className={cn(buttonVariants({ size: "sm" }))}>
-          {kind === "agent" ? "Добавить агент" : "Добавить"}
+          {addLabel}
         </Link>
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="min-w-[1200px] w-full text-xs">
+        <table
+          className={cn("w-full text-xs", kind === "supervisor" ? "min-w-[32rem]" : "min-w-[1200px]")}
+        >
           <thead className="bg-muted/50">
             <tr>
-              {(kind === "agent" ? agentColumns : expeditorColumns).map((c) => (
+              {columns.map((c) => (
                 <th key={c} className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
                   {c}
                 </th>
@@ -152,6 +199,33 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
                     <td className="px-2 py-2">{new Date(r.created_at).toLocaleDateString()}</td>
                     <td className="px-2 py-2">{r.app_access ? "Да" : "Нет"}</td>
                     <td className="px-2 py-2">{r.client_count}</td>
+                    <td className="min-w-[12rem] px-2 py-2">
+                      <select
+                        className="h-8 max-w-[14rem] rounded-md border border-input bg-background px-2 text-xs disabled:opacity-50"
+                        disabled={supervisorMut.isPending || supervisorsQ.isLoading}
+                        value={r.supervisor_user_id ?? ""}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const supervisor_user_id = raw === "" ? null : Number.parseInt(raw, 10);
+                          supervisorMut.mutate({ agentId: r.id, supervisor_user_id });
+                        }}
+                      >
+                        <option value="">—</option>
+                        {(supervisorsQ.data ?? []).filter((u) => u.is_active).map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.fio} ({u.login})
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </>
+                ) : kind === "supervisor" ? (
+                  <>
+                    <td className="px-2 py-2">{r.fio}</td>
+                    <td className="px-2 py-2 font-mono">{r.login}</td>
+                    <td className="px-2 py-2">{r.phone ?? "—"}</td>
+                    <td className="px-2 py-2">{r.supervisee_count}</td>
+                    <td className="px-2 py-2">{r.is_active ? "Faol" : "Nofaol"}</td>
                   </>
                 ) : (
                   <>

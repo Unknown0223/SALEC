@@ -23,6 +23,10 @@ export type ClientAgentAssignmentApi = {
   agent_name: string | null;
   visit_date: string | null;
   expeditor_phone: string | null;
+  /** 1=Du … 7=Ya */
+  visit_weekdays: number[];
+  expeditor_user_id: number | null;
+  expeditor_name: string | null;
 };
 
 export type ClientListRow = {
@@ -54,6 +58,19 @@ export type ClientListRow = {
   visit_date: string | null;
   notes: string | null;
   client_format: string | null;
+  client_code: string | null;
+  sales_channel: string | null;
+  product_category_ref: string | null;
+  bank_name: string | null;
+  bank_account: string | null;
+  bank_mfo: string | null;
+  client_pinfl: string | null;
+  oked: string | null;
+  contract_number: string | null;
+  vat_reg_code: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  zone: string | null;
   agent_id: number | null;
   agent_name: string | null;
   agent_assignments: ClientAgentAssignmentApi[];
@@ -82,6 +99,26 @@ export type ListClientsQuery = {
   region?: string;
   district?: string;
   neighborhood?: string;
+  zone?: string;
+  client_type_code?: string;
+  client_format?: string;
+  sales_channel?: string;
+  /** Asosiy `agent_id` yoki istalgan jamoa qatoridagi agent */
+  agent_id?: number;
+  /** Jamoa qatoridagi ekspeditor foydalanuvchi */
+  expeditor_user_id?: number;
+  /** 1=Du … 7=Ya — istalgan jamoa qatorida shu kun tanlangan mijozlar */
+  visit_weekday?: number;
+  /** INN qismiy moslik */
+  inn?: string;
+  /** Telefon qismiy moslik */
+  phone?: string;
+  /** YYYY-MM-DD — `created_at` dan katta yoki teng */
+  created_from?: string;
+  /** YYYY-MM-DD — `created_at` kichik yoki teng (kun oxirigacha) */
+  created_to?: string;
+  /** Asosiy agent yoki jamoa qatoridagi agentning `supervisor_user_id` */
+  supervisor_user_id?: number;
   sort?: "name" | "phone" | "id" | "created_at" | "region";
   order?: "asc" | "desc";
 };
@@ -94,7 +131,10 @@ export type ClientReferences = {
   regions: string[];
   districts: string[];
   neighborhoods: string[];
+  zones: string[];
   client_formats: string[];
+  sales_channels: string[];
+  product_category_refs: string[];
   logistics_services: string[];
 };
 
@@ -134,13 +174,32 @@ function normalizeDistinct(values: Array<string | null | undefined>): string[] {
   return [...set].sort((a, b) => a.localeCompare(b, "uz"));
 }
 
+/** JSON / massivdan 1..7 (Du..Ya) butun sonlarni ajratadi */
+export function parseVisitWeekdaysJson(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out: number[] = [];
+  for (const x of raw) {
+    const n = typeof x === "number" ? x : Number.parseInt(String(x), 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 7) out.push(n);
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+function visitWeekdaysToPrismaJson(days: number[]): Prisma.InputJsonValue {
+  const clean = parseVisitWeekdaysJson(days);
+  return clean as unknown as Prisma.InputJsonValue;
+}
+
 function mapAgentAssignmentsToApi(
   rows: Array<{
     slot: number;
     agent_id: number | null;
     visit_date: Date | null;
     expeditor_phone: string | null;
+    visit_weekdays: unknown;
+    expeditor_user_id: number | null;
     agent: { name: string } | null;
+    expeditor_user: { id: number; name: string } | null;
   }>
 ): ClientAgentAssignmentApi[] {
   return rows.map((r) => ({
@@ -148,7 +207,10 @@ function mapAgentAssignmentsToApi(
     agent_id: r.agent_id,
     agent_name: r.agent?.name ?? null,
     visit_date: r.visit_date?.toISOString() ?? null,
-    expeditor_phone: r.expeditor_phone
+    expeditor_phone: r.expeditor_phone,
+    visit_weekdays: parseVisitWeekdaysJson(r.visit_weekdays),
+    expeditor_user_id: r.expeditor_user_id,
+    expeditor_name: r.expeditor_user?.name ?? null
   }));
 }
 
@@ -178,6 +240,8 @@ export type AgentAssignmentPatch = {
   agent_id?: number | null;
   visit_date?: string | null;
   expeditor_phone?: string | null;
+  expeditor_user_id?: number | null;
+  visit_weekdays?: number[];
 };
 
 async function replaceClientAgentAssignments(
@@ -200,6 +264,8 @@ async function replaceClientAgentAssignments(
     agent_id: number | null;
     visit_date: Date | null;
     expeditor_phone: string | null;
+    expeditor_user_id: number | null;
+    visit_weekdays: Prisma.InputJsonValue;
   }> = [];
 
   for (const slot of [...bySlot.keys()].sort((a, b) => a - b)) {
@@ -230,10 +296,40 @@ async function replaceClientAgentAssignments(
 
     const expeditor_phone = s.expeditor_phone?.trim() || null;
 
-    const hasData = agent_id != null || visit_date != null || (expeditor_phone != null && expeditor_phone.length > 0);
+    let expeditor_user_id: number | null = null;
+    if (s.expeditor_user_id != null) {
+      const eid = Math.floor(Number(s.expeditor_user_id));
+      if (!Number.isFinite(eid) || eid < 1) {
+        throw new Error("VALIDATION");
+      }
+      const eu = await tx.user.findFirst({
+        where: { id: eid, tenant_id: tenantId, is_active: true }
+      });
+      if (!eu) {
+        throw new Error("VALIDATION");
+      }
+      expeditor_user_id = eid;
+    }
+
+    const weekdaysJson = visitWeekdaysToPrismaJson(s.visit_weekdays ?? []);
+    const weekdaysArr = parseVisitWeekdaysJson(s.visit_weekdays);
+
+    const hasData =
+      agent_id != null ||
+      visit_date != null ||
+      (expeditor_phone != null && expeditor_phone.length > 0) ||
+      expeditor_user_id != null ||
+      weekdaysArr.length > 0;
     if (!hasData) continue;
 
-    rows.push({ slot, agent_id, visit_date, expeditor_phone });
+    rows.push({
+      slot,
+      agent_id,
+      visit_date,
+      expeditor_phone,
+      expeditor_user_id,
+      visit_weekdays: weekdaysJson
+    });
   }
 
   await tx.clientAgentAssignment.deleteMany({ where: { client_id: clientId } });
@@ -245,7 +341,9 @@ async function replaceClientAgentAssignments(
         slot: r.slot,
         agent_id: r.agent_id,
         visit_date: r.visit_date,
-        expeditor_phone: r.expeditor_phone
+        expeditor_phone: r.expeditor_phone,
+        expeditor_user_id: r.expeditor_user_id,
+        visit_weekdays: r.visit_weekdays
       }
     });
   }
@@ -302,7 +400,9 @@ async function syncAssignmentSlotOneWithClientRow(
         slot: 1,
         agent_id: c.agent_id,
         visit_date: c.visit_date,
-        expeditor_phone: null
+        expeditor_phone: null,
+        expeditor_user_id: null,
+        visit_weekdays: []
       }
     });
   }
@@ -318,7 +418,10 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
         region: true,
         district: true,
         neighborhood: true,
+        zone: true,
         client_format: true,
+        sales_channel: true,
+        product_category_ref: true,
         logistics_service: true
       }
     }),
@@ -328,54 +431,284 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     })
   ]);
 
-  const settingsRef = (tenant?.settings as { references?: { regions?: unknown } } | null)?.references;
-  const settingsRegions = Array.isArray(settingsRef?.regions)
-    ? settingsRef.regions.filter((x): x is string => typeof x === "string")
-    : [];
+  const settingsRef = (tenant?.settings as { references?: Record<string, unknown> } | null)?.references;
+  const strArr = (k: string): string[] => {
+    const v = settingsRef?.[k];
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((s) => s.trim());
+  };
+  const settingsRegions = strArr("regions");
+  const setCat = strArr("client_categories");
+  const setTypes = strArr("client_type_codes");
+  const setFormats = strArr("client_formats");
+  const setSales = strArr("sales_channels");
+  const setProdCat = strArr("client_product_category_refs");
 
   return {
-    categories: normalizeDistinct(clientRows.map((r) => r.category)),
-    client_type_codes: normalizeDistinct(clientRows.map((r) => r.client_type_code)),
+    categories: normalizeDistinct([...setCat, ...clientRows.map((r) => r.category)]),
+    client_type_codes: normalizeDistinct([...setTypes, ...clientRows.map((r) => r.client_type_code)]),
     regions: normalizeDistinct([...settingsRegions, ...clientRows.map((r) => r.region)]),
     districts: normalizeDistinct(clientRows.map((r) => r.district)),
     neighborhoods: normalizeDistinct(clientRows.map((r) => r.neighborhood)),
-    client_formats: normalizeDistinct(clientRows.map((r) => r.client_format)),
+    zones: normalizeDistinct(clientRows.map((r) => r.zone)),
+    client_formats: normalizeDistinct([...setFormats, ...clientRows.map((r) => r.client_format)]),
+    sales_channels: normalizeDistinct([...setSales, ...clientRows.map((r) => r.sales_channel)]),
+    product_category_refs: normalizeDistinct([...setProdCat, ...clientRows.map((r) => r.product_category_ref)]),
     logistics_services: normalizeDistinct(clientRows.map((r) => r.logistics_service))
   };
+}
+
+async function clientIdsWithVisitWeekday(tenantId: number, day: number): Promise<number[]> {
+  const d = Math.floor(day);
+  if (d < 1 || d > 7) return [];
+  const json = JSON.stringify([d]);
+  const rows = await prisma.$queryRawUnsafe<{ client_id: number }[]>(
+    `SELECT DISTINCT client_id FROM client_agent_assignments WHERE tenant_id = $1 AND visit_weekdays::jsonb @> $2::jsonb`,
+    tenantId,
+    json
+  );
+  return rows.map((r) => r.client_id);
+}
+
+/** Ro‘yxat, eksport va count uchun umumiy WHERE. `null` — hech qachon mos kelmas (masalan hafta kuni bo‘yicha bo‘sh). */
+export async function buildClientListWhereInput(
+  tenantId: number,
+  q: ListClientsQuery
+): Promise<Prisma.ClientWhereInput | null> {
+  const andList: Prisma.ClientWhereInput[] = [{ tenant_id: tenantId, merged_into_client_id: null }];
+
+  if (q.is_active === true) andList.push({ is_active: true });
+  if (q.is_active === false) andList.push({ is_active: false });
+  const cat = q.category?.trim();
+  if (cat) andList.push({ category: cat });
+  const region = q.region?.trim();
+  if (region) andList.push({ region });
+  const district = q.district?.trim();
+  if (district) andList.push({ district });
+  const neighborhood = q.neighborhood?.trim();
+  if (neighborhood) andList.push({ neighborhood });
+  const zone = q.zone?.trim();
+  if (zone) andList.push({ zone });
+  const ctc = q.client_type_code?.trim();
+  if (ctc) andList.push({ client_type_code: ctc });
+  const cf = q.client_format?.trim();
+  if (cf) andList.push({ client_format: cf });
+  const sc = q.sales_channel?.trim();
+  if (sc) andList.push({ sales_channel: sc });
+
+  if (q.agent_id != null && Number.isFinite(q.agent_id) && q.agent_id > 0) {
+    andList.push({
+      OR: [
+        { agent_id: q.agent_id },
+        { agent_assignments: { some: { agent_id: q.agent_id } } }
+      ]
+    });
+  }
+
+  if (q.expeditor_user_id != null && Number.isFinite(q.expeditor_user_id) && q.expeditor_user_id > 0) {
+    andList.push({
+      agent_assignments: { some: { expeditor_user_id: q.expeditor_user_id } }
+    });
+  }
+
+  if (q.visit_weekday != null && Number.isFinite(q.visit_weekday)) {
+    const ids = await clientIdsWithVisitWeekday(tenantId, q.visit_weekday);
+    if (ids.length === 0) {
+      return null;
+    }
+    andList.push({ id: { in: ids } });
+  }
+
+  const innQ = q.inn?.trim();
+  if (innQ) {
+    andList.push({ inn: { contains: innQ, mode: "insensitive" } });
+  }
+  const phoneQ = q.phone?.trim();
+  if (phoneQ) {
+    andList.push({ phone: { contains: phoneQ, mode: "insensitive" } });
+  }
+
+  const createdAtFilter: Prisma.DateTimeFilter = {};
+  const crFrom = q.created_from?.trim();
+  const crTo = q.created_to?.trim();
+  if (crFrom) {
+    const d = new Date(`${crFrom}T00:00:00.000Z`);
+    if (!Number.isNaN(d.getTime())) createdAtFilter.gte = d;
+  }
+  if (crTo) {
+    const d = new Date(`${crTo}T23:59:59.999Z`);
+    if (!Number.isNaN(d.getTime())) createdAtFilter.lte = d;
+  }
+  if (Object.keys(createdAtFilter).length > 0) {
+    andList.push({ created_at: createdAtFilter });
+  }
+
+  if (q.supervisor_user_id != null && Number.isFinite(q.supervisor_user_id) && q.supervisor_user_id > 0) {
+    const sid = Math.floor(q.supervisor_user_id);
+    andList.push({
+      OR: [
+        { agent: { supervisor_user_id: sid } },
+        { agent_assignments: { some: { agent: { supervisor_user_id: sid } } } }
+      ]
+    });
+  }
+
+  const search = q.search?.trim();
+  if (search) {
+    andList.push({
+      OR: [
+        { name: { contains: search, mode: "insensitive" } },
+        { phone: { contains: search, mode: "insensitive" } },
+        { inn: { contains: search, mode: "insensitive" } },
+        { region: { contains: search, mode: "insensitive" } },
+        { district: { contains: search, mode: "insensitive" } },
+        { landmark: { contains: search, mode: "insensitive" } },
+        { responsible_person: { contains: search, mode: "insensitive" } },
+        { notes: { contains: search, mode: "insensitive" } },
+        { street: { contains: search, mode: "insensitive" } }
+      ]
+    });
+  }
+
+  return { AND: andList };
+}
+
+const CLIENTS_EXPORT_MAX = 10_000;
+
+function csvEscapeCell(v: string): string {
+  const t = String(v).replace(/\r?\n/g, " ").replace(/"/g, '""');
+  if (/[";\n]/.test(t)) return `"${t}"`;
+  return t;
+}
+
+export async function exportClientsFilteredCsv(
+  tenantId: number,
+  q: ListClientsQuery
+): Promise<{ csv: string; truncated: boolean; totalMatched: number }> {
+  const where = await buildClientListWhereInput(tenantId, q);
+  const headers = [
+    "ID",
+    "Nomi",
+    "Firma",
+    "Telefon",
+    "INN",
+    "Viloyat",
+    "Tuman",
+    "Zona",
+    "Toifa",
+    "Tur",
+    "Format",
+    "Savdo kanali",
+    "Faol",
+    "Yaratilgan"
+  ];
+  if (where === null) {
+    return {
+      csv: `\ufeff${headers.map(csvEscapeCell).join(";")}\n`,
+      truncated: false,
+      totalMatched: 0
+    };
+  }
+
+  const totalMatched = await prisma.client.count({ where });
+  const rows = await prisma.client.findMany({
+    where,
+    take: CLIENTS_EXPORT_MAX,
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      legal_name: true,
+      phone: true,
+      inn: true,
+      region: true,
+      district: true,
+      zone: true,
+      category: true,
+      client_type_code: true,
+      client_format: true,
+      sales_channel: true,
+      is_active: true,
+      created_at: true
+    }
+  });
+
+  const lines = [
+    headers.map(csvEscapeCell).join(";"),
+    ...rows.map((r) =>
+      [
+        String(r.id),
+        r.name ?? "",
+        r.legal_name ?? "",
+        r.phone ?? "",
+        r.inn ?? "",
+        r.region ?? "",
+        r.district ?? "",
+        r.zone ?? "",
+        r.category ?? "",
+        r.client_type_code ?? "",
+        r.client_format ?? "",
+        r.sales_channel ?? "",
+        r.is_active ? "ha" : "yo‘q",
+        r.created_at.toISOString().slice(0, 10)
+      ]
+        .map(csvEscapeCell)
+        .join(";")
+    )
+  ];
+
+  return {
+    csv: `\ufeff${lines.join("\n")}`,
+    truncated: totalMatched > CLIENTS_EXPORT_MAX,
+    totalMatched
+  };
+}
+
+export async function bulkSetClientsActive(
+  tenantId: number,
+  clientIds: number[],
+  is_active: boolean,
+  actorUserId: number | null
+): Promise<{ updated: number }> {
+  const MAX = 500;
+  const ids = [...new Set(clientIds.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0))].slice(
+    0,
+    MAX
+  );
+  if (ids.length === 0) {
+    return { updated: 0 };
+  }
+
+  const existing = await prisma.client.findMany({
+    where: { tenant_id: tenantId, merged_into_client_id: null, id: { in: ids } },
+    select: { id: true }
+  });
+  const ok = existing.map((e) => e.id);
+  if (ok.length === 0) {
+    return { updated: 0 };
+  }
+
+  await prisma.client.updateMany({
+    where: { tenant_id: tenantId, merged_into_client_id: null, id: { in: ok } },
+    data: { is_active }
+  });
+
+  for (const id of ok) {
+    await appendClientAuditLog(tenantId, id, actorUserId, "client.bulk_set_active", { is_active });
+  }
+
+  return { updated: ok.length };
 }
 
 export async function listClientsForTenantPaged(
   tenantId: number,
   q: ListClientsQuery
 ): Promise<{ data: ClientListRow[]; total: number; page: number; limit: number }> {
-  const where: Prisma.ClientWhereInput = {
-    tenant_id: tenantId,
-    merged_into_client_id: null
-  };
-  if (q.is_active === true) where.is_active = true;
-  if (q.is_active === false) where.is_active = false;
-  const cat = q.category?.trim();
-  if (cat) where.category = cat;
-  const region = q.region?.trim();
-  if (region) where.region = region;
-  const district = q.district?.trim();
-  if (district) where.district = district;
-  const neighborhood = q.neighborhood?.trim();
-  if (neighborhood) where.neighborhood = neighborhood;
-  const search = q.search?.trim();
-  if (search) {
-    where.OR = [
-      { name: { contains: search, mode: "insensitive" } },
-      { phone: { contains: search, mode: "insensitive" } },
-      { inn: { contains: search, mode: "insensitive" } },
-      { region: { contains: search, mode: "insensitive" } },
-      { district: { contains: search, mode: "insensitive" } },
-      { landmark: { contains: search, mode: "insensitive" } },
-      { responsible_person: { contains: search, mode: "insensitive" } },
-      { notes: { contains: search, mode: "insensitive" } },
-      { street: { contains: search, mode: "insensitive" } }
-    ];
+  const whereInput = await buildClientListWhereInput(tenantId, q);
+  if (whereInput === null) {
+    return { data: [], total: 0, page: q.page, limit: q.limit };
   }
+  const where: Prisma.ClientWhereInput = whereInput;
 
   const sortField = q.sort ?? "name";
   const ord: Prisma.SortOrder = q.order === "desc" ? "desc" : "asc";
@@ -425,6 +758,19 @@ export async function listClientsForTenantPaged(
         visit_date: true,
         notes: true,
         client_format: true,
+        client_code: true,
+        sales_channel: true,
+        product_category_ref: true,
+        bank_name: true,
+        bank_account: true,
+        bank_mfo: true,
+        client_pinfl: true,
+        oked: true,
+        contract_number: true,
+        vat_reg_code: true,
+        latitude: true,
+        longitude: true,
+        zone: true,
         contact_persons: true,
         agent_id: true,
         agent: { select: { name: true } },
@@ -435,7 +781,10 @@ export async function listClientsForTenantPaged(
             agent_id: true,
             visit_date: true,
             expeditor_phone: true,
-            agent: { select: { name: true } }
+            visit_weekdays: true,
+            expeditor_user_id: true,
+            agent: { select: { name: true } },
+            expeditor_user: { select: { id: true, name: true } }
           }
         },
         client_balances: { take: 1, select: { balance: true } }
@@ -482,6 +831,19 @@ export async function listClientsForTenantPaged(
         visit_date: disp.visit_date,
         notes: c.notes,
         client_format: c.client_format,
+        client_code: c.client_code,
+        sales_channel: c.sales_channel,
+        product_category_ref: c.product_category_ref,
+        bank_name: c.bank_name,
+        bank_account: c.bank_account,
+        bank_mfo: c.bank_mfo,
+        client_pinfl: c.client_pinfl,
+        oked: c.oked,
+        contract_number: c.contract_number,
+        vat_reg_code: c.vat_reg_code,
+        latitude: c.latitude != null ? c.latitude.toString() : null,
+        longitude: c.longitude != null ? c.longitude.toString() : null,
+        zone: c.zone,
         agent_id: disp.agent_id,
         agent_name: disp.agent_name,
         agent_assignments,
@@ -535,6 +897,19 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         visit_date: true,
         notes: true,
         client_format: true,
+        client_code: true,
+        sales_channel: true,
+        product_category_ref: true,
+        bank_name: true,
+        bank_account: true,
+        bank_mfo: true,
+        client_pinfl: true,
+        oked: true,
+        contract_number: true,
+        vat_reg_code: true,
+        latitude: true,
+        longitude: true,
+        zone: true,
         contact_persons: true,
         agent: { select: { name: true } },
         agent_assignments: {
@@ -544,7 +919,10 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
             agent_id: true,
             visit_date: true,
             expeditor_phone: true,
-            agent: { select: { name: true } }
+            visit_weekdays: true,
+            expeditor_user_id: true,
+            agent: { select: { name: true } },
+            expeditor_user: { select: { id: true, name: true } }
           }
         }
       }
@@ -607,6 +985,19 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     visit_date: disp.visit_date,
     notes: c.notes,
     client_format: c.client_format,
+    client_code: c.client_code,
+    sales_channel: c.sales_channel,
+    product_category_ref: c.product_category_ref,
+    bank_name: c.bank_name,
+    bank_account: c.bank_account,
+    bank_mfo: c.bank_mfo,
+    client_pinfl: c.client_pinfl,
+    oked: c.oked,
+    contract_number: c.contract_number,
+    vat_reg_code: c.vat_reg_code,
+    latitude: c.latitude != null ? c.latitude.toString() : null,
+    longitude: c.longitude != null ? c.longitude.toString() : null,
+    zone: c.zone,
     agent_assignments,
     contact_persons: parseContactPersonsJson(c.contact_persons),
     open_orders_total
@@ -744,11 +1135,42 @@ export type UpdateClientInput = {
   visit_date?: string | null;
   notes?: string | null;
   client_format?: string | null;
+  client_code?: string | null;
+  sales_channel?: string | null;
+  product_category_ref?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
+  bank_mfo?: string | null;
+  client_pinfl?: string | null;
+  oked?: string | null;
+  contract_number?: string | null;
+  vat_reg_code?: string | null;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+  zone?: string | null;
   agent_id?: number | null;
   agent_assignments?: AgentAssignmentPatch[];
   contact_persons?: ContactPersonSlot[];
   is_active?: boolean;
 };
+
+function parseOptionalLatitude(v: string | number | null | undefined): Prisma.Decimal | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number.parseFloat(s);
+  if (!Number.isFinite(n) || n < -90 || n > 90) throw new Error("VALIDATION");
+  return new Prisma.Decimal(s);
+}
+
+function parseOptionalLongitude(v: string | number | null | undefined): Prisma.Decimal | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number.parseFloat(s);
+  if (!Number.isFinite(n) || n < -180 || n > 180) throw new Error("VALIDATION");
+  return new Prisma.Decimal(s);
+}
 
 export async function appendClientAuditLog(
   tenantId: number,
@@ -768,6 +1190,35 @@ export async function appendClientAuditLog(
       detail: detail as Prisma.InputJsonValue
     }
   });
+}
+
+/** Minimal yangi mijoz (keyin to‘liq tahrir sahifasida to‘ldiriladi). */
+export async function createClientMinimal(
+  tenantId: number,
+  actorUserId: number | null,
+  input: { name: string; phone?: string | null }
+): Promise<{ id: number }> {
+  const name = input.name?.trim();
+  if (!name) {
+    throw new Error("VALIDATION");
+  }
+  const phone = input.phone != null && String(input.phone).trim() !== "" ? String(input.phone).trim() : null;
+
+  const row = await prisma.client.create({
+    data: {
+      tenant_id: tenantId,
+      name,
+      phone,
+      phone_normalized: normalizePhoneDigits(phone)
+    }
+  });
+
+  await appendClientAuditLog(tenantId, row.id, actorUserId, "client.create", {
+    name,
+    phone
+  });
+
+  return { id: row.id };
 }
 
 export async function listClientAuditLogs(
@@ -905,6 +1356,50 @@ export async function updateClientFields(
   }
   if (input.client_format !== undefined) {
     data.client_format = input.client_format?.trim() || null;
+  }
+  if (input.client_code !== undefined) {
+    const cc = input.client_code?.trim().slice(0, 32) || null;
+    data.client_code = cc;
+  }
+  if (input.sales_channel !== undefined) {
+    data.sales_channel = input.sales_channel?.trim() || null;
+  }
+  if (input.product_category_ref !== undefined) {
+    data.product_category_ref = input.product_category_ref?.trim() || null;
+  }
+  if (input.bank_name !== undefined) {
+    data.bank_name = input.bank_name?.trim() || null;
+  }
+  if (input.bank_account !== undefined) {
+    data.bank_account = input.bank_account?.trim() || null;
+  }
+  if (input.bank_mfo !== undefined) {
+    data.bank_mfo = input.bank_mfo?.trim() || null;
+  }
+  if (input.client_pinfl !== undefined) {
+    const pf = input.client_pinfl?.replace(/\D/g, "") ?? "";
+    if (pf.length > 0 && pf.length < 14) {
+      throw new Error("VALIDATION");
+    }
+    data.client_pinfl = pf.length > 0 ? pf.slice(0, 20) : null;
+  }
+  if (input.oked !== undefined) {
+    data.oked = input.oked?.trim() || null;
+  }
+  if (input.contract_number !== undefined) {
+    data.contract_number = input.contract_number?.trim() || null;
+  }
+  if (input.vat_reg_code !== undefined) {
+    data.vat_reg_code = input.vat_reg_code?.trim() || null;
+  }
+  if (input.latitude !== undefined) {
+    data.latitude = parseOptionalLatitude(input.latitude);
+  }
+  if (input.longitude !== undefined) {
+    data.longitude = parseOptionalLongitude(input.longitude);
+  }
+  if (input.zone !== undefined) {
+    data.zone = input.zone?.trim() || null;
   }
   if (input.license_until !== undefined) {
     if (input.license_until === null || input.license_until === "") {

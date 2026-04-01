@@ -124,6 +124,21 @@ async function main() {
     }
   });
 
+  await prisma.user.upsert({
+    where: { tenant_id_login: { tenant_id: test1.id, login: "supervisor" } },
+    update: { password_hash },
+    create: {
+      tenant_id: test1.id,
+      name: "Supervizor (seed)",
+      first_name: "Supervizor",
+      last_name: "Seed",
+      login: "supervisor",
+      password_hash,
+      role: "supervisor",
+      is_active: true
+    }
+  });
+
   const whMain = await ensureWarehouse(test1.id, "Asosiy ombor", "main");
   await ensureWarehouse(test1.id, "Filial ombor", "branch");
 

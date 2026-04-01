@@ -61,6 +61,12 @@ export type TenantProfileDto = {
     payment_types: string[];
     return_reasons: string[];
     regions: string[];
+    /** Mijoz kartochkasi — spravochnikdan tanlanadigan qiymatlar */
+    client_categories: string[];
+    client_type_codes: string[];
+    client_formats: string[];
+    sales_channels: string[];
+    client_product_category_refs: string[];
   };
 };
 
@@ -89,7 +95,12 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
     references: {
       payment_types: stringArrayFromUnknown(ref.payment_types),
       return_reasons: stringArrayFromUnknown(ref.return_reasons),
-      regions: stringArrayFromUnknown(ref.regions)
+      regions: stringArrayFromUnknown(ref.regions),
+      client_categories: stringArrayFromUnknown(ref.client_categories),
+      client_type_codes: stringArrayFromUnknown(ref.client_type_codes),
+      client_formats: stringArrayFromUnknown(ref.client_formats),
+      sales_channels: stringArrayFromUnknown(ref.sales_channels),
+      client_product_category_refs: stringArrayFromUnknown(ref.client_product_category_refs)
     }
   };
 }
@@ -106,6 +117,11 @@ export async function patchTenantProfile(
       payment_types?: string[];
       return_reasons?: string[];
       regions?: string[];
+      client_categories?: string[];
+      client_type_codes?: string[];
+      client_formats?: string[];
+      sales_channels?: string[];
+      client_product_category_refs?: string[];
     };
   }>
 ): Promise<TenantProfileDto> {
@@ -150,6 +166,21 @@ export async function patchTenantProfile(
       }
       if (patch.references.regions != null) {
         merged.regions = patch.references.regions;
+      }
+      if (patch.references.client_categories != null) {
+        merged.client_categories = patch.references.client_categories;
+      }
+      if (patch.references.client_type_codes != null) {
+        merged.client_type_codes = patch.references.client_type_codes;
+      }
+      if (patch.references.client_formats != null) {
+        merged.client_formats = patch.references.client_formats;
+      }
+      if (patch.references.sales_channels != null) {
+        merged.sales_channels = patch.references.sales_channels;
+      }
+      if (patch.references.client_product_category_refs != null) {
+        merged.client_product_category_refs = patch.references.client_product_category_refs;
       }
       nextSettings.references = merged;
     }

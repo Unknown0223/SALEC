@@ -12,9 +12,9 @@ export type ClientColumnDef = {
 const agentCols: ClientColumnDef[] = [];
 for (let i = 1; i <= 10; i++) {
   agentCols.push(
-    { id: `agent_${i}`, label: `Агент ${i}` },
-    { id: `agent_${i}_day`, label: `Агент ${i} день` },
-    { id: `expeditor_${i}`, label: `Экспедитор ${i}` }
+    { id: `agent_${i}`, label: i === 1 ? "Агент" : `Агент ${i}` },
+    { id: `agent_${i}_day`, label: i === 1 ? "День" : `День ${i}` },
+    { id: `expeditor_${i}`, label: i === 1 ? "Экспедитор" : `Эксп. ${i}` }
   );
 }
 
@@ -32,6 +32,9 @@ export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "client_category_code", label: "Категория клиента (код)" },
   { id: "client_type_code", label: "Тип клиента (код)" },
   { id: "format_code", label: "Формат (код)" },
+  { id: "client_region", label: "Область" },
+  { id: "client_district", label: "Город / туман" },
+  { id: "client_zone", label: "Зона" },
   { id: "city_code", label: "Город (код)" },
   { id: "latitude", label: "Широта" },
   { id: "longitude", label: "Долгота" },
@@ -47,12 +50,19 @@ export function getDefaultColumnVisibility(): Record<string, boolean> {
   for (const c of CLIENT_TABLE_COLUMNS) {
     m[c.id] = [
       "name",
+      "legal_name",
       "address",
       "phone",
-      "contact_person",
+      "client_category_code",
+      "format_code",
+      "client_region",
+      "client_district",
+      "client_zone",
+      "landmark",
       "inn",
-      "city_code",
       "agent_1",
+      "agent_1_day",
+      "expeditor_1",
       "_actions"
     ].includes(c.id);
   }

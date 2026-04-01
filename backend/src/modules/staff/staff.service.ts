@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../../config/database";
 
-type StaffKind = "agent" | "expeditor";
+type StaffKind = "agent" | "expeditor" | "supervisor";
 
 export type StaffRow = {
   id: number;
@@ -28,6 +28,11 @@ export type StaffRow = {
   login: string;
   is_active: boolean;
   client_count: number;
+  /** Agentning ustavi (User.id) */
+  supervisor_user_id: number | null;
+  supervisor_name: string | null;
+  /** `role: supervisor` bo‘lgan foydalanuvchining ostidagi agentlar soni */
+  supervisee_count: number;
 };
 
 export type CreateStaffInput = {
@@ -57,7 +62,9 @@ export type CreateStaffInput = {
 };
 
 function kindRole(kind: StaffKind): string {
-  return kind === "agent" ? "agent" : "expeditor";
+  if (kind === "agent") return "agent";
+  if (kind === "supervisor") return "supervisor";
+  return "expeditor";
 }
 
 function toFio(u: { first_name: string | null; last_name: string | null; middle_name: string | null; name: string }) {
@@ -71,7 +78,8 @@ export async function listStaff(tenantId: number, kind: StaffKind): Promise<Staf
     where: { tenant_id: tenantId, role },
     include: {
       warehouse: { select: { name: true } },
-      return_warehouse: { select: { name: true } }
+      return_warehouse: { select: { name: true } },
+      supervisor: { select: { id: true, name: true } }
     },
     orderBy: { created_at: "desc" }
   });
@@ -84,6 +92,24 @@ export async function listStaff(tenantId: number, kind: StaffKind): Promise<Staf
   const countMap = new Map<number, number>();
   for (const row of clientCounts) {
     if (row.agent_id != null) countMap.set(row.agent_id, row._count._all);
+  }
+
+  let superviseeCountMap = new Map<number, number>();
+  if (kind === "supervisor") {
+    const grouped = await prisma.user.groupBy({
+      by: ["supervisor_user_id"],
+      where: {
+        tenant_id: tenantId,
+        role: "agent",
+        supervisor_user_id: { not: null }
+      },
+      _count: { _all: true }
+    });
+    for (const g of grouped) {
+      if (g.supervisor_user_id != null) {
+        superviseeCountMap.set(g.supervisor_user_id, g._count._all);
+      }
+    }
   }
 
   return users.map((u) => ({
@@ -110,8 +136,48 @@ export async function listStaff(tenantId: number, kind: StaffKind): Promise<Staf
     territory: u.territory,
     login: u.login,
     is_active: u.is_active,
-    client_count: countMap.get(u.id) ?? 0
+    client_count: countMap.get(u.id) ?? 0,
+    supervisor_user_id: u.supervisor_user_id,
+    supervisor_name: u.supervisor?.name ?? null,
+    supervisee_count: kind === "supervisor" ? superviseeCountMap.get(u.id) ?? 0 : 0
   }));
+}
+
+export async function patchAgentSupervisor(
+  tenantId: number,
+  agentUserId: number,
+  supervisorUserId: number | null
+): Promise<StaffRow> {
+  const agent = await prisma.user.findFirst({
+    where: { id: agentUserId, tenant_id: tenantId, role: "agent" }
+  });
+  if (!agent) {
+    throw new Error("NOT_FOUND");
+  }
+
+  if (supervisorUserId != null) {
+    if (supervisorUserId === agentUserId) {
+      throw new Error("SELF_SUPERVISOR");
+    }
+    const sup = await prisma.user.findFirst({
+      where: { id: supervisorUserId, tenant_id: tenantId, is_active: true, role: "supervisor" }
+    });
+    if (!sup) {
+      throw new Error("BAD_SUPERVISOR");
+    }
+  }
+
+  await prisma.user.update({
+    where: { id: agentUserId },
+    data: { supervisor_user_id: supervisorUserId }
+  });
+
+  const rows = await listStaff(tenantId, "agent");
+  const row = rows.find((x) => x.id === agentUserId);
+  if (!row) {
+    throw new Error("NOT_FOUND");
+  }
+  return row;
 }
 
 export async function createStaff(tenantId: number, kind: StaffKind, input: CreateStaffInput): Promise<StaffRow> {

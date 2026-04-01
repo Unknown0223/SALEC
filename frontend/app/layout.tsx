@@ -26,8 +26,11 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="uz" className={cn("font-sans", fontSans.variable)}>
-      <body className={`${fontSans.variable} ${fontMono.variable} min-h-dvh antialiased`}>
+    <html lang="uz" className={cn("font-sans", fontSans.variable)} suppressHydrationWarning>
+      <body
+        className={`${fontSans.variable} ${fontMono.variable} min-h-dvh antialiased`}
+        suppressHydrationWarning
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

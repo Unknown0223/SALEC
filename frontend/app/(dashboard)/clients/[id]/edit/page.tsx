@@ -46,7 +46,7 @@ export default function ClientEditPage() {
   }
 
   return (
-    <PageShell>
+    <PageShell className="max-w-[min(100%,90rem)]">
       <ClientEditForm
         tenantSlug={tenantSlug}
         clientId={clientId}

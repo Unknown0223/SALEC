@@ -23,7 +23,12 @@ const profilePatchSchema = z
       .object({
         payment_types: z.array(z.string()).optional(),
         return_reasons: z.array(z.string()).optional(),
-        regions: z.array(z.string()).optional()
+        regions: z.array(z.string()).optional(),
+        client_categories: z.array(z.string()).optional(),
+        client_type_codes: z.array(z.string()).optional(),
+        client_formats: z.array(z.string()).optional(),
+        sales_channels: z.array(z.string()).optional(),
+        client_product_category_refs: z.array(z.string()).optional()
       })
       .optional()
   })

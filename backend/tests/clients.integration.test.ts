@@ -146,4 +146,92 @@ describe.skipIf(!dbReady)("clients API (database)", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
   });
+
+  it("POST clients creates minimal row and created_from filter includes it", async () => {
+    const loginResponse = await request(app.server).post("/api/auth/login").send({
+      slug: "test1",
+      login: "admin",
+      password: "secret123"
+    });
+    expect(loginResponse.status).toBe(200);
+    const token = loginResponse.body.accessToken as string;
+
+    const unique = `API-New-${Date.now()}`;
+    const create = await request(app.server)
+      .post("/api/test1/clients")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: unique, phone: null });
+    expect(create.status).toBe(201);
+    const id = create.body.id as number;
+    expect(typeof id).toBe("number");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const list = await request(app.server)
+      .get(`/api/test1/clients?page=1&limit=500&created_from=${today}&search=${encodeURIComponent(unique)}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const ids = (list.body.data as { id: number }[]).map((r) => r.id);
+    expect(ids).toContain(id);
+  });
+
+  it("GET clients/export returns CSV and total header for admin", async () => {
+    const loginResponse = await request(app.server).post("/api/auth/login").send({
+      slug: "test1",
+      login: "admin",
+      password: "secret123"
+    });
+    expect(loginResponse.status).toBe(200);
+    const token = loginResponse.body.accessToken as string;
+
+    const res = await request(app.server)
+      .get("/api/test1/clients/export?page=1&limit=5")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(String(res.headers["content-type"] ?? "")).toMatch(/text\/csv/);
+    expect(res.headers["x-clients-export-total"]).toBeDefined();
+    expect(res.text).toContain("ID");
+    expect(res.text).toContain("Nomi");
+  });
+
+  it("PATCH clients/bulk-active toggles is_active", async () => {
+    const loginResponse = await request(app.server).post("/api/auth/login").send({
+      slug: "test1",
+      login: "admin",
+      password: "secret123"
+    });
+    expect(loginResponse.status).toBe(200);
+    const token = loginResponse.body.accessToken as string;
+
+    const listResponse = await request(app.server)
+      .get("/api/test1/clients?page=1&limit=1")
+      .set("Authorization", `Bearer ${token}`);
+    const id = (listResponse.body.data[0] as { id: number }).id;
+
+    const off = await request(app.server)
+      .patch("/api/test1/clients/bulk-active")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ client_ids: [id], is_active: false });
+    expect(off.status).toBe(200);
+    expect(off.body.updated).toBe(1);
+
+    const detailOff = await request(app.server)
+      .get(`/api/test1/clients/${id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(detailOff.status).toBe(200);
+    expect(detailOff.body.is_active).toBe(false);
+
+    const on = await request(app.server)
+      .patch("/api/test1/clients/bulk-active")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ client_ids: [id], is_active: true });
+    expect(on.status).toBe(200);
+    expect(on.body.updated).toBe(1);
+
+    const detailOn = await request(app.server)
+      .get(`/api/test1/clients/${id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(detailOn.status).toBe(200);
+    expect(detailOn.body.is_active).toBe(true);
+  });
 });

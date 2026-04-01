@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { apiBaseURL } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
-import axios from "axios";
+import axios, { isAxiosError } from "axios";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -37,8 +37,32 @@ export default function LoginPage() {
       const from = searchParams.get("from") ?? "/dashboard";
       router.replace(from);
       router.refresh();
-    } catch {
-      setError("Login yoki parol noto‘g‘ri, yoki serverga ulanib bo‘lmadi.");
+    } catch (err: unknown) {
+      if (isAxiosError(err)) {
+        const st = err.response?.status;
+        const body = err.response?.data as
+          | { error?: string; message?: string }
+          | undefined;
+        if (st === 401 || body?.error === "INVALID_CREDENTIALS") {
+          setError("Login yoki parol noto‘g‘ri.");
+          return;
+        }
+        if (st === 404 || body?.error === "TENANT_NOT_FOUND") {
+          setError("Bunday diler (slug) topilmadi yoki o‘chirilgan.");
+          return;
+        }
+        if (body?.message && typeof body.message === "string") {
+          setError(body.message);
+          return;
+        }
+        if (st === 503) {
+          setError(
+            "Server tayyor emas (odatda baza yoki migratsiya). Backend papkasida: npm run db:deploy va PostgreSQL ishlayotganini tekshiring."
+          );
+          return;
+        }
+      }
+      setError("Serverga ulanib bo‘lmadi yoki kutilmagan xato. Backend 4000-portda ishlayotganini tekshiring.");
     } finally {
       setLoading(false);
     }

@@ -2,10 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import type { ListClientsQuery } from "./clients.service";
 import {
   addClientBalanceMovement,
+  bulkSetClientsActive,
   buildClientImportTemplateBuffer,
   checkDuplicateCandidates,
+  createClientMinimal,
+  exportClientsFilteredCsv,
   getClientDetail,
   getClientReferences,
   getDuplicatePhoneGroups,
@@ -24,6 +28,11 @@ const checkBodySchema = z.object({
   phone: z.string().nullable().optional()
 });
 
+const createClientBodySchema = z.object({
+  name: z.string().min(1).max(500),
+  phone: z.string().max(80).nullable().optional()
+});
+
 const mergeBodySchema = z.object({
   keep_client_id: z.number().int().positive(),
   merge_client_ids: z.array(z.number().int().positive()).min(1)
@@ -39,8 +48,12 @@ const agentAssignmentSlotSchema = z.object({
   slot: z.number().int().min(1).max(10),
   agent_id: z.number().int().positive().nullable().optional(),
   visit_date: z.string().nullable().optional(),
-  expeditor_phone: z.string().nullable().optional()
+  expeditor_phone: z.string().nullable().optional(),
+  expeditor_user_id: z.number().int().positive().nullable().optional(),
+  visit_weekdays: z.array(z.number().int().min(1).max(7)).max(7).optional()
 });
+
+const coordIn = z.union([z.number().finite(), z.string(), z.null()]).optional();
 
 const patchClientSchema = z
   .object({
@@ -68,6 +81,19 @@ const patchClientSchema = z
     visit_date: z.string().nullable().optional(),
     notes: z.string().nullable().optional(),
     client_format: z.string().nullable().optional(),
+    client_code: z.string().nullable().optional(),
+    sales_channel: z.string().nullable().optional(),
+    product_category_ref: z.string().nullable().optional(),
+    bank_name: z.string().nullable().optional(),
+    bank_account: z.string().nullable().optional(),
+    bank_mfo: z.string().nullable().optional(),
+    client_pinfl: z.string().nullable().optional(),
+    oked: z.string().nullable().optional(),
+    contract_number: z.string().nullable().optional(),
+    vat_reg_code: z.string().nullable().optional(),
+    latitude: coordIn,
+    longitude: coordIn,
+    zone: z.string().nullable().optional(),
     agent_id: z.number().int().positive().nullable().optional(),
     agent_assignments: z.array(agentAssignmentSlotSchema).max(10).optional(),
     contact_persons: z.array(contactSlotSchema).max(10).optional(),
@@ -80,6 +106,86 @@ const balanceMovementBodySchema = z.object({
   note: z.string().max(500).nullable().optional()
 });
 
+const bulkActiveBodySchema = z.object({
+  client_ids: z.array(z.number().int().positive()).min(1).max(500),
+  is_active: z.boolean()
+});
+
+function parseClientListQuery(q: Record<string, string | undefined>): ListClientsQuery {
+  const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50));
+  const search = q.search?.trim() || undefined;
+  let is_active: boolean | undefined;
+  if (q.is_active === "true") is_active = true;
+  else if (q.is_active === "false") is_active = false;
+  const category = q.category?.trim() || undefined;
+  const region = q.region?.trim() || undefined;
+  const district = q.district?.trim() || undefined;
+  const neighborhood = q.neighborhood?.trim() || undefined;
+  const zone = q.zone?.trim() || undefined;
+  const client_type_code = q.client_type_code?.trim() || undefined;
+  const client_format = q.client_format?.trim() || undefined;
+  const sales_channel = q.sales_channel?.trim() || undefined;
+  let agent_id: number | undefined;
+  if (q.agent_id != null && q.agent_id !== "") {
+    const n = Number.parseInt(q.agent_id, 10);
+    if (Number.isFinite(n) && n > 0) agent_id = n;
+  }
+  let expeditor_user_id: number | undefined;
+  if (q.expeditor_user_id != null && q.expeditor_user_id !== "") {
+    const n = Number.parseInt(q.expeditor_user_id, 10);
+    if (Number.isFinite(n) && n > 0) expeditor_user_id = n;
+  }
+  let visit_weekday: number | undefined;
+  if (q.visit_weekday != null && q.visit_weekday !== "") {
+    const n = Number.parseInt(q.visit_weekday, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 7) visit_weekday = n;
+  }
+  const inn = q.inn?.trim() || undefined;
+  const phone = q.phone?.trim() || undefined;
+  const created_from = q.created_from?.trim() || undefined;
+  const created_to = q.created_to?.trim() || undefined;
+  let supervisor_user_id: number | undefined;
+  if (q.supervisor_user_id != null && q.supervisor_user_id !== "") {
+    const n = Number.parseInt(q.supervisor_user_id, 10);
+    if (Number.isFinite(n) && n > 0) supervisor_user_id = n;
+  }
+  const sortRaw = q.sort?.trim();
+  const sort =
+    sortRaw === "phone" ||
+    sortRaw === "id" ||
+    sortRaw === "created_at" ||
+    sortRaw === "region"
+      ? sortRaw
+      : "name";
+  const order = q.order === "desc" ? "desc" : "asc";
+
+  return {
+    page: pageNum,
+    limit: limitNum,
+    search,
+    ...(is_active !== undefined ? { is_active } : {}),
+    category,
+    region,
+    district,
+    neighborhood,
+    ...(zone ? { zone } : {}),
+    ...(client_type_code ? { client_type_code } : {}),
+    ...(client_format ? { client_format } : {}),
+    ...(sales_channel ? { sales_channel } : {}),
+    ...(agent_id !== undefined ? { agent_id } : {}),
+    ...(expeditor_user_id !== undefined ? { expeditor_user_id } : {}),
+    ...(visit_weekday !== undefined ? { visit_weekday } : {}),
+    ...(inn ? { inn } : {}),
+    ...(phone ? { phone } : {}),
+    ...(created_from ? { created_from } : {}),
+    ...(created_to ? { created_to } : {}),
+    ...(supervisor_user_id !== undefined ? { supervisor_user_id } : {}),
+    sort,
+    order
+  };
+}
+
 export async function registerClientRoutes(app: FastifyInstance) {
   app.get(
     "/api/:slug/clients",
@@ -87,39 +193,35 @@ export async function registerClientRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
-      const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
-      const limitNum = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50));
-      const search = q.search?.trim() || undefined;
-      let is_active: boolean | undefined;
-      if (q.is_active === "true") is_active = true;
-      else if (q.is_active === "false") is_active = false;
-      const category = q.category?.trim() || undefined;
-      const region = q.region?.trim() || undefined;
-      const district = q.district?.trim() || undefined;
-      const neighborhood = q.neighborhood?.trim() || undefined;
-      const sortRaw = q.sort?.trim();
-      const sort =
-        sortRaw === "phone" ||
-        sortRaw === "id" ||
-        sortRaw === "created_at" ||
-        sortRaw === "region"
-          ? sortRaw
-          : "name";
-      const order = q.order === "desc" ? "desc" : "asc";
-
-      const result = await listClientsForTenantPaged(request.tenant!.id, {
-        page: pageNum,
-        limit: limitNum,
-        search,
-        ...(is_active !== undefined ? { is_active } : {}),
-        category,
-        region,
-        district,
-        neighborhood,
-        sort,
-        order
-      });
+      const result = await listClientsForTenantPaged(request.tenant!.id, parseClientListQuery(q));
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = createClientBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const actor = getAccessUser(request);
+        const sub = Number.parseInt(actor.sub, 10);
+        const actorUserId = Number.isFinite(sub) && sub > 0 ? sub : null;
+        const { id } = await createClientMinimal(request.tenant!.id, actorUserId, {
+          name: parsed.data.name,
+          phone: parsed.data.phone ?? null
+        });
+        return reply.status(201).send({ id });
+      } catch (e) {
+        if (e instanceof Error && e.message === "VALIDATION") {
+          return reply.status(400).send({ error: "ValidationError" });
+        }
+        throw e;
+      }
     }
   );
 
@@ -170,6 +272,45 @@ export async function registerClientRoutes(app: FastifyInstance) {
       if (!ensureTenantContext(request, reply)) return;
       const groups = await getDuplicatePhoneGroups(request.tenant!.id);
       return reply.send({ data: groups });
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/export",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const listQ = parseClientListQuery(q);
+      const { csv, truncated, totalMatched } = await exportClientsFilteredCsv(request.tenant!.id, listQ);
+      reply
+        .header("Content-Type", "text/csv; charset=utf-8")
+        .header("Content-Disposition", 'attachment; filename="mijozlar.csv"')
+        .header("X-Clients-Export-Truncated", truncated ? "1" : "0")
+        .header("X-Clients-Export-Total", String(totalMatched));
+      return reply.send(csv);
+    }
+  );
+
+  app.patch(
+    "/api/:slug/clients/bulk-active",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = bulkActiveBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      const actor = getAccessUser(request);
+      const sub = Number.parseInt(actor.sub, 10);
+      const actorUserId = Number.isFinite(sub) && sub > 0 ? sub : null;
+      const result = await bulkSetClientsActive(
+        request.tenant!.id,
+        parsed.data.client_ids,
+        parsed.data.is_active,
+        actorUserId
+      );
+      return reply.send(result);
     }
   );
 

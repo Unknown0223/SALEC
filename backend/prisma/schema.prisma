@@ -69,6 +69,10 @@ model User {
   return_warehouse_id Int?
   return_warehouse Warehouse? @relation("UserReturnWarehouse", fields: [return_warehouse_id], references: [id])
   is_active     Boolean  @default(true)
+  /// Agent / foydalanuvchi ustavi (supervisor) — klientlar ro‘yxatida filtr
+  supervisor_user_id Int?
+  supervisor         User?   @relation("UserSupervisor", fields: [supervisor_user_id], references: [id], onDelete: SetNull)
+  supervisees        User[] @relation("UserSupervisor")
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
@@ -80,6 +84,7 @@ model User {
   order_change_logs    OrderChangeLog[]
   balance_movements    ClientBalanceMovement[]
   client_audit_logs    ClientAuditLog[]
+  expeditor_assignments ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -199,6 +204,26 @@ model Client {
 
   /// Mijoz formati (masalan savdo kanali / turi) — keyinroq qoidalarga bog‘lash mumkin
   client_format String?
+  /// Qisqa ichki kod (masalan 20 belgi)
+  client_code     String?  @db.VarChar(32)
+  /// Savdo kanali (Lalaku: «Канал продаж»)
+  sales_channel   String?
+  /// Mahsulot toifasi (spravochnikdan tanlangan qiymat matni)
+  product_category_ref String?
+  /// Bank rekvizitlari
+  bank_name       String?
+  bank_account    String?
+  bank_mfo        String?
+  /// Mijoz JSHSHIR / ПИНФЛ
+  client_pinfl    String?  @db.VarChar(20)
+  oked            String?
+  contract_number String?
+  vat_reg_code    String?
+  /// Xarita (Yandex / GPS)
+  latitude        Decimal? @db.Decimal(11, 8)
+  longitude       Decimal? @db.Decimal(11, 8)
+  /// Zona (Lalaku jadvalidagi «Зона»)
+  zone            String?
 
   /// 10 ta kontakt: [{ "firstName", "lastName", "phone" }, ...]
   contact_persons Json @default("[]")
@@ -232,6 +257,11 @@ model ClientAgentAssignment {
   agent            User?     @relation("ClientAgentSlotAgents", fields: [agent_id], references: [id], onDelete: SetNull)
   visit_date       DateTime?
   expeditor_phone  String?
+  /// Tanlangan foydalanuvchi (ekspeditor ro‘yxatidan)
+  expeditor_user_id Int?
+  expeditor_user    User?    @relation("ExpeditorOnAssignment", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
+  /// Tashrif kunlari: [1..7] — 1=Du, 7=Ya (ISO hafta kuni emas, savdo UI)
+  visit_weekdays   Json      @default("[]")
   created_at       DateTime  @default(now())
   updated_at       DateTime  @updatedAt
 

@@ -9,8 +9,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ClientRow } from "@/lib/client-types";
 import { getDefaultColumnVisibility, loadColumnVisibility } from "@/lib/client-table-columns";
-import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { CLIENT_IMPORT_MAX_FILE_BYTES } from "@/lib/client-import-limits";
+import { downloadClientsCsvPage } from "@/lib/clients-csv-export";
 import { api } from "@/lib/api";
 import { QueryErrorState } from "@/components/common/query-error-state";
 import { getUserFacingError } from "@/lib/error-utils";
@@ -33,14 +34,65 @@ type ClientReferencesResponse = {
   regions: string[];
   districts: string[];
   neighborhoods: string[];
+  zones: string[];
   client_formats: string[];
+  sales_channels: string[];
+  product_category_refs: string[];
   logistics_services: string[];
 };
+
+type FilterBundle = {
+  search: string;
+  activeFilter: "all" | "true" | "false";
+  categoryFilter: string;
+  regionFilter: string;
+  districtFilter: string;
+  neighborhoodFilter: string;
+  zoneFilter: string;
+  clientTypeFilter: string;
+  clientFormatFilter: string;
+  salesChannelFilter: string;
+  agentFilter: string;
+  expeditorFilter: string;
+  supervisorFilter: string;
+  visitWeekdayFilter: string;
+  innFilter: string;
+  phoneFilter: string;
+  createdFromFilter: string;
+  createdToFilter: string;
+  sortField: "name" | "phone" | "id" | "created_at" | "region";
+  sortOrder: "asc" | "desc";
+};
+
+function appendClientsFilterParams(params: URLSearchParams, p: FilterBundle) {
+  if (p.search.trim()) params.set("search", p.search.trim());
+  if (p.activeFilter !== "all") params.set("is_active", p.activeFilter);
+  if (p.categoryFilter.trim()) params.set("category", p.categoryFilter.trim());
+  if (p.regionFilter.trim()) params.set("region", p.regionFilter.trim());
+  if (p.districtFilter.trim()) params.set("district", p.districtFilter.trim());
+  if (p.neighborhoodFilter.trim()) params.set("neighborhood", p.neighborhoodFilter.trim());
+  if (p.zoneFilter.trim()) params.set("zone", p.zoneFilter.trim());
+  if (p.clientTypeFilter.trim()) params.set("client_type_code", p.clientTypeFilter.trim());
+  if (p.clientFormatFilter.trim()) params.set("client_format", p.clientFormatFilter.trim());
+  if (p.salesChannelFilter.trim()) params.set("sales_channel", p.salesChannelFilter.trim());
+  if (p.agentFilter.trim()) params.set("agent_id", p.agentFilter.trim());
+  if (p.expeditorFilter.trim()) params.set("expeditor_user_id", p.expeditorFilter.trim());
+  if (p.supervisorFilter.trim()) params.set("supervisor_user_id", p.supervisorFilter.trim());
+  if (p.visitWeekdayFilter.trim()) params.set("visit_weekday", p.visitWeekdayFilter.trim());
+  if (p.innFilter.trim()) params.set("inn", p.innFilter.trim());
+  if (p.phoneFilter.trim()) params.set("phone", p.phoneFilter.trim());
+  if (p.createdFromFilter.trim()) params.set("created_from", p.createdFromFilter.trim());
+  if (p.createdToFilter.trim()) params.set("created_to", p.createdToFilter.trim());
+  params.set("sort", p.sortField);
+  params.set("order", p.sortOrder);
+}
 
 export default function ClientsPage() {
   const router = useRouter();
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
+  const role = useEffectiveRole();
+  const canCatalog = role === "admin" || role === "operator";
   const qc = useQueryClient();
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -51,14 +103,80 @@ export default function ClientsPage() {
   const [regionFilter, setRegionFilter] = useState("");
   const [districtFilter, setDistrictFilter] = useState("");
   const [neighborhoodFilter, setNeighborhoodFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [clientTypeFilter, setClientTypeFilter] = useState("");
+  const [clientFormatFilter, setClientFormatFilter] = useState("");
+  const [salesChannelFilter, setSalesChannelFilter] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [expeditorFilter, setExpeditorFilter] = useState("");
+  const [supervisorFilter, setSupervisorFilter] = useState("");
+  const [visitWeekdayFilter, setVisitWeekdayFilter] = useState("");
+  const [innFilter, setInnFilter] = useState("");
+  const [phoneFilter, setPhoneFilter] = useState("");
+  const [createdFromFilter, setCreatedFromFilter] = useState("");
+  const [createdToFilter, setCreatedToFilter] = useState("");
   const [sortField, setSortField] = useState<"name" | "phone" | "id" | "created_at" | "region">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [pageLimit, setPageLimit] = useState(30);
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(getDefaultColumnVisibility);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   useEffect(() => {
     setColumnVisibility(loadColumnVisibility());
   }, []);
+
+  const filterBundle: FilterBundle = {
+    search,
+    activeFilter,
+    categoryFilter,
+    regionFilter,
+    districtFilter,
+    neighborhoodFilter,
+    zoneFilter,
+    clientTypeFilter,
+    clientFormatFilter,
+    salesChannelFilter,
+    agentFilter,
+    expeditorFilter,
+    supervisorFilter,
+    visitWeekdayFilter,
+    innFilter,
+    phoneFilter,
+    createdFromFilter,
+    createdToFilter,
+    sortField,
+    sortOrder
+  };
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [
+    tenantSlug,
+    search,
+    activeFilter,
+    categoryFilter,
+    regionFilter,
+    districtFilter,
+    neighborhoodFilter,
+    zoneFilter,
+    clientTypeFilter,
+    clientFormatFilter,
+    salesChannelFilter,
+    agentFilter,
+    expeditorFilter,
+    supervisorFilter,
+    visitWeekdayFilter,
+    innFilter,
+    phoneFilter,
+    createdFromFilter,
+    createdToFilter,
+    sortField,
+    sortOrder,
+    pageLimit
+  ]);
 
   const importMut = useMutation({
     mutationFn: async (file: File) => {
@@ -112,6 +230,30 @@ export default function ClientsPage() {
     }
   });
 
+  const bulkMut = useMutation({
+    mutationFn: async (payload: { client_ids: number[]; is_active: boolean }) => {
+      const slug = tenantSlug;
+      if (!slug) throw new Error("TenantRequired");
+      const { data: body } = await api.patch<{ updated: number }>(
+        `/api/${slug}/clients/bulk-active`,
+        payload
+      );
+      return body;
+    },
+    onSuccess: (body) => {
+      setBulkMsg(`Yangilandi: ${body.updated} ta`);
+      setSelectedIds(new Set());
+      void qc.invalidateQueries({ queryKey: ["clients", tenantSlug] });
+    },
+    onError: (e: unknown) => {
+      if (isAxiosError(e) && e.response?.status === 403) {
+        setBulkMsg("Ruxsat yo‘q (faqat admin yoki operator).");
+        return;
+      }
+      setBulkMsg("Guruh yangilashi muvaffaqiyatsiz.");
+    }
+  });
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "clients",
@@ -123,6 +265,18 @@ export default function ClientsPage() {
       regionFilter,
       districtFilter,
       neighborhoodFilter,
+      zoneFilter,
+      clientTypeFilter,
+      clientFormatFilter,
+      salesChannelFilter,
+      agentFilter,
+      expeditorFilter,
+      supervisorFilter,
+      visitWeekdayFilter,
+      innFilter,
+      phoneFilter,
+      createdFromFilter,
+      createdToFilter,
       sortField,
       sortOrder,
       pageLimit
@@ -131,16 +285,9 @@ export default function ClientsPage() {
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
-        limit: String(pageLimit),
-        sort: sortField,
-        order: sortOrder
+        limit: String(pageLimit)
       });
-      if (search.trim()) params.set("search", search.trim());
-      if (activeFilter !== "all") params.set("is_active", activeFilter);
-      if (categoryFilter.trim()) params.set("category", categoryFilter.trim());
-      if (regionFilter.trim()) params.set("region", regionFilter.trim());
-      if (districtFilter.trim()) params.set("district", districtFilter.trim());
-      if (neighborhoodFilter.trim()) params.set("neighborhood", neighborhoodFilter.trim());
+      appendClientsFilterParams(params, filterBundle);
       const { data: body } = await api.get<ClientsResponse>(
         `/api/${tenantSlug}/clients?${params.toString()}`
       );
@@ -157,6 +304,45 @@ export default function ClientsPage() {
     }
   });
 
+  const agentsFilterQ = useQuery({
+    queryKey: ["agents", tenantSlug, "clients-toolbar"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/agents`);
+      return data.data
+        .filter((r) => r.is_active)
+        .map((r) => ({ id: r.id, name: r.fio, login: r.login }));
+    }
+  });
+
+  const expeditorsFilterQ = useQuery({
+    queryKey: ["expeditors", tenantSlug, "clients-toolbar"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/expeditors`);
+      return data.data
+        .filter((r) => r.is_active)
+        .map((r) => ({ id: r.id, name: r.fio, login: r.login }));
+    }
+  });
+
+  const supervisorsFilterQ = useQuery({
+    queryKey: ["supervisors", tenantSlug, "clients-toolbar"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/supervisors`);
+      return data.data
+        .filter((s) => s.is_active)
+        .map((s) => ({ id: s.id, name: s.fio, login: s.login }));
+    }
+  });
+
   const rows = data?.data ?? [];
 
   return (
@@ -166,6 +352,9 @@ export default function ClientsPage() {
         description={tenantSlug ? `Tenant: ${tenantSlug}` : "Ro‘yxat, filtr va ustunlar"}
         actions={
           <>
+            <Link className={cn(buttonVariants({ variant: "default", size: "sm" }))} href="/clients/new">
+              Yangi mijoz
+            </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
               Boshqaruv
             </Link>
@@ -217,6 +406,94 @@ export default function ClientsPage() {
         >
           Excel import
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={rows.length === 0}
+          onClick={() => {
+            downloadClientsCsvPage(rows, `mijozlar_sahifa_${page}.csv`);
+          }}
+        >
+          CSV (joriy sahifa)
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!canCatalog || !tenantSlug || exportBusy}
+          onClick={async () => {
+            if (!tenantSlug || !canCatalog) return;
+            setExportMsg(null);
+            setExportBusy(true);
+            try {
+              const params = new URLSearchParams({ page: "1", limit: "50" });
+              appendClientsFilterParams(params, filterBundle);
+              const res = await api.get<Blob>(`/api/${tenantSlug}/clients/export?${params.toString()}`, {
+                responseType: "blob"
+              });
+              const truncated = String(res.headers["x-clients-export-truncated"] ?? "") === "1";
+              const total = String(res.headers["x-clients-export-total"] ?? "");
+              const blob = new Blob([res.data as BlobPart], { type: "text/csv;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `mijozlar_filtr_${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+              if (truncated) {
+                setExportMsg(
+                  `Eksport: jami mos ${total} ta; faylda dastlabki 10 000 qator (qolganlari kesilgan).`
+                );
+              } else if (total) {
+                setExportMsg(`Eksport: ${total} ta qator.`);
+              }
+            } catch {
+              setExportMsg("Filtr bo‘yicha CSV yuklab bo‘lmadi (ruxsat yoki tarmoq).");
+            } finally {
+              setExportBusy(false);
+            }
+          }}
+        >
+          {exportBusy ? "CSV…" : "CSV (barcha filtr)"}
+        </Button>
+        {canCatalog ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={
+                selectedIds.size === 0 || selectedIds.size > 500 || bulkMut.isPending || !tenantSlug
+              }
+              title={selectedIds.size > 500 ? "Bir vaqtda 500 tadan oshmasin" : undefined}
+              onClick={() => {
+                setBulkMsg(null);
+                bulkMut.mutate({ client_ids: Array.from(selectedIds), is_active: true });
+              }}
+            >
+              Tanlangan → faol
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={
+                selectedIds.size === 0 || selectedIds.size > 500 || bulkMut.isPending || !tenantSlug
+              }
+              title={selectedIds.size > 500 ? "Bir vaqtda 500 tadan oshmasin" : undefined}
+              onClick={() => {
+                setBulkMsg(null);
+                bulkMut.mutate({ client_ids: Array.from(selectedIds), is_active: false });
+              }}
+            >
+              Tanlangan → nofaol
+            </Button>
+            {selectedIds.size > 0 ? (
+              <span className="text-sm text-muted-foreground">Tanlangan: {selectedIds.size}</span>
+            ) : null}
+          </>
+        ) : null}
         <input
           ref={importFileRef}
           type="file"
@@ -243,6 +520,8 @@ export default function ClientsPage() {
           }}
         />
         {importMsg ? <span className="text-sm text-muted-foreground">{importMsg}</span> : null}
+        {exportMsg ? <span className="text-sm text-muted-foreground">{exportMsg}</span> : null}
+        {bulkMsg ? <span className="text-sm text-muted-foreground">{bulkMsg}</span> : null}
       </div>
 
       <ClientsTableToolbar
@@ -276,10 +555,81 @@ export default function ClientsPage() {
           setNeighborhoodFilter(v);
           setPage(1);
         }}
+        zoneFilter={zoneFilter}
+        onZoneFilterChange={(v) => {
+          setZoneFilter(v);
+          setPage(1);
+        }}
+        clientTypeFilter={clientTypeFilter}
+        onClientTypeFilterChange={(v) => {
+          setClientTypeFilter(v);
+          setPage(1);
+        }}
+        clientFormatFilter={clientFormatFilter}
+        onClientFormatFilterChange={(v) => {
+          setClientFormatFilter(v);
+          setPage(1);
+        }}
+        salesChannelFilter={salesChannelFilter}
+        onSalesChannelFilterChange={(v) => {
+          setSalesChannelFilter(v);
+          setPage(1);
+        }}
+        agentFilter={agentFilter}
+        onAgentFilterChange={(v) => {
+          setAgentFilter(v);
+          setPage(1);
+        }}
+        expeditorFilter={expeditorFilter}
+        onExpeditorFilterChange={(v) => {
+          setExpeditorFilter(v);
+          setPage(1);
+        }}
+        supervisorFilter={supervisorFilter}
+        onSupervisorFilterChange={(v) => {
+          setSupervisorFilter(v);
+          setPage(1);
+        }}
+        visitWeekdayFilter={visitWeekdayFilter}
+        onVisitWeekdayFilterChange={(v) => {
+          setVisitWeekdayFilter(v);
+          setPage(1);
+        }}
+        innFilter={innFilter}
+        onInnFilterChange={(v) => {
+          setInnFilter(v);
+          setPage(1);
+        }}
+        phoneFilter={phoneFilter}
+        onPhoneFilterChange={(v) => {
+          setPhoneFilter(v);
+          setPage(1);
+        }}
+        createdFromFilter={createdFromFilter}
+        onCreatedFromFilterChange={(v) => {
+          setCreatedFromFilter(v);
+          setPage(1);
+        }}
+        createdToFilter={createdToFilter}
+        onCreatedToFilterChange={(v) => {
+          setCreatedToFilter(v);
+          setPage(1);
+        }}
+        onApplyToolbar={() => {
+          void refetch();
+          setFiltersVisible(false);
+        }}
         categoryOptions={refsQ.data?.categories ?? []}
         regionOptions={refsQ.data?.regions ?? []}
         districtOptions={refsQ.data?.districts ?? []}
         neighborhoodOptions={refsQ.data?.neighborhoods ?? []}
+        zoneOptions={refsQ.data?.zones ?? []}
+        clientTypeOptions={refsQ.data?.client_type_codes ?? []}
+        clientFormatOptions={refsQ.data?.client_formats ?? []}
+        salesChannelOptions={refsQ.data?.sales_channels ?? []}
+        agentOptions={agentsFilterQ.data ?? []}
+        expeditorOptions={expeditorsFilterQ.data ?? []}
+        supervisorOptions={supervisorsFilterQ.data ?? []}
         sortField={sortField}
         onSortFieldChange={(v) => {
           setSortField(v);
@@ -325,6 +675,27 @@ export default function ClientsPage() {
             <ClientsDataTable
               rows={rows}
               visibility={columnVisibility}
+              bulkSelect={canCatalog}
+              selectedIds={selectedIds}
+              onToggleRow={(id, selected) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  if (selected) next.add(id);
+                  else next.delete(id);
+                  return next;
+                });
+              }}
+              onTogglePage={(selectAll) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  if (selectAll) {
+                    for (const r of rows) next.add(r.id);
+                  } else {
+                    for (const r of rows) next.delete(r.id);
+                  }
+                  return next;
+                });
+              }}
               onEdit={(row) => {
                 router.push(`/clients/${row.id}/edit`);
               }}

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClientRow, ContactPersonSlot } from "@/lib/client-types";
+import type { ClientRow } from "@/lib/client-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,21 +8,14 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { api } from "@/lib/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type ClientDetailApi = ClientRow & {
   phone_normalized?: string | null;
   open_orders_total?: string;
 };
-
-function padContacts(raw: ContactPersonSlot[] | undefined): ContactPersonSlot[] {
-  const a = raw ?? [];
-  return Array.from({ length: 10 }, (_, i) => ({
-    firstName: a[i]?.firstName ?? null,
-    lastName: a[i]?.lastName ?? null,
-    phone: a[i]?.phone ?? null
-  }));
-}
 
 function isoToDateInput(iso: string | null): string {
   if (!iso) return "";
@@ -39,35 +32,138 @@ function dateInputToIso(s: string): string | null {
   return d.toISOString();
 }
 
-type AgentSlotForm = { agentId: string; visitDate: string; expeditorPhone: string };
+const VISIT_DAYS: { k: number; l: string }[] = [
+  { k: 1, l: "Du" },
+  { k: 2, l: "Se" },
+  { k: 3, l: "Ch" },
+  { k: 4, l: "Pa" },
+  { k: 5, l: "Ju" },
+  { k: 6, l: "Sh" },
+  { k: 7, l: "Ya" }
+];
+
+const MAX_TEAM_ROWS = 10;
+
+type AgentSlotForm = {
+  agentId: string;
+  expeditorUserId: string;
+  weekdays: number[];
+  /** UI da ko‘rinmaydi — mavjud yozuvni saqlash uchun */
+  legacyVisitDate: string;
+  legacyExpeditorPhone: string;
+};
+
+function emptyAgentSlot(): AgentSlotForm {
+  return { agentId: "", expeditorUserId: "", weekdays: [], legacyVisitDate: "", legacyExpeditorPhone: "" };
+}
+
+function assignmentRowHasData(a: ClientRow["agent_assignments"][number]): boolean {
+  const wd = Array.isArray(a.visit_weekdays) ? a.visit_weekdays.filter((x) => x >= 1 && x <= 7) : [];
+  return (
+    a.agent_id != null ||
+    a.expeditor_user_id != null ||
+    wd.length > 0 ||
+    (a.visit_date != null && String(a.visit_date).trim() !== "") ||
+    (a.expeditor_phone != null && a.expeditor_phone.trim() !== "")
+  );
+}
 
 function buildAgentSlots(client: ClientRow): AgentSlotForm[] {
-  const slots: AgentSlotForm[] = Array.from({ length: 10 }, () => ({
-    agentId: "",
-    visitDate: "",
-    expeditorPhone: ""
-  }));
   const list = client.agent_assignments;
-  if (Array.isArray(list)) {
-    for (const a of list) {
-      const i = a.slot - 1;
-      if (i < 0 || i > 9) continue;
-      slots[i] = {
+  const rows: AgentSlotForm[] = [];
+  if (Array.isArray(list) && list.length > 0) {
+    const sorted = [...list].sort((a, b) => a.slot - b.slot);
+    for (const a of sorted) {
+      if (!assignmentRowHasData(a)) continue;
+      const wd = Array.isArray(a.visit_weekdays) ? a.visit_weekdays.filter((x) => x >= 1 && x <= 7) : [];
+      rows.push({
         agentId: a.agent_id != null ? String(a.agent_id) : "",
-        visitDate: isoToDateInput(a.visit_date),
-        expeditorPhone: a.expeditor_phone ?? ""
-      };
+        expeditorUserId: a.expeditor_user_id != null ? String(a.expeditor_user_id) : "",
+        weekdays: wd,
+        legacyVisitDate: isoToDateInput(a.visit_date),
+        legacyExpeditorPhone: a.expeditor_phone ?? ""
+      });
     }
-    return slots;
   }
-  if (client.agent_id != null) {
-    slots[0] = {
+  if (rows.length === 0 && client.agent_id != null) {
+    rows.push({
       agentId: String(client.agent_id),
-      visitDate: isoToDateInput(client.visit_date),
-      expeditorPhone: ""
-    };
+      expeditorUserId: "",
+      weekdays: [],
+      legacyVisitDate: isoToDateInput(client.visit_date),
+      legacyExpeditorPhone: ""
+    });
   }
-  return slots;
+  return rows.length > 0 ? rows : [emptyAgentSlot()];
+}
+
+function toggleWeekday(slot: AgentSlotForm, day: number): number[] {
+  const set = new Set(slot.weekdays);
+  if (set.has(day)) set.delete(day);
+  else set.add(day);
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+function mergeRefOptions(current: string, list: string[] | undefined): string[] {
+  const s = new Set<string>();
+  for (const x of list ?? []) {
+    const t = x?.trim();
+    if (t) s.add(t);
+  }
+  const c = current.trim();
+  if (c) s.add(c);
+  return Array.from(s).sort((a, b) => a.localeCompare(b, "uz"));
+}
+
+function Caption({ children, variant }: { children: ReactNode; variant?: "write" | "pick" }) {
+  return (
+    <p
+      className={cn(
+        "text-[11px] font-medium uppercase tracking-wide",
+        variant === "write" && "text-blue-600 dark:text-blue-400",
+        variant === "pick" && "text-emerald-700 dark:text-emerald-400",
+        !variant && "text-muted-foreground"
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
+function SpravochnikAdminLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+    >
+      {children}
+    </Link>
+  );
+}
+
+/** Standart markaz (Toshkent atrofi) */
+const MAP_DEFAULT_LAT = 41.311081;
+const MAP_DEFAULT_LON = 69.279737;
+
+/**
+ * Ichki ko‘rinish: OpenStreetMap embed (CSP sababli Yandex map-widget `cs.js` xatolarini bermaydi).
+ * Yandex — faqat qidiruv va «to‘liq xarita» havolalari orqali.
+ */
+function openStreetMapEmbedUrl(lat: number, lon: number, withMarker: boolean): string {
+  const dLat = withMarker ? 0.006 : 0.11;
+  const dLon = withMarker ? 0.008 : 0.14;
+  const minLon = lon - dLon;
+  const minLat = lat - dLat;
+  const maxLon = lon + dLon;
+  const maxLat = lat + dLat;
+  const bbox = `${minLon},${minLat},${maxLon},${maxLat}`;
+  let url = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik`;
+  if (withMarker) {
+    url += `&marker=${encodeURIComponent(`${lat},${lon}`)}`;
+  }
+  return url;
 }
 
 type Props = {
@@ -80,6 +176,7 @@ type Props = {
 export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Props) {
   const qc = useQueryClient();
   const [localError, setLocalError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"main" | "extra">("main");
 
   const [name, setName] = useState("");
   const [legalName, setLegalName] = useState("");
@@ -105,10 +202,21 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const [gpsText, setGpsText] = useState("");
   const [notes, setNotes] = useState("");
   const [clientFormat, setClientFormat] = useState("");
-  const [agentSlots, setAgentSlots] = useState<AgentSlotForm[]>(() =>
-    Array.from({ length: 10 }, () => ({ agentId: "", visitDate: "", expeditorPhone: "" }))
-  );
-  const [contacts, setContacts] = useState<ContactPersonSlot[]>(padContacts([]));
+  const [clientCode, setClientCode] = useState("");
+  const [salesChannel, setSalesChannel] = useState("");
+  const [productCategoryRef, setProductCategoryRef] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccount, setBankAccount] = useState("");
+  const [bankMfo, setBankMfo] = useState("");
+  const [clientPinfl, setClientPinfl] = useState("");
+  const [oked, setOked] = useState("");
+  const [contractNumber, setContractNumber] = useState("");
+  const [vatRegCode, setVatRegCode] = useState("");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [zone, setZone] = useState("");
+  const [mapSearchText, setMapSearchText] = useState("");
+  const [agentSlots, setAgentSlots] = useState<AgentSlotForm[]>(() => [emptyAgentSlot()]);
 
   const clientQ = useQuery({
     queryKey: ["client", tenantSlug, clientId],
@@ -119,14 +227,29 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     }
   });
 
-  const usersQ = useQuery({
-    queryKey: ["users", tenantSlug, "client-edit"],
+  const agentsPickerQ = useQuery({
+    queryKey: ["agents", tenantSlug, "client-edit"],
     enabled: Boolean(tenantSlug),
     queryFn: async () => {
-      const { data } = await api.get<{ data: Array<{ id: number; name: string; login: string }> }>(
-        `/api/${tenantSlug}/users`
-      );
-      return data.data;
+      const { data } = await api.get<{
+        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/agents`);
+      return data.data
+        .filter((r) => r.is_active)
+        .map((r) => ({ id: r.id, name: r.fio, login: r.login }));
+    }
+  });
+
+  const expeditorsPickerQ = useQuery({
+    queryKey: ["expeditors", tenantSlug, "client-edit"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/expeditors`);
+      return data.data
+        .filter((r) => r.is_active)
+        .map((r) => ({ id: r.id, name: r.fio, login: r.login }));
     }
   });
 
@@ -140,12 +263,47 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         regions: string[];
         districts: string[];
         neighborhoods: string[];
+        zones: string[];
         client_formats: string[];
+        sales_channels: string[];
+        product_category_refs: string[];
         logistics_services: string[];
       }>(`/api/${tenantSlug}/clients/references`);
       return data;
     }
   });
+
+  const catOpts = useMemo(
+    () => mergeRefOptions(category, refsQ.data?.categories),
+    [category, refsQ.data?.categories]
+  );
+  const typeOpts = useMemo(
+    () => mergeRefOptions(clientTypeCode, refsQ.data?.client_type_codes),
+    [clientTypeCode, refsQ.data?.client_type_codes]
+  );
+  const terrOpts = useMemo(() => mergeRefOptions(region, refsQ.data?.regions), [region, refsQ.data?.regions]);
+  const formatOpts = useMemo(
+    () => mergeRefOptions(clientFormat, refsQ.data?.client_formats),
+    [clientFormat, refsQ.data?.client_formats]
+  );
+  const salesOpts = useMemo(
+    () => mergeRefOptions(salesChannel, refsQ.data?.sales_channels),
+    [salesChannel, refsQ.data?.sales_channels]
+  );
+  const prodCatOpts = useMemo(
+    () => mergeRefOptions(productCategoryRef, refsQ.data?.product_category_refs),
+    [productCategoryRef, refsQ.data?.product_category_refs]
+  );
+  const distOpts = useMemo(() => mergeRefOptions(district, refsQ.data?.districts), [district, refsQ.data?.districts]);
+  const neiOpts = useMemo(
+    () => mergeRefOptions(neighborhood, refsQ.data?.neighborhoods),
+    [neighborhood, refsQ.data?.neighborhoods]
+  );
+  const zoneOpts = useMemo(() => mergeRefOptions(zone, refsQ.data?.zones), [zone, refsQ.data?.zones]);
+  const logOpts = useMemo(
+    () => mergeRefOptions(logisticsService, refsQ.data?.logistics_services),
+    [logisticsService, refsQ.data?.logistics_services]
+  );
 
   useEffect(() => {
     const client = clientQ.data;
@@ -175,8 +333,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     setGpsText(client.gps_text ?? "");
     setNotes(client.notes ?? "");
     setClientFormat(client.client_format ?? "");
+    setClientCode(client.client_code ?? "");
+    setSalesChannel(client.sales_channel ?? "");
+    setProductCategoryRef(client.product_category_ref ?? "");
+    setBankName(client.bank_name ?? "");
+    setBankAccount(client.bank_account ?? "");
+    setBankMfo(client.bank_mfo ?? "");
+    setClientPinfl(client.client_pinfl ?? "");
+    setOked(client.oked ?? "");
+    setContractNumber(client.contract_number ?? "");
+    setVatRegCode(client.vat_reg_code ?? "");
+    setLatitude(client.latitude ?? "");
+    setLongitude(client.longitude ?? "");
+    setZone(client.zone ?? "");
     setAgentSlots(buildAgentSlots(client));
-    setContacts(padContacts(client.contact_persons));
   }, [clientQ.data]);
 
   const mutation = useMutation({
@@ -187,7 +357,15 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         throw new Error("Kredit limiti noto‘g‘ri");
       }
 
-      const agent_assignments = agentSlots.map((s, idx) => {
+      const filled = agentSlots.filter(
+        (s) =>
+          s.agentId.trim() !== "" ||
+          s.expeditorUserId.trim() !== "" ||
+          s.weekdays.length > 0 ||
+          s.legacyVisitDate.trim() !== "" ||
+          s.legacyExpeditorPhone.trim() !== ""
+      );
+      const agent_assignments = filled.map((s, idx) => {
         const slot = idx + 1;
         let agent_id: number | null = null;
         if (s.agentId.trim() !== "") {
@@ -195,11 +373,19 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
           if (!Number.isFinite(n) || n <= 0) throw new Error(`Agent #${slot} tanlovi noto‘g‘ri`);
           agent_id = n;
         }
+        let expeditor_user_id: number | null = null;
+        if (s.expeditorUserId.trim() !== "") {
+          const e = Number.parseInt(s.expeditorUserId, 10);
+          if (!Number.isFinite(e) || e <= 0) throw new Error(`Dastavchik #${slot} noto‘g‘ri`);
+          expeditor_user_id = e;
+        }
         return {
           slot,
           agent_id,
-          visit_date: s.visitDate.trim() ? dateInputToIso(s.visitDate) : null,
-          expeditor_phone: s.expeditorPhone.trim() || null
+          visit_date: s.legacyVisitDate.trim() ? dateInputToIso(s.legacyVisitDate) : null,
+          expeditor_phone: s.legacyExpeditorPhone.trim() || null,
+          expeditor_user_id,
+          visit_weekdays: s.weekdays.length ? s.weekdays : undefined
         };
       });
 
@@ -228,12 +414,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         gps_text: gpsText.trim() || null,
         notes: notes.trim() || null,
         client_format: clientFormat.trim() || null,
-        agent_assignments,
-        contact_persons: contacts.map((c) => ({
-          firstName: c.firstName?.trim() || null,
-          lastName: c.lastName?.trim() || null,
-          phone: c.phone?.trim() || null
-        }))
+        client_code: clientCode.trim().slice(0, 20) || null,
+        sales_channel: salesChannel.trim() || null,
+        product_category_ref: productCategoryRef.trim() || null,
+        bank_name: bankName.trim() || null,
+        bank_account: bankAccount.trim() || null,
+        bank_mfo: bankMfo.trim() || null,
+        client_pinfl: clientPinfl.trim() || null,
+        oked: oked.trim() || null,
+        contract_number: contractNumber.trim() || null,
+        vat_reg_code: vatRegCode.trim() || null,
+        latitude: latitude.trim() === "" ? null : latitude.trim(),
+        longitude: longitude.trim() === "" ? null : longitude.trim(),
+        zone: zone.trim() || null,
+        agent_assignments
       };
       const { data } = await api.patch(`/api/${tenantSlug}/clients/${clientId}`, body);
       return data;
@@ -260,7 +454,19 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   });
 
   const inputCls =
-    "flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+  const selectCls = inputCls;
+
+  const latN = latitude.trim().replace(",", ".");
+  const lonN = longitude.trim().replace(",", ".");
+  const mapOk =
+    latN !== "" && lonN !== "" && Number.isFinite(Number.parseFloat(latN)) && Number.isFinite(Number.parseFloat(lonN));
+  const latNum = mapOk ? Number.parseFloat(latN) : MAP_DEFAULT_LAT;
+  const lonNum = mapOk ? Number.parseFloat(lonN) : MAP_DEFAULT_LON;
+  const mapEmbedUrl = openStreetMapEmbedUrl(latNum, lonNum, mapOk);
+  const yandexMapsHref = mapOk
+    ? `https://yandex.com/maps/?pt=${encodeURIComponent(lonN)},${encodeURIComponent(latN)}&z=17&l=map`
+    : `https://yandex.com/maps/?ll=${encodeURIComponent(String(MAP_DEFAULT_LON))}%2C${encodeURIComponent(String(MAP_DEFAULT_LAT))}&z=11`;
 
   if (clientQ.isError) {
     return (
@@ -279,10 +485,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 pb-10">
+    <div className="mx-auto flex w-full max-w-[min(100%,90rem)] flex-col gap-4 px-3 pb-10 pt-1 sm:px-4 lg:px-6">
       <PageHeader
-        title="Mijoz kartochkasi"
-        description="Barcha maydonlarni to‘liq sahifada tahrirlash"
+        title="Mijozni tahrirlash"
+        description="Asosiy varaqda: yuqorida yoziladi, pastda spravochnikdan tanlanadi. Jamoa va xarita o‘ngda."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={onCancel}>
             Orqaga
@@ -290,349 +496,678 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         }
       />
 
-      <p className="text-xs text-muted-foreground">Bo‘sh maydonlar keyinroq to‘ldirilishi mumkin.</p>
-
-      <section className="grid gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Asosiy</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-name">Nomi</Label>
-            <Input id="ce-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-legal">Yuridik nom</Label>
-            <Input
-              id="ce-legal"
-              value={legalName}
-              onChange={(e) => setLegalName(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-phone">Telefon</Label>
-            <Input id="ce-phone" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-credit">Kredit limiti (UZS)</Label>
-            <Input
-              id="ce-credit"
-              type="text"
-              inputMode="decimal"
-              value={creditLimit}
-              onChange={(e) => setCreditLimit(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-cat">Toifa</Label>
-            <Input
-              id="ce-cat"
-              list="client-categories-list"
-              placeholder="masalan retail"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-type-code">Mijoz turi (kod)</Label>
-            <Input
-              id="ce-type-code"
-              list="client-type-codes-list"
-              value={clientTypeCode}
-              onChange={(e) => setClientTypeCode(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-format">Mijoz formati</Label>
-            <Input
-              id="ce-format"
-              list="client-formats-list"
-              value={clientFormat}
-              onChange={(e) => setClientFormat(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="flex items-center gap-2 pt-6">
-            <input
-              id="ce-active"
-              type="checkbox"
-              className="h-4 w-4 rounded border-input accent-primary"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              disabled={mutation.isPending}
-            />
-            <Label htmlFor="ce-active" className="font-normal">
-              Faol
-            </Label>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs">
+        <div className="flex flex-wrap gap-3">
+          <span>
+            <span className="text-blue-600 dark:text-blue-400">■</span> Yoziladi (klaviatura)
+          </span>
+          <span>
+            <span className="text-emerald-700 dark:text-emerald-400">■</span> Tanlanadi (
+            <Link href="/settings/spravochnik/client-lists" className="underline underline-offset-2">
+              mijoz spravochniklari
+            </Link>
+            ,{" "}
+            <Link href="/settings/spravochnik/agents" className="underline underline-offset-2">
+              agentlar
+            </Link>
+            ,{" "}
+            <Link href="/settings/spravochnik/expeditors" className="underline underline-offset-2">
+              ekspeditorlar
+            </Link>
+            )
+          </span>
         </div>
-      </section>
+      </div>
 
-      <section className="grid gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agentlar (10 slot)</h3>
-        <p className="text-xs text-muted-foreground">Har bir qatorda agent, tashrif sanasi va ekspeditor telefoni.</p>
-        <div className="space-y-3">
-          {agentSlots.map((slot, idx) => (
-            <div
-              key={idx}
-              className="grid gap-2 rounded-md border border-dashed p-3 sm:grid-cols-[auto_1fr_1fr_1fr] sm:items-end"
-            >
-              <span className="text-xs font-medium text-muted-foreground sm:pt-2">#{idx + 1}</span>
-              <div className="grid gap-1">
-                <Label className="text-xs">Agent</Label>
-                <select
-                  className={inputCls}
-                  value={slot.agentId}
-                  onChange={(e) => {
-                    const next = [...agentSlots];
-                    next[idx] = { ...next[idx], agentId: e.target.value };
-                    setAgentSlots(next);
+      <div className="flex flex-wrap gap-1 border-b border-border">
+        {(
+          [
+            ["main", "Asosiy ma’lumotlar"],
+            ["extra", "Qo‘shimcha ma’lumotlar"]
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={cn(
+              "rounded-t-md border border-b-0 px-3 py-2 text-sm font-medium transition-colors",
+              tab === id
+                ? "border-border bg-background text-foreground"
+                : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/60"
+            )}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "main" && (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.95fr)] xl:gap-8">
+          <div className="flex flex-col gap-6">
+            <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+              <Caption variant="write">Yoziladi (klaviatura)</Caption>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nomi, manzil, telefon va hokazo — to‘g‘ridan-to‘g‘ri kiritiladi.
+              </p>
+              <div className="mt-4 grid gap-4">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-name">Nomi</Label>
+                  <Input id="ce-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-legal">Yuridik / firma nomi</Label>
+                  <Input
+                    id="ce-legal"
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-addr">Manzil</Label>
+                  <Input id="ce-addr" value={address} onChange={(e) => setAddress(e.target.value)} disabled={mutation.isPending} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-land">Mo‘ljal</Label>
+                  <Input id="ce-land" value={landmark} onChange={(e) => setLandmark(e.target.value)} disabled={mutation.isPending} />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ce-phone">Telefon</Label>
+                    <Input id="ce-phone" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={mutation.isPending} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="ce-code">Kod</Label>
+                    <Input
+                      id="ce-code"
+                      maxLength={20}
+                      value={clientCode}
+                      onChange={(e) => setClientCode(e.target.value)}
+                      disabled={mutation.isPending}
+                    />
+                    <span className="text-[10px] text-muted-foreground">{clientCode.length} / 20</span>
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-contact">Kontakt shaxs</Label>
+                  <Input
+                    id="ce-contact"
+                    placeholder="FIO yoki qisqa eslatma"
+                    value={responsiblePerson}
+                    onChange={(e) => setResponsiblePerson(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="flex items-center gap-2 rounded-md border border-dashed border-border/80 bg-muted/20 px-3 py-2">
+                  <input
+                    id="ce-active"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-input accent-primary"
+                    checked={isActive}
+                    onChange={(e) => setIsActive(e.target.checked)}
+                    disabled={mutation.isPending}
+                  />
+                  <Label htmlFor="ce-active" className="font-normal">
+                    Faol
+                  </Label>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-notes">Izoh</Label>
+                  <textarea
+                    id="ce-notes"
+                    className={`${inputCls} min-h-[100px] resize-y py-2.5`}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+              <Caption variant="pick">Spravochnikdan tanlanadi</Caption>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Ro‘yxatlarni administrator{" "}
+                <SpravochnikAdminLink href="/settings/spravochnik/client-lists">mijoz spravochniklari</SpravochnikAdminLink>{" "}
+                va <SpravochnikAdminLink href="/settings/company#ref-regions">kompaniya hududlari</SpravochnikAdminLink>{" "}
+                bo‘limlarida to‘ldiradi.
+              </p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Toifa</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-category">Qiymatlar</SpravochnikAdminLink>
+                  </div>
+                  <select
+                    className={selectCls}
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {catOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Tur (kod)</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-type">Qiymatlar</SpravochnikAdminLink>
+                  </div>
+                  <select
+                    className={selectCls}
+                    value={clientTypeCode}
+                    onChange={(e) => setClientTypeCode(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {typeOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Teritoriya</Label>
+                    <SpravochnikAdminLink href="/settings/company#ref-regions">Hududlar</SpravochnikAdminLink>
+                  </div>
+                  <select
+                    className={selectCls}
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {terrOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Mijoz formati</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-format">Qiymatlar</SpravochnikAdminLink>
+                  </div>
+                  <select
+                    className={selectCls}
+                    value={clientFormat}
+                    onChange={(e) => setClientFormat(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {formatOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+              <Caption>Manzil (batafsil, ixtiyoriy)</Caption>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Tuman, mahalla, zona ro‘yxati avtomatik to‘planadi; yangi qiymatni birinchi marta shu yerda tanlab saqlang.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label>Tuman</Label>
+                  <select
+                    className={selectCls}
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {distOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Mahalla</Label>
+                  <select
+                    className={selectCls}
+                    value={neighborhood}
+                    onChange={(e) => setNeighborhood(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {neiOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Zona</Label>
+                  <select
+                    className={selectCls}
+                    value={zone}
+                    onChange={(e) => setZone(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="">—</option>
+                    {zoneOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label htmlFor="ce-str">Ko‘cha</Label>
+                  <Input id="ce-str" value={street} onChange={(e) => setStreet(e.target.value)} disabled={mutation.isPending} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-house">Uy</Label>
+                  <Input
+                    id="ce-house"
+                    value={houseNumber}
+                    onChange={(e) => setHouseNumber(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ce-apt">Xonadon</Label>
+                  <Input
+                    id="ce-apt"
+                    value={apartment}
+                    onChange={(e) => setApartment(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label htmlFor="ce-gps">GPS matn</Label>
+                  <Input id="ce-gps" value={gpsText} onChange={(e) => setGpsText(e.target.value)} disabled={mutation.isPending} />
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+              <Caption variant="write">Xarita</Caption>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Oldindan ko‘rinish — OpenStreetMap (brauzer konsoli toza). Aniq nuqta uchun kenglik/uzunlik kiriting.
+                Yandex — qidiruv va pastdagi havola.
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                <Input
+                  className={cn(inputCls, "sm:flex-1")}
+                  placeholder="Manzil yoki obyekt (Yandex da qidirish)"
+                  value={mapSearchText}
+                  onChange={(e) => setMapSearchText(e.target.value)}
+                  disabled={mutation.isPending}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const t = mapSearchText.trim();
+                    if (!t) return;
+                    window.open(`https://yandex.com/maps/?text=${encodeURIComponent(t)}`, "_blank", "noopener,noreferrer");
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-10 shrink-0 sm:w-auto"
+                  disabled={mutation.isPending || !mapSearchText.trim()}
+                  onClick={() => {
+                    const t = mapSearchText.trim();
+                    if (!t) return;
+                    window.open(`https://yandex.com/maps/?text=${encodeURIComponent(t)}`, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  Qidirish
+                </Button>
+              </div>
+              <div className="relative mt-3 overflow-hidden rounded-lg border bg-muted/30">
+                <iframe
+                  title="Xarita — OpenStreetMap"
+                  src={mapEmbedUrl}
+                  width="100%"
+                  height={420}
+                  className="block min-h-[280px] w-full border-0 sm:min-h-[360px]"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+                {!mapOk ? (
+                  <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-background/95 px-2 py-1.5 text-center text-[11px] text-muted-foreground shadow-sm ring-1 ring-border/60">
+                    Aniq nuqta: pastdagi kenglik va uzunlikni kiriting
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="grid gap-1">
+                  <Label htmlFor="ce-lat">Kenglik</Label>
+                  <Input
+                    id="ce-lat"
+                    inputMode="decimal"
+                    value={latitude}
+                    onChange={(e) => setLatitude(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="ce-lon">Uzunlik</Label>
+                  <Input
+                    id="ce-lon"
+                    inputMode="decimal"
+                    value={longitude}
+                    onChange={(e) => setLongitude(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLatitude("");
+                    setLongitude("");
                   }}
                   disabled={mutation.isPending}
                 >
+                  Koordinatalarni tozalash
+                </Button>
+                <a
+                  href={yandexMapsHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center text-sm text-primary underline-offset-4 hover:underline"
+                >
+                  {mapOk ? "To‘liq xaritada ochish" : "Yandex xaritasi (yangi oyna)"}
+                </a>
+              </div>
+            </section>
+
+            <div className="rounded-lg border bg-card p-4 shadow-sm">
+              <Caption variant="pick">Jamoa (agent / dastavchik — foydalanuvchilar bo‘limida)</Caption>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Bir nechta jamoani ketma-ket qo‘shishingiz mumkin (maks. {MAX_TEAM_ROWS}).
+              </p>
+              <div className="mt-3 space-y-3">
+                {agentSlots.map((slot, idx) => (
+                  <div key={idx} className="rounded-md border bg-background p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">Jamoa {idx + 1}</span>
+                      {agentSlots.length > 1 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-destructive hover:text-destructive"
+                          disabled={mutation.isPending}
+                          onClick={() => {
+                            setAgentSlots((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+                          }}
+                        >
+                          O‘chirish
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="grid gap-1.5">
+                        <Label className="text-xs">Agent</Label>
+                        <select
+                          className={selectCls}
+                          value={slot.agentId}
+                          onChange={(e) => {
+                            const next = [...agentSlots];
+                            next[idx] = { ...next[idx], agentId: e.target.value };
+                            setAgentSlots(next);
+                          }}
+                          disabled={mutation.isPending}
+                        >
+                          <option value="">—</option>
+                          {(agentsPickerQ.data ?? []).map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.login})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label className="text-xs">Dastavchik</Label>
+                        <select
+                          className={selectCls}
+                          value={slot.expeditorUserId}
+                          onChange={(e) => {
+                            const next = [...agentSlots];
+                            next[idx] = { ...next[idx], expeditorUserId: e.target.value };
+                            setAgentSlots(next);
+                          }}
+                          disabled={mutation.isPending}
+                        >
+                          <option value="">—</option>
+                          {(expeditorsPickerQ.data ?? []).map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.login})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <Label className="text-xs text-muted-foreground">Tashrif kuni (hafta)</Label>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {VISIT_DAYS.map(({ k, l }) => (
+                          <label key={k} className="flex cursor-pointer items-center gap-1.5 text-xs">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 rounded border-input accent-primary"
+                              checked={slot.weekdays.includes(k)}
+                              onChange={() => {
+                                const next = [...agentSlots];
+                                next[idx] = { ...next[idx], weekdays: toggleWeekday(next[idx], k) };
+                                setAgentSlots(next);
+                              }}
+                              disabled={mutation.isPending}
+                            />
+                            {l}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={mutation.isPending || agentSlots.length >= MAX_TEAM_ROWS}
+                  onClick={() => setAgentSlots((prev) => (prev.length >= MAX_TEAM_ROWS ? prev : [...prev, emptyAgentSlot()]))}
+                >
+                  Qo‘shish
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "extra" && (
+        <div className="mx-auto w-full max-w-4xl space-y-6">
+          <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+            <Caption variant="pick">Spravochnikdan tanlanadi</Caption>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Qiymatlar{" "}
+              <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">mijoz spravochniklari</SpravochnikAdminLink>{" "}
+              bo‘limida yaratiladi.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="mb-0">Mahsulot toifasi</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">Qiymatlar</SpravochnikAdminLink>
+                </div>
+                <select
+                  className={selectCls}
+                  value={productCategoryRef}
+                  onChange={(e) => setProductCategoryRef(e.target.value)}
+                  disabled={mutation.isPending}
+                >
                   <option value="">—</option>
-                  {(usersQ.data ?? []).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.login})
+                  {prodCatOpts.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
                     </option>
                   ))}
                 </select>
               </div>
-              <div className="grid gap-1">
-                <Label className="text-xs">Tashrif sanasi</Label>
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="mb-0">Savdo kanali</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-sales">Qiymatlar</SpravochnikAdminLink>
+                </div>
+                <select
+                  className={selectCls}
+                  value={salesChannel}
+                  onChange={(e) => setSalesChannel(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {salesOpts.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-card p-4 shadow-sm">
+            <Caption variant="write">Yoziladi</Caption>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-1.5 sm:col-span-2">
+                <Label htmlFor="ce-bank">Bank</Label>
+                <Input id="ce-bank" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-rs">Hisob raqam</Label>
                 <Input
+                  id="ce-rs"
+                  value={bankAccount}
+                  onChange={(e) => setBankAccount(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-mfo">MFO</Label>
+                <Input id="ce-mfo" value={bankMfo} onChange={(e) => setBankMfo(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-inn">INN</Label>
+                <Input id="ce-inn" value={inn} onChange={(e) => setInn(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-pinfl">JSHSHIR / PINFL</Label>
+                <Input
+                  id="ce-pinfl"
+                  inputMode="numeric"
+                  value={clientPinfl}
+                  onChange={(e) => setClientPinfl(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-oked">OKED / OKONH</Label>
+                <Input id="ce-oked" value={oked} onChange={(e) => setOked(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-contract">Shartnoma №</Label>
+                <Input
+                  id="ce-contract"
+                  value={contractNumber}
+                  onChange={(e) => setContractNumber(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+              <div className="grid gap-1.5 sm:col-span-2">
+                <Label htmlFor="ce-vat">QQS ro‘yxatdan o‘tish kodi</Label>
+                <Input
+                  id="ce-vat"
+                  value={vatRegCode}
+                  onChange={(e) => setVatRegCode(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-card p-4 shadow-sm">
+            <Caption>Boshqa (yoziladi yoki tanlanadi)</Caption>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-credit">Kredit limiti (UZS)</Label>
+                <Input
+                  id="ce-credit"
+                  inputMode="decimal"
+                  value={creditLimit}
+                  onChange={(e) => setCreditLimit(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Logistika xizmati</Label>
+                <select
+                  className={selectCls}
+                  value={logisticsService}
+                  onChange={(e) => setLogisticsService(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {logOpts.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-lic">Litsenziya muddati</Label>
+                <Input
+                  id="ce-lic"
                   type="date"
-                  value={slot.visitDate}
-                  onChange={(e) => {
-                    const next = [...agentSlots];
-                    next[idx] = { ...next[idx], visitDate: e.target.value };
-                    setAgentSlots(next);
-                  }}
+                  value={licenseUntil}
+                  onChange={(e) => setLicenseUntil(e.target.value)}
                   disabled={mutation.isPending}
                 />
               </div>
-              <div className="grid gap-1">
-                <Label className="text-xs">Ekspeditor tel.</Label>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ce-wh">Ish vaqti</Label>
                 <Input
-                  value={slot.expeditorPhone}
-                  onChange={(e) => {
-                    const next = [...agentSlots];
-                    next[idx] = { ...next[idx], expeditorPhone: e.target.value };
-                    setAgentSlots(next);
-                  }}
+                  id="ce-wh"
+                  value={workingHours}
+                  onChange={(e) => setWorkingHours(e.target.value)}
                   disabled={mutation.isPending}
                 />
               </div>
+              <div className="grid gap-1.5 sm:col-span-2 lg:col-span-4">
+                <Label htmlFor="ce-pdl">P-D-L</Label>
+                <Input id="ce-pdl" value={pdl} onChange={(e) => setPdl(e.target.value)} disabled={mutation.isPending} />
+              </div>
             </div>
-          ))}
+          </section>
         </div>
-      </section>
-
-      <section className="grid gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manzil va rekvizitlar</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-addr">Manzil (to‘liq)</Label>
-            <Input id="ce-addr" value={address} onChange={(e) => setAddress(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-resp">Mas’ul shaxs</Label>
-            <Input
-              id="ce-resp"
-              value={responsiblePerson}
-              onChange={(e) => setResponsiblePerson(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-land">Mo‘ljal</Label>
-            <Input id="ce-land" value={landmark} onChange={(e) => setLandmark(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-inn">INN</Label>
-            <Input id="ce-inn" value={inn} onChange={(e) => setInn(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-pdl">P-D-L</Label>
-            <Input id="ce-pdl" value={pdl} onChange={(e) => setPdl(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-log">Logistika xizmati</Label>
-            <Input
-              id="ce-log"
-              list="client-logistics-list"
-              value={logisticsService}
-              onChange={(e) => setLogisticsService(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-lic">Litsenziya muddati</Label>
-            <Input
-              id="ce-lic"
-              type="date"
-              value={licenseUntil}
-              onChange={(e) => setLicenseUntil(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-wh">Ish vaqti</Label>
-            <Input
-              id="ce-wh"
-              value={workingHours}
-              onChange={(e) => setWorkingHours(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-reg">Viloyat</Label>
-            <Input
-              id="ce-reg"
-              list="client-regions-list"
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-dist">Tuman</Label>
-            <Input
-              id="ce-dist"
-              list="client-districts-list"
-              value={district}
-              onChange={(e) => setDistrict(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-nei">Mahalla</Label>
-            <Input
-              id="ce-nei"
-              list="client-neighborhoods-list"
-              value={neighborhood}
-              onChange={(e) => setNeighborhood(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-str">Ko‘cha</Label>
-            <Input id="ce-str" value={street} onChange={(e) => setStreet(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-house">Uy</Label>
-            <Input
-              id="ce-house"
-              value={houseNumber}
-              onChange={(e) => setHouseNumber(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ce-apt">Xonadon</Label>
-            <Input
-              id="ce-apt"
-              value={apartment}
-              onChange={(e) => setApartment(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-gps">GPS</Label>
-            <Input id="ce-gps" value={gpsText} onChange={(e) => setGpsText(e.target.value)} disabled={mutation.isPending} />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="ce-notes">Izoh</Label>
-            <textarea
-              id="ce-notes"
-              className={`${inputCls} min-h-[72px] py-2`}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={mutation.isPending}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Kontaktlar (10 gacha)</h3>
-        <div className="space-y-3">
-          {contacts.map((slot, idx) => (
-            <div key={idx} className="grid gap-2 rounded-md border border-dashed p-2 sm:grid-cols-3">
-              <Input
-                placeholder={`Ism ${idx + 1}`}
-                value={slot.firstName ?? ""}
-                onChange={(e) => {
-                  const next = [...contacts];
-                  next[idx] = { ...next[idx], firstName: e.target.value || null };
-                  setContacts(next);
-                }}
-                disabled={mutation.isPending}
-              />
-              <Input
-                placeholder={`Familiya ${idx + 1}`}
-                value={slot.lastName ?? ""}
-                onChange={(e) => {
-                  const next = [...contacts];
-                  next[idx] = { ...next[idx], lastName: e.target.value || null };
-                  setContacts(next);
-                }}
-                disabled={mutation.isPending}
-              />
-              <Input
-                placeholder={`Telefon ${idx + 1}`}
-                value={slot.phone ?? ""}
-                onChange={(e) => {
-                  const next = [...contacts];
-                  next[idx] = { ...next[idx], phone: e.target.value || null };
-                  setContacts(next);
-                }}
-                disabled={mutation.isPending}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
+      )}
 
       {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
-
-      <datalist id="client-categories-list">
-        {(refsQ.data?.categories ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-type-codes-list">
-        {(refsQ.data?.client_type_codes ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-formats-list">
-        {(refsQ.data?.client_formats ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-logistics-list">
-        {(refsQ.data?.logistics_services ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-regions-list">
-        {(refsQ.data?.regions ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-districts-list">
-        {(refsQ.data?.districts ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="client-neighborhoods-list">
-        {(refsQ.data?.neighborhoods ?? []).map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
 
       <div className="flex flex-wrap gap-2 border-t pt-4">
         <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
@@ -642,7 +1177,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
           {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
         </Button>
         <Link href={`/clients/${clientId}`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
-          Kartochkaga qaytish
+          Kartochkaga
         </Link>
       </div>
     </div>

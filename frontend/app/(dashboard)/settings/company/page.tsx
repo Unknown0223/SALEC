@@ -180,8 +180,11 @@ export default function CompanySettingsPage() {
               disabled={!isAdmin || saveMut.isPending}
             />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="co-reg">Hududlar</Label>
+          <div id="ref-regions" className="scroll-mt-20 grid gap-1.5">
+            <Label htmlFor="co-reg">Hududlar (viloyat / territoriya)</Label>
+            <p className="text-xs text-muted-foreground">
+              Mijoz kartochkasidagi «Teritoriya» tanlovi shu ro‘yxatdan to‘ldiriladi.
+            </p>
             <textarea
               id="co-reg"
               className="min-h-[72px] rounded-md border bg-background px-3 py-2 text-sm"

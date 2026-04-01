@@ -111,6 +111,19 @@ export default function SpravochnikPage() {
           </section>
 
           <section className="space-y-2 rounded-lg border p-4">
+            <h2 className="text-sm font-semibold">Mijoz kartochkasi tanlovlari</h2>
+            <p className="text-xs text-muted-foreground">
+              Toifa, tur, format, savdo kanali va hokazo — mijoz tahririda dropdown uchun.
+            </p>
+            <Link
+              className={cn(buttonVariants({ variant: "default", size: "sm" }))}
+              href="/settings/spravochnik/client-lists"
+            >
+              Mijoz spravochniklarini boshqarish
+            </Link>
+          </section>
+
+          <section className="space-y-2 rounded-lg border p-4">
             <h2 className="text-sm font-semibold">Foydalanuvchilar</h2>
             <div className="flex flex-wrap gap-2">
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/settings/spravochnik/agents">
@@ -118,6 +131,12 @@ export default function SpravochnikPage() {
               </Link>
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/settings/spravochnik/expeditors">
                 Ekspeditorlar bo‘limi
+              </Link>
+              <Link
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                href="/settings/spravochnik/supervisors"
+              >
+                Supervizorlar
               </Link>
             </div>
             {users.isLoading ? (

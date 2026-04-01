@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
-import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
   createProductCategoryRow,
   createWarehouseRow,
@@ -127,7 +127,7 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
 
   app.get(
     "/api/:slug/users",
-    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    { preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const data = await listUsersForOrderAgent(request.tenant!.id);
