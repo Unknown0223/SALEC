@@ -1,7 +1,6 @@
 "use client";
 
 import type { ClientRow } from "@/lib/client-types";
-import { ClientEditDialog } from "@/components/clients/client-edit-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,7 +72,6 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
   const qc = useQueryClient();
   const role = useEffectiveRole();
   const isAdmin = role === "admin";
-  const [editOpen, setEditOpen] = useState(false);
   const [tab, setTab] = useState<DetailTab>("main");
   const [balPage, setBalPage] = useState(1);
   const [deltaInput, setDeltaInput] = useState("");
@@ -157,15 +155,6 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     creditLimitNum > 0 &&
     Number.isFinite(openNum);
 
-  const listRowForEdit: ClientRow | null = data
-    ? (() => {
-        const { phone_normalized, open_orders_total, ...row } = data;
-        void phone_normalized;
-        void open_orders_total;
-        return row;
-      })()
-    : null;
-
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
   }
@@ -187,9 +176,12 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold tracking-tight">{data.name}</h2>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="secondary" onClick={() => setEditOpen(true)}>
+          <Link
+            href={`/clients/${clientId}/edit`}
+            className="inline-flex h-9 items-center justify-center rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground shadow-sm transition-colors hover:bg-secondary/80"
+          >
             Tahrir kartochka
-          </Button>
+          </Link>
           <Link
             href={`/orders?client_id=${clientId}`}
             className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-muted"
@@ -547,12 +539,6 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
         </div>
       ) : null}
 
-      <ClientEditDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        tenantSlug={tenantSlug}
-        client={listRowForEdit}
-      />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { ClientEditDialog } from "@/components/clients/client-edit-dialog";
 import { ClientsDataTable } from "@/components/clients/clients-data-table";
 import { ClientsTableToolbar } from "@/components/clients/clients-table-toolbar";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -18,6 +17,7 @@ import { getUserFacingError } from "@/lib/error-utils";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 type ClientsResponse = {
@@ -27,7 +27,18 @@ type ClientsResponse = {
   limit: number;
 };
 
+type ClientReferencesResponse = {
+  categories: string[];
+  client_type_codes: string[];
+  regions: string[];
+  districts: string[];
+  neighborhoods: string[];
+  client_formats: string[];
+  logistics_services: string[];
+};
+
 export default function ClientsPage() {
+  const router = useRouter();
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
@@ -37,14 +48,14 @@ export default function ClientsPage() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [regionFilter, setRegionFilter] = useState("");
+  const [districtFilter, setDistrictFilter] = useState("");
+  const [neighborhoodFilter, setNeighborhoodFilter] = useState("");
   const [sortField, setSortField] = useState<"name" | "phone" | "id" | "created_at" | "region">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [pageLimit, setPageLimit] = useState(30);
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(getDefaultColumnVisibility);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editing, setEditing] = useState<ClientRow | null>(null);
-
   useEffect(() => {
     setColumnVisibility(loadColumnVisibility());
   }, []);
@@ -109,6 +120,9 @@ export default function ClientsPage() {
       search,
       activeFilter,
       categoryFilter,
+      regionFilter,
+      districtFilter,
+      neighborhoodFilter,
       sortField,
       sortOrder,
       pageLimit
@@ -124,10 +138,22 @@ export default function ClientsPage() {
       if (search.trim()) params.set("search", search.trim());
       if (activeFilter !== "all") params.set("is_active", activeFilter);
       if (categoryFilter.trim()) params.set("category", categoryFilter.trim());
+      if (regionFilter.trim()) params.set("region", regionFilter.trim());
+      if (districtFilter.trim()) params.set("district", districtFilter.trim());
+      if (neighborhoodFilter.trim()) params.set("neighborhood", neighborhoodFilter.trim());
       const { data: body } = await api.get<ClientsResponse>(
         `/api/${tenantSlug}/clients?${params.toString()}`
       );
       return body;
+    }
+  });
+
+  const refsQ = useQuery({
+    queryKey: ["clients-references", tenantSlug],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<ClientReferencesResponse>(`/api/${tenantSlug}/clients/references`);
+      return data;
     }
   });
 
@@ -235,6 +261,25 @@ export default function ClientsPage() {
           setCategoryFilter(v);
           setPage(1);
         }}
+        regionFilter={regionFilter}
+        onRegionFilterChange={(v) => {
+          setRegionFilter(v);
+          setPage(1);
+        }}
+        districtFilter={districtFilter}
+        onDistrictFilterChange={(v) => {
+          setDistrictFilter(v);
+          setPage(1);
+        }}
+        neighborhoodFilter={neighborhoodFilter}
+        onNeighborhoodFilterChange={(v) => {
+          setNeighborhoodFilter(v);
+          setPage(1);
+        }}
+        categoryOptions={refsQ.data?.categories ?? []}
+        regionOptions={refsQ.data?.regions ?? []}
+        districtOptions={refsQ.data?.districts ?? []}
+        neighborhoodOptions={refsQ.data?.neighborhoods ?? []}
         sortField={sortField}
         onSortFieldChange={(v) => {
           setSortField(v);
@@ -281,8 +326,7 @@ export default function ClientsPage() {
               rows={rows}
               visibility={columnVisibility}
               onEdit={(row) => {
-                setEditing(row);
-                setEditOpen(true);
+                router.push(`/clients/${row.id}/edit`);
               }}
             />
           </CardContent>
@@ -315,15 +359,6 @@ export default function ClientsPage() {
         </div>
       ) : null}
 
-      <ClientEditDialog
-        open={editOpen}
-        onOpenChange={(o) => {
-          setEditOpen(o);
-          if (!o) setEditing(null);
-        }}
-        tenantSlug={tenantSlug}
-        client={editing}
-      />
     </PageShell>
   );
 }

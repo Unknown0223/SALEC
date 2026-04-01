@@ -17,12 +17,22 @@ export type ContactPersonSlot = {
   phone: string | null;
 };
 
+export type ClientAgentAssignmentApi = {
+  slot: number;
+  agent_id: number | null;
+  agent_name: string | null;
+  visit_date: string | null;
+  expeditor_phone: string | null;
+};
+
 export type ClientListRow = {
   id: number;
   name: string;
+  legal_name: string | null;
   phone: string | null;
   address: string | null;
   category: string | null;
+  client_type_code: string | null;
   credit_limit: string;
   is_active: boolean;
   /** Hisob saldo (qarzdorlik ko‘rsatkichi) */
@@ -46,6 +56,7 @@ export type ClientListRow = {
   client_format: string | null;
   agent_id: number | null;
   agent_name: string | null;
+  agent_assignments: ClientAgentAssignmentApi[];
   contact_persons: ContactPersonSlot[];
   created_at: string;
 };
@@ -68,11 +79,24 @@ export type ListClientsQuery = {
   search?: string;
   is_active?: boolean;
   category?: string;
+  region?: string;
+  district?: string;
+  neighborhood?: string;
   sort?: "name" | "phone" | "id" | "created_at" | "region";
   order?: "asc" | "desc";
 };
 
 const CONTACT_SLOTS = 10;
+
+export type ClientReferences = {
+  categories: string[];
+  client_type_codes: string[];
+  regions: string[];
+  districts: string[];
+  neighborhoods: string[];
+  client_formats: string[];
+  logistics_services: string[];
+};
 
 function parseContactPersonsJson(raw: unknown): ContactPersonSlot[] {
   const slots: ContactPersonSlot[] = Array.from({ length: CONTACT_SLOTS }, () => ({
@@ -101,6 +125,225 @@ function contactPersonsToJson(slots: ContactPersonSlot[]): Prisma.InputJsonValue
   return trimmed as unknown as Prisma.InputJsonValue;
 }
 
+function normalizeDistinct(values: Array<string | null | undefined>): string[] {
+  const set = new Set<string>();
+  for (const v of values) {
+    const t = v?.trim();
+    if (t) set.add(t);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, "uz"));
+}
+
+function mapAgentAssignmentsToApi(
+  rows: Array<{
+    slot: number;
+    agent_id: number | null;
+    visit_date: Date | null;
+    expeditor_phone: string | null;
+    agent: { name: string } | null;
+  }>
+): ClientAgentAssignmentApi[] {
+  return rows.map((r) => ({
+    slot: r.slot,
+    agent_id: r.agent_id,
+    agent_name: r.agent?.name ?? null,
+    visit_date: r.visit_date?.toISOString() ?? null,
+    expeditor_phone: r.expeditor_phone
+  }));
+}
+
+function mergeAgentDisplayFromAssignments(
+  legacyAgentId: number | null,
+  legacyAgentName: string | null,
+  legacyVisitIso: string | null,
+  assignments: ClientAgentAssignmentApi[]
+): { agent_id: number | null; agent_name: string | null; visit_date: string | null } {
+  const s1 = assignments.find((a) => a.slot === 1);
+  if (s1) {
+    return {
+      agent_id: s1.agent_id,
+      agent_name: s1.agent_name,
+      visit_date: s1.visit_date
+    };
+  }
+  return {
+    agent_id: legacyAgentId,
+    agent_name: legacyAgentName,
+    visit_date: legacyVisitIso
+  };
+}
+
+export type AgentAssignmentPatch = {
+  slot: number;
+  agent_id?: number | null;
+  visit_date?: string | null;
+  expeditor_phone?: string | null;
+};
+
+async function replaceClientAgentAssignments(
+  tx: Prisma.TransactionClient,
+  tenantId: number,
+  clientId: number,
+  raw: AgentAssignmentPatch[]
+): Promise<void> {
+  const bySlot = new Map<number, AgentAssignmentPatch>();
+  for (const s of raw) {
+    const slot = Math.floor(Number(s.slot));
+    if (slot < 1 || slot > CONTACT_SLOTS) {
+      throw new Error("VALIDATION");
+    }
+    bySlot.set(slot, s);
+  }
+
+  const rows: Array<{
+    slot: number;
+    agent_id: number | null;
+    visit_date: Date | null;
+    expeditor_phone: string | null;
+  }> = [];
+
+  for (const slot of [...bySlot.keys()].sort((a, b) => a - b)) {
+    const s = bySlot.get(slot)!;
+    let agent_id: number | null = null;
+    if (s.agent_id != null) {
+      const uid = Math.floor(Number(s.agent_id));
+      if (!Number.isFinite(uid) || uid < 1) {
+        throw new Error("VALIDATION");
+      }
+      const u = await tx.user.findFirst({
+        where: { id: uid, tenant_id: tenantId, is_active: true }
+      });
+      if (!u) {
+        throw new Error("VALIDATION");
+      }
+      agent_id = uid;
+    }
+
+    let visit_date: Date | null = null;
+    if (s.visit_date != null && String(s.visit_date).trim() !== "") {
+      const d = new Date(s.visit_date as string);
+      if (Number.isNaN(d.getTime())) {
+        throw new Error("VALIDATION");
+      }
+      visit_date = d;
+    }
+
+    const expeditor_phone = s.expeditor_phone?.trim() || null;
+
+    const hasData = agent_id != null || visit_date != null || (expeditor_phone != null && expeditor_phone.length > 0);
+    if (!hasData) continue;
+
+    rows.push({ slot, agent_id, visit_date, expeditor_phone });
+  }
+
+  await tx.clientAgentAssignment.deleteMany({ where: { client_id: clientId } });
+  for (const r of rows) {
+    await tx.clientAgentAssignment.create({
+      data: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        slot: r.slot,
+        agent_id: r.agent_id,
+        visit_date: r.visit_date,
+        expeditor_phone: r.expeditor_phone
+      }
+    });
+  }
+
+  const s1 = rows.find((r) => r.slot === 1);
+  await tx.client.update({
+    where: { id: clientId },
+    data: {
+      agent_id: s1?.agent_id ?? null,
+      visit_date: s1?.visit_date ?? null
+    }
+  });
+}
+
+async function syncAssignmentSlotOneWithClientRow(
+  tx: Prisma.TransactionClient,
+  tenantId: number,
+  clientId: number
+): Promise<void> {
+  const c = await tx.client.findUnique({
+    where: { id: clientId },
+    select: { agent_id: true, visit_date: true }
+  });
+  if (!c) return;
+
+  const existing = await tx.clientAgentAssignment.findUnique({
+    where: { client_id_slot: { client_id: clientId, slot: 1 } }
+  });
+
+  const hasLegacy = c.agent_id != null || c.visit_date != null;
+
+  if (!hasLegacy) {
+    if (existing) {
+      await tx.clientAgentAssignment.delete({
+        where: { client_id_slot: { client_id: clientId, slot: 1 } }
+      });
+    }
+    return;
+  }
+
+  if (existing) {
+    await tx.clientAgentAssignment.update({
+      where: { client_id_slot: { client_id: clientId, slot: 1 } },
+      data: {
+        agent_id: c.agent_id,
+        visit_date: c.visit_date
+      }
+    });
+  } else {
+    await tx.clientAgentAssignment.create({
+      data: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        slot: 1,
+        agent_id: c.agent_id,
+        visit_date: c.visit_date,
+        expeditor_phone: null
+      }
+    });
+  }
+}
+
+export async function getClientReferences(tenantId: number): Promise<ClientReferences> {
+  const [clientRows, tenant] = await Promise.all([
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, merged_into_client_id: null },
+      select: {
+        category: true,
+        client_type_code: true,
+        region: true,
+        district: true,
+        neighborhood: true,
+        client_format: true,
+        logistics_service: true
+      }
+    }),
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { settings: true }
+    })
+  ]);
+
+  const settingsRef = (tenant?.settings as { references?: { regions?: unknown } } | null)?.references;
+  const settingsRegions = Array.isArray(settingsRef?.regions)
+    ? settingsRef.regions.filter((x): x is string => typeof x === "string")
+    : [];
+
+  return {
+    categories: normalizeDistinct(clientRows.map((r) => r.category)),
+    client_type_codes: normalizeDistinct(clientRows.map((r) => r.client_type_code)),
+    regions: normalizeDistinct([...settingsRegions, ...clientRows.map((r) => r.region)]),
+    districts: normalizeDistinct(clientRows.map((r) => r.district)),
+    neighborhoods: normalizeDistinct(clientRows.map((r) => r.neighborhood)),
+    client_formats: normalizeDistinct(clientRows.map((r) => r.client_format)),
+    logistics_services: normalizeDistinct(clientRows.map((r) => r.logistics_service))
+  };
+}
+
 export async function listClientsForTenantPaged(
   tenantId: number,
   q: ListClientsQuery
@@ -113,6 +356,12 @@ export async function listClientsForTenantPaged(
   if (q.is_active === false) where.is_active = false;
   const cat = q.category?.trim();
   if (cat) where.category = cat;
+  const region = q.region?.trim();
+  if (region) where.region = region;
+  const district = q.district?.trim();
+  if (district) where.district = district;
+  const neighborhood = q.neighborhood?.trim();
+  if (neighborhood) where.neighborhood = neighborhood;
   const search = q.search?.trim();
   if (search) {
     where.OR = [
@@ -151,9 +400,11 @@ export async function listClientsForTenantPaged(
       select: {
         id: true,
         name: true,
+        legal_name: true,
         phone: true,
         address: true,
         category: true,
+        client_type_code: true,
         credit_limit: true,
         is_active: true,
         created_at: true,
@@ -177,6 +428,16 @@ export async function listClientsForTenantPaged(
         contact_persons: true,
         agent_id: true,
         agent: { select: { name: true } },
+        agent_assignments: {
+          orderBy: { slot: "asc" },
+          select: {
+            slot: true,
+            agent_id: true,
+            visit_date: true,
+            expeditor_phone: true,
+            agent: { select: { name: true } }
+          }
+        },
         client_balances: { take: 1, select: { balance: true } }
       }
     })
@@ -185,12 +446,22 @@ export async function listClientsForTenantPaged(
   return {
     data: clients.map((c) => {
       const bal = c.client_balances[0]?.balance;
+      const agent_assignments = mapAgentAssignmentsToApi(c.agent_assignments);
+      const visitLegacy = c.visit_date?.toISOString() ?? null;
+      const disp = mergeAgentDisplayFromAssignments(
+        c.agent_id,
+        c.agent?.name ?? null,
+        visitLegacy,
+        agent_assignments
+      );
       return {
         id: c.id,
         name: c.name,
+        legal_name: c.legal_name,
         phone: c.phone,
         address: c.address,
         category: c.category,
+        client_type_code: c.client_type_code,
         credit_limit: c.credit_limit.toString(),
         is_active: c.is_active,
         account_balance: bal != null ? bal.toString() : "0",
@@ -208,11 +479,12 @@ export async function listClientsForTenantPaged(
         house_number: c.house_number,
         apartment: c.apartment,
         gps_text: c.gps_text,
-        visit_date: c.visit_date?.toISOString() ?? null,
+        visit_date: disp.visit_date,
         notes: c.notes,
         client_format: c.client_format,
-        agent_id: c.agent_id,
-        agent_name: c.agent?.name ?? null,
+        agent_id: disp.agent_id,
+        agent_name: disp.agent_name,
+        agent_assignments,
         contact_persons: parseContactPersonsJson(c.contact_persons),
         created_at: c.created_at.toISOString()
       };
@@ -236,10 +508,12 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
       select: {
         id: true,
         name: true,
+        legal_name: true,
         phone: true,
         phone_normalized: true,
         address: true,
         category: true,
+        client_type_code: true,
         credit_limit: true,
         is_active: true,
         agent_id: true,
@@ -262,7 +536,17 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         notes: true,
         client_format: true,
         contact_persons: true,
-        agent: { select: { name: true } }
+        agent: { select: { name: true } },
+        agent_assignments: {
+          orderBy: { slot: "asc" },
+          select: {
+            slot: true,
+            agent_id: true,
+            visit_date: true,
+            expeditor_phone: true,
+            agent: { select: { name: true } }
+          }
+        }
       }
     }),
     prisma.order.aggregate({
@@ -283,17 +567,27 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
   }
   const open_orders_total = (agg._sum.total_sum ?? new Prisma.Decimal(0)).toString();
   const account_balance = balRow?.balance.toString() ?? "0";
+  const agent_assignments = mapAgentAssignmentsToApi(c.agent_assignments);
+  const visitLegacy = c.visit_date?.toISOString() ?? null;
+  const disp = mergeAgentDisplayFromAssignments(
+    c.agent_id,
+    c.agent?.name ?? null,
+    visitLegacy,
+    agent_assignments
+  );
   return {
     id: c.id,
     name: c.name,
+    legal_name: c.legal_name,
     phone: c.phone,
     address: c.address,
     category: c.category,
+    client_type_code: c.client_type_code,
     credit_limit: c.credit_limit.toString(),
     is_active: c.is_active,
     phone_normalized: c.phone_normalized,
-    agent_id: c.agent_id,
-    agent_name: c.agent?.name ?? null,
+    agent_id: disp.agent_id,
+    agent_name: disp.agent_name,
     created_at: c.created_at.toISOString(),
     account_balance,
     responsible_person: c.responsible_person,
@@ -310,9 +604,10 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     house_number: c.house_number,
     apartment: c.apartment,
     gps_text: c.gps_text,
-    visit_date: c.visit_date?.toISOString() ?? null,
+    visit_date: disp.visit_date,
     notes: c.notes,
     client_format: c.client_format,
+    agent_assignments,
     contact_persons: parseContactPersonsJson(c.contact_persons),
     open_orders_total
   };
@@ -426,10 +721,12 @@ export async function addClientBalanceMovement(
 
 export type UpdateClientInput = {
   name?: string;
+  legal_name?: string | null;
   phone?: string | null;
   credit_limit?: number;
   address?: string | null;
   category?: string | null;
+  client_type_code?: string | null;
   responsible_person?: string | null;
   landmark?: string | null;
   inn?: string | null;
@@ -448,6 +745,7 @@ export type UpdateClientInput = {
   notes?: string | null;
   client_format?: string | null;
   agent_id?: number | null;
+  agent_assignments?: AgentAssignmentPatch[];
   contact_persons?: ContactPersonSlot[];
   is_active?: boolean;
 };
@@ -532,6 +830,8 @@ export async function updateClientFields(
     throw new Error("NOT_FOUND");
   }
 
+  const skipLegacyAgentFields = input.agent_assignments !== undefined;
+
   const data: Prisma.ClientUncheckedUpdateInput = {};
   if (input.credit_limit !== undefined) {
     if (!Number.isFinite(input.credit_limit) || input.credit_limit < 0) {
@@ -544,6 +844,9 @@ export async function updateClientFields(
     if (n.length < 1) throw new Error("VALIDATION");
     data.name = n;
   }
+  if (input.legal_name !== undefined) {
+    data.legal_name = input.legal_name?.trim() || null;
+  }
   if (input.phone !== undefined) {
     const p = input.phone?.trim() || null;
     data.phone = p;
@@ -554,6 +857,9 @@ export async function updateClientFields(
   }
   if (input.category !== undefined) {
     data.category = input.category?.trim() || null;
+  }
+  if (input.client_type_code !== undefined) {
+    data.client_type_code = input.client_type_code?.trim() || null;
   }
   if (input.responsible_person !== undefined) {
     data.responsible_person = input.responsible_person?.trim() || null;
@@ -609,7 +915,7 @@ export async function updateClientFields(
       data.license_until = d;
     }
   }
-  if (input.visit_date !== undefined) {
+  if (!skipLegacyAgentFields && input.visit_date !== undefined) {
     if (input.visit_date === null || input.visit_date === "") {
       data.visit_date = null;
     } else {
@@ -618,7 +924,7 @@ export async function updateClientFields(
       data.visit_date = d;
     }
   }
-  if (input.agent_id !== undefined) {
+  if (!skipLegacyAgentFields && input.agent_id !== undefined) {
     if (input.agent_id === null) {
       data.agent_id = null;
     } else {
@@ -638,11 +944,23 @@ export async function updateClientFields(
     data.is_active = input.is_active;
   }
 
-  if (Object.keys(data).length === 0) {
+  const hasClientScalars = Object.keys(data).length > 0;
+  const hasAssignments = input.agent_assignments !== undefined;
+  if (!hasClientScalars && !hasAssignments) {
     throw new Error("EMPTY");
   }
 
-  await prisma.client.update({ where: { id }, data });
+  await prisma.$transaction(async (tx) => {
+    if (hasClientScalars) {
+      await tx.client.update({ where: { id }, data });
+    }
+    if (hasAssignments) {
+      await replaceClientAgentAssignments(tx, tenantId, id, input.agent_assignments!);
+    } else if (!skipLegacyAgentFields && (input.agent_id !== undefined || input.visit_date !== undefined)) {
+      await syncAssignmentSlotOneWithClientRow(tx, tenantId, id);
+    }
+  });
+
   const detail: Record<string, unknown> = { ...input };
   await appendClientAuditLog(tenantId, id, actorUserId, "client.patch", detail);
   return getClientDetail(tenantId, id);

@@ -7,6 +7,7 @@ import {
   buildClientImportTemplateBuffer,
   checkDuplicateCandidates,
   getClientDetail,
+  getClientReferences,
   getDuplicatePhoneGroups,
   importClientsFromXlsx,
   listClientAuditLogs,
@@ -34,13 +35,22 @@ const contactSlotSchema = z.object({
   phone: z.string().nullable().optional()
 });
 
+const agentAssignmentSlotSchema = z.object({
+  slot: z.number().int().min(1).max(10),
+  agent_id: z.number().int().positive().nullable().optional(),
+  visit_date: z.string().nullable().optional(),
+  expeditor_phone: z.string().nullable().optional()
+});
+
 const patchClientSchema = z
   .object({
     name: z.string().min(1).optional(),
+    legal_name: z.string().nullable().optional(),
     phone: z.string().nullable().optional(),
     credit_limit: z.number().nonnegative().optional(),
     address: z.string().nullable().optional(),
     category: z.string().nullable().optional(),
+    client_type_code: z.string().nullable().optional(),
     responsible_person: z.string().nullable().optional(),
     landmark: z.string().nullable().optional(),
     inn: z.string().nullable().optional(),
@@ -59,6 +69,7 @@ const patchClientSchema = z
     notes: z.string().nullable().optional(),
     client_format: z.string().nullable().optional(),
     agent_id: z.number().int().positive().nullable().optional(),
+    agent_assignments: z.array(agentAssignmentSlotSchema).max(10).optional(),
     contact_persons: z.array(contactSlotSchema).max(10).optional(),
     is_active: z.boolean().optional()
   })
@@ -83,6 +94,9 @@ export async function registerClientRoutes(app: FastifyInstance) {
       if (q.is_active === "true") is_active = true;
       else if (q.is_active === "false") is_active = false;
       const category = q.category?.trim() || undefined;
+      const region = q.region?.trim() || undefined;
+      const district = q.district?.trim() || undefined;
+      const neighborhood = q.neighborhood?.trim() || undefined;
       const sortRaw = q.sort?.trim();
       const sort =
         sortRaw === "phone" ||
@@ -99,10 +113,23 @@ export async function registerClientRoutes(app: FastifyInstance) {
         search,
         ...(is_active !== undefined ? { is_active } : {}),
         category,
+        region,
+        district,
+        neighborhood,
         sort,
         order
       });
       return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/references",
+    { preHandler: [jwtAccessVerify] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const refs = await getClientReferences(request.tenant!.id);
+      return reply.send(refs);
     }
   );
 

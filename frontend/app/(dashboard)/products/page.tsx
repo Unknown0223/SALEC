@@ -1,7 +1,6 @@
 "use client";
 
-import type { ProductRow } from "@/components/products/product-form-dialog";
-import { ProductFormDialog } from "@/components/products/product-form-dialog";
+import type { ProductRow } from "@/lib/product-types";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -54,8 +53,6 @@ function ProductsPageContent() {
   const fileRef = useRef<HTMLInputElement>(null);
   const priceFileRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ProductRow | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
   function replaceProductsQuery(patch: { categoryId?: string; page?: number }) {
@@ -171,13 +168,12 @@ function ProductsPageContent() {
   });
 
   function openCreate() {
-    setEditing(null);
-    setFormOpen(true);
+    const qs = categoryIdFromUrl ? `?category_id=${encodeURIComponent(categoryIdFromUrl)}` : "";
+    router.push(`/products/new${qs}`);
   }
 
   function openEdit(row: ProductRow) {
-    setEditing(row);
-    setFormOpen(true);
+    router.push(`/products/${row.id}/edit`);
   }
 
   function confirmDelete(row: ProductRow) {
@@ -408,13 +404,6 @@ function ProductsPageContent() {
         </div>
       ) : null}
 
-      <ProductFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        tenantSlug={tenantSlug}
-        product={editing}
-        onSaved={() => setImportMsg(null)}
-      />
     </PageShell>
   );
 }

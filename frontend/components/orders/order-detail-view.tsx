@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import type { ProductRow } from "@/components/products/product-form-dialog";
+import type { ProductRow } from "@/lib/product-types";
 import axios, { type AxiosError } from "axios";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { ORDER_STATUS_LABELS, orderStatusTransitionDirection } from "@/lib/order-status";

@@ -42,5 +42,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+echo Seed ma'lumotlarini tekshirish ^(db:seed^)...
+call npm run db:seed
+if errorlevel 1 (
+  echo [XATO] db:seed bajarilmadi.
+  pause
+  exit /b 1
+)
 call npm run dev:clean
 endlocal

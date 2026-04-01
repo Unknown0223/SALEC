@@ -32,6 +32,7 @@ model Tenant {
   stock            Stock[]
   orders           Order[]
   bonus_rules      BonusRule[]
+  client_agent_assignments ClientAgentAssignment[]
 
   @@map("tenants")
 }
@@ -73,6 +74,7 @@ model User {
 
   refresh_tokens RefreshToken[]
   clients_as_agent Client[] @relation("UserAgents")
+  client_agent_slots ClientAgentAssignment[] @relation("ClientAgentSlotAgents")
   orders_as_agent      Order[]           @relation("OrderAgents")
   order_status_changes OrderStatusLog[]
   order_change_logs    OrderChangeLog[]
@@ -161,6 +163,8 @@ model Client {
   tenant_id     Int
   tenant        Tenant   @relation(fields: [tenant_id], references: [id])
   name          String
+  /// Yuridik / rasmiy nom (ko‘rsatish uchun)
+  legal_name    String?
   address       String?
   phone         String?
   /// Faqat raqamlar (dublikat va yagona bazada qidiruv uchun)
@@ -168,6 +172,8 @@ model Client {
   agent_id      Int?
   agent         User?    @relation("UserAgents", fields: [agent_id], references: [id])
   category      String?
+  /// Mijoz turi kodi (spravochnik bilan bog‘lanishi mumkin)
+  client_type_code String?
   credit_limit  Decimal  @default(0) @db.Decimal(15, 2)
   is_active     Boolean  @default(true)
 
@@ -206,11 +212,32 @@ model Client {
   orders          Order[]
   client_balances ClientBalance[]
   audit_logs      ClientAuditLog[]
+  agent_assignments ClientAgentAssignment[]
 
   @@index([tenant_id])
   @@index([tenant_id, name])
   @@index([tenant_id, phone_normalized])
   @@map("clients")
+}
+
+/// Mijozga 1..10 gacha agent slotlari (tashrif sanasi + ekspeditor telefoni).
+model ClientAgentAssignment {
+  id               Int       @id @default(autoincrement())
+  tenant_id        Int
+  tenant           Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  client_id        Int
+  client           Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  slot             Int
+  agent_id         Int?
+  agent            User?     @relation("ClientAgentSlotAgents", fields: [agent_id], references: [id], onDelete: SetNull)
+  visit_date       DateTime?
+  expeditor_phone  String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  @@unique([client_id, slot])
+  @@index([tenant_id, client_id])
+  @@map("client_agent_assignments")
 }
 
 /// Mijoz hisob saldosi (yozuvlar yig‘indisi bilan sinxron).

@@ -11,7 +11,7 @@
  * - ПИНФЛ → `pdl` (jismoniy shaxs identifikatori)
  * - Торговый канал (код) → `logistics_service`
  * - Категория клиента (код) → `category`
- * - Тип клиента (код) → alohida maydon yo‘q (keyinroq API/DB)
+ * - Тип клиента (код) → `client_type_code`
  * - Формат (код) → `client_format`
  * - Город (код) → `district` / `region` (tuman, viloyat)
  * - Широта / Долгота → `gps_text` dan parse yoki kelajakda alohida maydonlar
@@ -70,25 +70,40 @@ export function displayVisitDateShort(iso: string | null): string | null {
   return `${dd}.${mm}.${yy}`;
 }
 
-/** Faqat birovchi savdo vakili — `agent_name` */
+/** Agent N — `agent_assignments` yoki (slot 1) `agent_name` */
 export function displayAgentName(row: ClientRow, slot: number): string | null {
   if (slot < 1 || slot > 10) return null;
+  const list = row.agent_assignments;
+  if (Array.isArray(list)) {
+    const a = list.find((x) => x.slot === slot);
+    const n = nonEmpty(a?.agent_name);
+    if (n) return n;
+  }
   if (slot === 1) return nonEmpty(row.agent_name);
   return null;
 }
 
-/**
- * «Агент N день» — hozircha alohida jadval yo‘q.
- * Faqat N=1 va `visit_date` bo‘lsa, tashrif sanasi ko‘rsatiladi.
- */
+/** «Агент N день» — slot bo‘yicha `visit_date` */
 export function displayAgentDay(row: ClientRow, slot: number): string | null {
-  if (slot !== 1) return null;
-  return displayVisitDateShort(row.visit_date);
+  if (slot < 1 || slot > 10) return null;
+  const list = row.agent_assignments;
+  if (Array.isArray(list)) {
+    const a = list.find((x) => x.slot === slot);
+    if (a?.visit_date) return displayVisitDateShort(a.visit_date);
+  }
+  if (slot === 1) return displayVisitDateShort(row.visit_date);
+  return null;
 }
 
-/** Экспедитор N → shu qatordagi kontakt telefoni */
+/** Экспедитор N — avvalo `agent_assignments[N].expeditor_phone`, keyin kontakt */
 export function displayExpeditorPhone(row: ClientRow, slot: number): string | null {
   if (slot < 1 || slot > 10) return null;
+  const list = row.agent_assignments;
+  if (Array.isArray(list)) {
+    const a = list.find((x) => x.slot === slot);
+    const ex = nonEmpty(a?.expeditor_phone);
+    if (ex) return ex;
+  }
   const p = row.contact_persons[slot - 1]?.phone;
   return nonEmpty(p);
 }

@@ -5,12 +5,22 @@ export type ContactPersonSlot = {
   phone: string | null;
 };
 
+export type ClientAgentAssignmentRow = {
+  slot: number;
+  agent_id: number | null;
+  agent_name: string | null;
+  visit_date: string | null;
+  expeditor_phone: string | null;
+};
+
 export type ClientRow = {
   id: number;
   name: string;
+  legal_name: string | null;
   phone: string | null;
   address: string | null;
   category: string | null;
+  client_type_code: string | null;
   credit_limit: string;
   is_active: boolean;
   account_balance: string;
@@ -33,15 +43,14 @@ export type ClientRow = {
   client_format: string | null;
   agent_id: number | null;
   agent_name: string | null;
+  agent_assignments: ClientAgentAssignmentRow[];
   contact_persons: ContactPersonSlot[];
   created_at: string;
 
   // User requested columns (placeholders until fully wired in backend).
-  legal_name?: string | null;
   pinfl?: string | null;
   trade_channel_code?: string | null;
   client_category_code?: string | null;
-  client_type_code?: string | null;
   format_code?: string | null;
   city_code?: string | null;
   latitude?: string | null;

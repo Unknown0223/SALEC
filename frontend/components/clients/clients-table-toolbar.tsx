@@ -17,6 +17,16 @@ type Props = {
   onActiveFilterChange: (v: "all" | "true" | "false") => void;
   categoryFilter: string;
   onCategoryFilterChange: (v: string) => void;
+  regionFilter: string;
+  onRegionFilterChange: (v: string) => void;
+  districtFilter: string;
+  onDistrictFilterChange: (v: string) => void;
+  neighborhoodFilter: string;
+  onNeighborhoodFilterChange: (v: string) => void;
+  categoryOptions: string[];
+  regionOptions: string[];
+  districtOptions: string[];
+  neighborhoodOptions: string[];
   sortField: "name" | "phone" | "id" | "created_at" | "region";
   onSortFieldChange: (v: "name" | "phone" | "id" | "created_at" | "region") => void;
   sortOrder: "asc" | "desc";
@@ -36,6 +46,16 @@ export function ClientsTableToolbar({
   onActiveFilterChange,
   categoryFilter,
   onCategoryFilterChange,
+  regionFilter,
+  onRegionFilterChange,
+  districtFilter,
+  onDistrictFilterChange,
+  neighborhoodFilter,
+  onNeighborhoodFilterChange,
+  categoryOptions,
+  regionOptions,
+  districtOptions,
+  neighborhoodOptions,
   sortField,
   onSortFieldChange,
   sortOrder,
@@ -207,12 +227,63 @@ export function ClientsTableToolbar({
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Toifa (category)
-            <Input
-              className="h-10 w-44"
-              placeholder="masalan retail"
+            <select
+              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
               value={categoryFilter}
               onChange={(e) => onCategoryFilterChange(e.target.value)}
-            />
+            >
+              <option value="">Barchasi</option>
+              {categoryOptions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Viloyat
+            <select
+              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              value={regionFilter}
+              onChange={(e) => onRegionFilterChange(e.target.value)}
+            >
+              <option value="">Barchasi</option>
+              {regionOptions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Tuman
+            <select
+              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              value={districtFilter}
+              onChange={(e) => onDistrictFilterChange(e.target.value)}
+            >
+              <option value="">Barchasi</option>
+              {districtOptions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Zona (mahalla)
+            <select
+              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              value={neighborhoodFilter}
+              onChange={(e) => onNeighborhoodFilterChange(e.target.value)}
+            >
+              <option value="">Barchasi</option>
+              {neighborhoodOptions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
