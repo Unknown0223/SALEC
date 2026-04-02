@@ -2,7 +2,12 @@ import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import * as XLSX from "xlsx";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent } from "../../lib/tenant-audit";
 import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
+import {
+  activeValuesFromClientRefEntries,
+  clientRefEntriesFromUnknown
+} from "../tenant-settings/tenant-settings.service";
 
 /** Telefonni solishtirish uchun faqat raqamlar (masalan +998 90 → 99890). */
 export function normalizePhoneDigits(phone: string | null | undefined): string | null {
@@ -438,23 +443,33 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     return v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((s) => s.trim());
   };
   const settingsRegions = strArr("regions");
-  const setCat = strArr("client_categories");
-  const setTypes = strArr("client_type_codes");
-  const setFormats = strArr("client_formats");
+  const catParsed = clientRefEntriesFromUnknown(settingsRef?.client_category_entries);
+  const setCat =
+    catParsed.length > 0 ? activeValuesFromClientRefEntries(catParsed) : strArr("client_categories");
+  const typesParsed = clientRefEntriesFromUnknown(settingsRef?.client_type_entries);
+  const setTypes =
+    typesParsed.length > 0 ? activeValuesFromClientRefEntries(typesParsed) : strArr("client_type_codes");
+  const fmtParsed = clientRefEntriesFromUnknown(settingsRef?.client_format_entries);
+  const setFormats =
+    fmtParsed.length > 0 ? activeValuesFromClientRefEntries(fmtParsed) : strArr("client_formats");
   const setSales = strArr("sales_channels");
   const setProdCat = strArr("client_product_category_refs");
+  const setDistricts = strArr("client_districts");
+  const setNeighborhoods = strArr("client_neighborhoods");
+  const setZonesRef = strArr("client_zones");
+  const setLogistics = strArr("client_logistics_services");
 
   return {
     categories: normalizeDistinct([...setCat, ...clientRows.map((r) => r.category)]),
     client_type_codes: normalizeDistinct([...setTypes, ...clientRows.map((r) => r.client_type_code)]),
     regions: normalizeDistinct([...settingsRegions, ...clientRows.map((r) => r.region)]),
-    districts: normalizeDistinct(clientRows.map((r) => r.district)),
-    neighborhoods: normalizeDistinct(clientRows.map((r) => r.neighborhood)),
-    zones: normalizeDistinct(clientRows.map((r) => r.zone)),
+    districts: normalizeDistinct([...setDistricts, ...clientRows.map((r) => r.district)]),
+    neighborhoods: normalizeDistinct([...setNeighborhoods, ...clientRows.map((r) => r.neighborhood)]),
+    zones: normalizeDistinct([...setZonesRef, ...clientRows.map((r) => r.zone)]),
     client_formats: normalizeDistinct([...setFormats, ...clientRows.map((r) => r.client_format)]),
     sales_channels: normalizeDistinct([...setSales, ...clientRows.map((r) => r.sales_channel)]),
     product_category_refs: normalizeDistinct([...setProdCat, ...clientRows.map((r) => r.product_category_ref)]),
-    logistics_services: normalizeDistinct(clientRows.map((r) => r.logistics_service))
+    logistics_services: normalizeDistinct([...setLogistics, ...clientRows.map((r) => r.logistics_service)])
   };
 }
 
@@ -1190,13 +1205,36 @@ export async function appendClientAuditLog(
       detail: detail as Prisma.InputJsonValue
     }
   });
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId: uid,
+    entityType: "client",
+    entityId: clientId,
+    action,
+    payload: detail
+  });
 }
+
+export type CreateClientMinimalInput = {
+  name: string;
+  phone?: string | null;
+  category?: string | null;
+  client_type_code?: string | null;
+  region?: string | null;
+  district?: string | null;
+  neighborhood?: string | null;
+  zone?: string | null;
+  client_format?: string | null;
+  sales_channel?: string | null;
+  product_category_ref?: string | null;
+  logistics_service?: string | null;
+};
 
 /** Minimal yangi mijoz (keyin to‘liq tahrir sahifasida to‘ldiriladi). */
 export async function createClientMinimal(
   tenantId: number,
   actorUserId: number | null,
-  input: { name: string; phone?: string | null }
+  input: CreateClientMinimalInput
 ): Promise<{ id: number }> {
   const name = input.name?.trim();
   if (!name) {
@@ -1204,19 +1242,48 @@ export async function createClientMinimal(
   }
   const phone = input.phone != null && String(input.phone).trim() !== "" ? String(input.phone).trim() : null;
 
+  const str = (v: string | null | undefined) => {
+    if (v == null) return null;
+    const t = String(v).trim();
+    return t === "" ? null : t;
+  };
+
   const row = await prisma.client.create({
     data: {
       tenant_id: tenantId,
       name,
       phone,
-      phone_normalized: normalizePhoneDigits(phone)
+      phone_normalized: normalizePhoneDigits(phone),
+      category: str(input.category),
+      client_type_code: str(input.client_type_code),
+      region: str(input.region),
+      district: str(input.district),
+      neighborhood: str(input.neighborhood),
+      zone: str(input.zone),
+      client_format: str(input.client_format),
+      sales_channel: str(input.sales_channel),
+      product_category_ref: str(input.product_category_ref),
+      logistics_service: str(input.logistics_service)
     }
   });
 
-  await appendClientAuditLog(tenantId, row.id, actorUserId, "client.create", {
-    name,
-    phone
-  });
+  const detail: Record<string, unknown> = { name, phone };
+  for (const [k, v] of Object.entries({
+    category: str(input.category),
+    client_type_code: str(input.client_type_code),
+    region: str(input.region),
+    district: str(input.district),
+    neighborhood: str(input.neighborhood),
+    zone: str(input.zone),
+    client_format: str(input.client_format),
+    sales_channel: str(input.sales_channel),
+    product_category_ref: str(input.product_category_ref),
+    logistics_service: str(input.logistics_service)
+  })) {
+    if (v != null) detail[k] = v;
+  }
+
+  await appendClientAuditLog(tenantId, row.id, actorUserId, "client.create", detail);
 
   return { id: row.id };
 }

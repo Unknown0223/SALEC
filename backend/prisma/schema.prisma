@@ -33,6 +33,12 @@ model Tenant {
   orders           Order[]
   bonus_rules      BonusRule[]
   client_agent_assignments ClientAgentAssignment[]
+  tenant_audit_events    TenantAuditEvent[]
+  product_catalog_groups         ProductCatalogGroup[]
+  product_brands                 ProductBrand[]
+  product_manufacturers          ProductManufacturer[]
+  product_segments               ProductSegment[]
+  interchangeable_product_groups InterchangeableProductGroup[]
 
   @@map("tenants")
 }
@@ -85,6 +91,7 @@ model User {
   balance_movements    ClientBalanceMovement[]
   client_audit_logs    ClientAuditLog[]
   expeditor_assignments ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
+  tenant_audit_events   TenantAuditEvent[]       @relation("TenantAuditEventActor")
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -115,10 +122,18 @@ model ProductCategory {
   parent     ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
   children   ProductCategory[] @relation("CategoryHierarchy")
   products   Product[]
+  /// Qisqa kod (masalan SKU prefiks / filtr)
+  code            String?  @db.VarChar(24)
+  sort_order      Int?
+  /// Kategoriya uchun tavsiya etilgan birlik (mahsulot `unit` bilan mos kelishi mumkin)
+  default_unit    String?  @db.VarChar(64)
+  is_active       Boolean  @default(true)
+  comment         String?  @db.Text
   created_at DateTime          @default(now())
   updated_at DateTime          @updatedAt
 
   @@index([tenant_id])
+  @@index([tenant_id, parent_id])
   @@map("product_categories")
 }
 
@@ -133,16 +148,146 @@ model Product {
   unit        String           @default("dona")
   barcode     String?
   is_active   Boolean          @default(true)
+  /// «Группа товаров» (katalog guruh — kategoriya ierarxiyasidan alohida)
+  product_group_id Int?
+  product_group    ProductCatalogGroup? @relation(fields: [product_group_id], references: [id], onDelete: SetNull)
+  brand_id         Int?
+  brand            ProductBrand? @relation(fields: [brand_id], references: [id], onDelete: SetNull)
+  manufacturer_id  Int?
+  manufacturer     ProductManufacturer? @relation(fields: [manufacturer_id], references: [id], onDelete: SetNull)
+  segment_id       Int?
+  segment          ProductSegment? @relation(fields: [segment_id], references: [id], onDelete: SetNull)
+  weight_kg        Decimal? @db.Decimal(12, 4)
+  volume_m3        Decimal? @db.Decimal(14, 6)
+  qty_per_block    Int?
+  /// o‘lchov: `cm` yoki `m` (UI: santimetr / metr)
+  dimension_unit   String?  @db.VarChar(8)
+  width_cm         Decimal? @db.Decimal(12, 2)
+  height_cm        Decimal? @db.Decimal(12, 2)
+  length_cm        Decimal? @db.Decimal(12, 2)
+  ikpu_code        String?  @db.VarChar(64)
+  hs_code          String?  @db.VarChar(32)
+  sell_code        String?  @db.VarChar(64)
+  comment          String?  @db.Text
+  sort_order       Int?
+  is_blocked       Boolean  @default(false)
   created_at  DateTime         @default(now())
   updated_at  DateTime         @updatedAt
 
   stock       Stock[]
   order_items OrderItem[]
   prices      ProductPrice[]
+  interchangeable_links InterchangeableGroupProduct[]
 
   @@unique([tenant_id, sku])
   @@index([tenant_id, name])
+  @@index([tenant_id, product_group_id])
+  @@index([tenant_id, brand_id])
+  @@index([tenant_id, segment_id])
   @@map("products")
+}
+
+/// Katalog: «группа товаров»
+model ProductCatalogGroup {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(24)
+  sort_order Int?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  products   Product[]
+
+  @@index([tenant_id])
+  @@map("product_catalog_groups")
+}
+
+model ProductBrand {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(24)
+  sort_order Int?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  products   Product[]
+
+  @@index([tenant_id])
+  @@map("product_brands")
+}
+
+model ProductManufacturer {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(24)
+  sort_order Int?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  products   Product[]
+
+  @@index([tenant_id])
+  @@map("product_manufacturers")
+}
+
+model ProductSegment {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(24)
+  sort_order Int?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  products   Product[]
+
+  @@index([tenant_id])
+  @@map("product_segments")
+}
+
+model InterchangeableProductGroup {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(24)
+  sort_order Int?
+  comment    String?  @db.Text
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  products        InterchangeableGroupProduct[]
+  price_type_links InterchangeableGroupPriceType[]
+
+  @@index([tenant_id])
+  @@map("interchangeable_product_groups")
+}
+
+model InterchangeableGroupProduct {
+  group_id   Int
+  product_id Int
+  group      InterchangeableProductGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  product    Product                     @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@id([group_id, product_id])
+  @@index([product_id])
+  @@map("interchangeable_group_products")
+}
+
+model InterchangeableGroupPriceType {
+  group_id   Int
+  price_type String @db.VarChar(128)
+  group      InterchangeableProductGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
+
+  @@id([group_id, price_type])
+  @@map("interchangeable_group_price_types")
 }
 
 /// Mahsulot narxlari (narx turi: masalan retail, wholesale — bonus `price_type` bilan bog‘lanishi mumkin)
@@ -316,6 +461,24 @@ model ClientAuditLog {
 
   @@index([tenant_id, client_id])
   @@map("client_audit_logs")
+}
+
+/// Yagona audit jurnal — barcha muhim entitylar (staff, product, warehouse, …).
+model TenantAuditEvent {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  actor_user_id Int?
+  actor         User?    @relation("TenantAuditEventActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  entity_type   String   @db.VarChar(64)
+  entity_id     String   @db.VarChar(64)
+  action        String   @db.VarChar(128)
+  payload       Json     @default("{}")
+  created_at    DateTime @default(now())
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, entity_type, entity_id])
+  @@map("tenant_audit_events")
 }
 
 model Warehouse {

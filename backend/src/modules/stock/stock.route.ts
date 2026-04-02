@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
@@ -54,7 +55,11 @@ export async function registerStockRoutes(app: FastifyInstance) {
       if (buf.length === 0) {
         return reply.status(400).send({ error: "EmptyFile" });
       }
-      const result = await importStockReceiptFromXlsx(request.tenant!.id, buf);
+      const result = await importStockReceiptFromXlsx(
+        request.tenant!.id,
+        buf,
+        actorUserIdOrNull(request)
+      );
       return reply.send(result);
     }
   );
@@ -83,7 +88,7 @@ export async function registerStockRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        await applyStockReceipt(request.tenant!.id, parsed.data);
+        await applyStockReceipt(request.tenant!.id, parsed.data, actorUserIdOrNull(request));
         return reply.status(201).send({ ok: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";

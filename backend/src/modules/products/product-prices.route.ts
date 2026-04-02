@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../config/database";
+import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
@@ -84,7 +85,12 @@ export async function registerProductPriceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const rows = await syncProductPrices(request.tenant!.id, id, parsed.data.items);
+        const rows = await syncProductPrices(
+          request.tenant!.id,
+          id,
+          parsed.data.items,
+          actorUserIdOrNull(request)
+        );
         return reply.send({ data: rows });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -108,7 +114,11 @@ export async function registerProductPriceRoutes(app: FastifyInstance) {
       if (buf.length === 0) {
         return reply.status(400).send({ error: "EmptyFile" });
       }
-      const result = await importProductPricesFromXlsx(request.tenant!.id, buf);
+      const result = await importProductPricesFromXlsx(
+        request.tenant!.id,
+        buf,
+        actorUserIdOrNull(request)
+      );
       return reply.send(result);
     }
   );

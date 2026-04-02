@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
+import { actorUserIdOrNull } from "../../lib/request-actor";
 import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import { createStaff, listStaff, patchAgentSupervisor } from "./staff.service";
 
@@ -50,7 +51,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
     }
     try {
-      const row = await createStaff(request.tenant!.id, "agent", parsed.data);
+      const row = await createStaff(request.tenant!.id, "agent", parsed.data, actorUserIdOrNull(request));
       return reply.status(201).send(row);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
@@ -81,7 +82,8 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         const row = await patchAgentSupervisor(
           request.tenant!.id,
           id,
-          parsed.data.supervisor_user_id
+          parsed.data.supervisor_user_id,
+          actorUserIdOrNull(request)
         );
         return reply.send(row);
       } catch (e) {
@@ -114,7 +116,12 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await createStaff(request.tenant!.id, "supervisor", parsed.data);
+        const row = await createStaff(
+          request.tenant!.id,
+          "supervisor",
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.status(201).send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -149,7 +156,12 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await createStaff(request.tenant!.id, "expeditor", parsed.data);
+        const row = await createStaff(
+          request.tenant!.id,
+          "expeditor",
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.status(201).send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";

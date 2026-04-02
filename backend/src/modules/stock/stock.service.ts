@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 export type StockRow = {
   id: number;
@@ -50,7 +51,12 @@ export type StockReceiptInput = {
 /**
  * Prihod: omborga kirim (atomik upsert + increment).
  */
-export async function applyStockReceipt(tenantId: number, input: StockReceiptInput): Promise<void> {
+export async function applyStockReceipt(
+  tenantId: number,
+  input: StockReceiptInput,
+  actorUserId: number | null = null,
+  options?: { skipAudit?: boolean }
+): Promise<void> {
   const wh = await prisma.warehouse.findFirst({
     where: { id: input.warehouse_id, tenant_id: tenantId }
   });
@@ -93,6 +99,21 @@ export async function applyStockReceipt(tenantId: number, input: StockReceiptInp
       });
     }
   });
+
+  if (!options?.skipAudit) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.stock,
+      entityId: input.warehouse_id,
+      action: "receipt",
+      payload: {
+        line_count: input.items.length,
+        note: input.note ?? null,
+        product_ids: input.items.map((i) => i.product_id)
+      }
+    });
+  }
 }
 
 /** Shablon: birinchi qator — sarlavhalar, ikkinchi — namuna */
@@ -252,7 +273,8 @@ export type StockImportResult = {
  */
 export async function importStockReceiptFromXlsx(
   tenantId: number,
-  buffer: Buffer | Uint8Array
+  buffer: Buffer | Uint8Array,
+  actorUserId: number | null = null
 ): Promise<StockImportResult> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(Buffer.from(buffer) as never);
@@ -350,14 +372,30 @@ export async function importStockReceiptFromXlsx(
     }
 
     try {
-      await applyStockReceipt(tenantId, {
-        warehouse_id: whId,
-        items: [{ product_id: product.id, qty }]
-      });
+      await applyStockReceipt(
+        tenantId,
+        {
+          warehouse_id: whId,
+          items: [{ product_id: product.id, qty }]
+        },
+        actorUserId,
+        { skipAudit: true }
+      );
       applied += 1;
     } catch (e) {
       errors.push(`Qator ${r}: ${e instanceof Error ? e.message : "xato"}`);
     }
+  }
+
+  if (applied > 0) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.stock,
+      entityId: "bulk",
+      action: "import.xlsx",
+      payload: { applied_rows: applied, error_count: errors.length, warning_count: warnings.length }
+    });
   }
 
   return { applied, errors, warnings };

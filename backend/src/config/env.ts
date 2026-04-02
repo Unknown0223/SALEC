@@ -17,7 +17,13 @@ const envSchema = z.object({
   /** Excel import va boshqa multipart fayllar (baytlarda). */
   MULTIPART_MAX_FILE_BYTES: z.coerce.number().int().positive().default(50 * 1024 * 1024),
   JWT_ACCESS_SECRET: z.string().min(32).default("access-secret-key-min-32-characters-123"),
-  JWT_REFRESH_SECRET: z.string().min(32).default("refresh-secret-key-min-32-characters-123")
+  JWT_REFRESH_SECRET: z.string().min(32).default("refresh-secret-key-min-32-characters-123"),
+  /** Productionda majburiy: vergul bilan ajratilgan ruxsat etilgan Origin lar (masalan https://panel.example.com) */
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
+  /** POST /auth/login va /api/auth/login uchun bir IP dan maksimal urinishlar (oyna) */
+  AUTH_LOGIN_RATE_MAX: z.coerce.number().int().positive().default(30),
+  /** Login rate limit oynasi (ms), masalan 900000 = 15 daqiqa */
+  AUTH_LOGIN_RATE_WINDOW_MS: z.coerce.number().int().positive().default(900_000)
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -46,6 +52,9 @@ if (env.NODE_ENV === "production") {
     throw new Error(
       `Unsafe production environment defaults detected: ${badProdDefaults.join(", ")}`
     );
+  }
+  if (!env.CORS_ALLOWED_ORIGINS?.trim()) {
+    throw new Error("Production requires CORS_ALLOWED_ORIGINS (comma-separated origins, e.g. https://app.example.com)");
   }
 }
 

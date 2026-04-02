@@ -16,6 +16,12 @@ type Props = {
   onCancel: () => void;
 };
 
+type TenantProfile = {
+  references: {
+    branches?: Array<{ id: string; name: string; active?: boolean }>;
+  };
+};
+
 const emptyForm = {
   first_name: "",
   last_name: "",
@@ -49,6 +55,15 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data;
+    }
+  });
+
+  const branchesQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "staff-create-branches"],
+    enabled: Boolean(tenantSlug) && kind !== "supervisor",
+    queryFn: async () => {
+      const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
+      return (data.references.branches ?? []).filter((b) => b.active !== false);
     }
   });
 
@@ -204,7 +219,18 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
         </select>
         <Input placeholder="Код" value={form.code} onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))} />
         <Input placeholder="ПИНФЛ" value={form.pinfl} onChange={(e) => setForm((p) => ({ ...p, pinfl: e.target.value }))} />
-        <Input placeholder="Филиал" value={form.branch} onChange={(e) => setForm((p) => ({ ...p, branch: e.target.value }))} />
+        <select
+          className="h-9 rounded-md border px-2 text-sm"
+          value={form.branch}
+          onChange={(e) => setForm((p) => ({ ...p, branch: e.target.value }))}
+        >
+          <option value="">Филиал</option>
+          {(branchesQ.data ?? []).map((b) => (
+            <option key={b.id} value={b.name}>
+              {b.name}
+            </option>
+          ))}
+        </select>
         <Input
           placeholder="Должность"
           value={form.position}

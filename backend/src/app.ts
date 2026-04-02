@@ -1,5 +1,6 @@
 import multipart from "@fastify/multipart";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { getAccessUser, jwtAccessVerify } from "./modules/auth/auth.prehandlers";
 import { registerAuthRoutes } from "./modules/auth/auth.route";
@@ -10,26 +11,34 @@ import { registerOrderStreamRoutes } from "./modules/orders/order-stream.route";
 import { registerReferenceRoutes } from "./modules/reference/reference.route";
 import { registerTenantSettingsRoutes } from "./modules/tenant-settings/tenant-settings.route";
 import { registerStockRoutes } from "./modules/stock/stock.route";
+import { registerProductCatalogRoutes } from "./modules/products/product-catalog.route";
 import { registerProductPriceRoutes } from "./modules/products/product-prices.route";
 import { registerProductRoutes } from "./modules/products/products.route";
+import { registerAuditEventRoutes } from "./modules/audit-events/audit-events.route";
 import { registerStaffRoutes } from "./modules/staff/staff.route";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
 import { loggerOptions } from "./config/logger";
 import { jwtPlugin } from "./plugins/jwt.plugin";
 import { tenantPlugin } from "./plugins/tenant.plugin";
+import { requestObservabilityPlugin } from "./plugins/request-observability.plugin";
 import { isOrderEventBusRedisEnabled } from "./lib/order-event-bus";
+import { buildCorsOrigin } from "./lib/cors-options";
 
 export function buildApp() {
-  const app = Fastify({ logger: loggerOptions });
+  const app = Fastify({ logger: loggerOptions, disableRequestLogging: true });
 
-  app.register(cors, { origin: true });
+  app.register(cors, { origin: buildCorsOrigin() });
   app.register(multipart, { limits: { fileSize: env.MULTIPART_MAX_FILE_BYTES } });
   app.register(jwtPlugin);
+  /** Faqat `config.rateLimit` berilgan marshrutlar (login) uchun — global: false */
+  app.register(rateLimit, { global: false });
   app.register(tenantPlugin);
+  app.register(requestObservabilityPlugin);
   app.register(registerAuthRoutes);
   app.register(registerClientRoutes);
   app.register(registerProductPriceRoutes);
+  app.register(registerProductCatalogRoutes);
   app.register(registerProductRoutes);
   app.register(registerStaffRoutes);
   app.register(registerBonusRuleRoutes);
@@ -37,6 +46,7 @@ export function buildApp() {
   app.register(registerOrderStreamRoutes);
   app.register(registerReferenceRoutes);
   app.register(registerTenantSettingsRoutes);
+  app.register(registerAuditEventRoutes);
   app.register(registerStockRoutes);
 
   app.get("/health", async () => ({
@@ -93,8 +103,16 @@ export function buildApp() {
         requestId
       });
     }
-    if ((error as { statusCode?: number }).statusCode) {
-      return reply.status((error as { statusCode: number }).statusCode).send({
+    const sc = (error as { statusCode?: number }).statusCode;
+    if (sc) {
+      if (sc === 429) {
+        return reply.status(429).send({
+          error: "TooManyRequests",
+          message: error.message || "Rate limit exceeded",
+          requestId
+        });
+      }
+      return reply.status(sc).send({
         error: error.name,
         message: error.message,
         requestId

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import {
   bonusPolicyToJson,
   mergeBonusStackPatch,
@@ -30,7 +31,8 @@ export async function updateTenantBonusStack(
     mode: unknown;
     max_units: unknown;
     forbid_apply_all_eligible: unknown;
-  }>
+  }>,
+  actorUserId: number | null = null
 ): Promise<{ policy: BonusStackPolicy; json: BonusStackJson }> {
   const row = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -48,8 +50,63 @@ export async function updateTenantBonusStack(
     data: { settings: nextSettings as Prisma.InputJsonValue }
   });
 
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.tenant_settings,
+    entityId: tenantId,
+    action: "patch.bonus_stack",
+    payload: { patch, bonus_stack: bonusPolicyToJson(policy) }
+  });
+
   return { policy, json: bonusPolicyToJson(policy) };
 }
+
+export type TerritoryNodeDto = {
+  id: string;
+  name: string;
+  code?: string | null;
+  comment?: string | null;
+  sort_order?: number | null;
+  active?: boolean;
+  children: TerritoryNodeDto[];
+};
+
+export type UnitMeasureDto = {
+  id: string;
+  name: string;
+  title?: string | null;
+  code?: string | null;
+  sort_order?: number | null;
+  comment?: string | null;
+  active?: boolean;
+};
+
+export type ClientRefEntryDto = {
+  id: string;
+  name: string;
+  code: string | null;
+  sort_order: number | null;
+  comment: string | null;
+  active: boolean;
+  color: string | null;
+};
+
+export type BranchDto = {
+  id: string;
+  name: string;
+  code?: string | null;
+  sort_order?: number | null;
+  comment?: string | null;
+  active?: boolean;
+  territory?: string | null;
+  city?: string | null;
+  cashbox?: string | null;
+  user_links?: {
+    role: string;
+    user_ids: number[];
+  }[];
+};
 
 export type TenantProfileDto = {
   name: string;
@@ -65,14 +122,262 @@ export type TenantProfileDto = {
     client_categories: string[];
     client_type_codes: string[];
     client_formats: string[];
+    client_format_entries: ClientRefEntryDto[];
+    client_type_entries: ClientRefEntryDto[];
+    client_category_entries: ClientRefEntryDto[];
     sales_channels: string[];
     client_product_category_refs: string[];
+    /** Manzil / logistika — mijoz kartasida tanlanadi, shu yerda yaratiladi */
+    client_districts: string[];
+    client_neighborhoods: string[];
+    client_zones: string[];
+    client_logistics_services: string[];
+    territory_levels: string[];
+    /** Ierarxik territoriya daraxti (asosiy manba) */
+    territory_nodes: TerritoryNodeDto[];
+    unit_measures: UnitMeasureDto[];
+    branches: BranchDto[];
+    /** Eski format — faqat migratsiya / orqaga moslik */
+    territory_tree: { zone: string; region: string; cities: string[] }[];
   };
 };
 
 function stringArrayFromUnknown(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((s) => s.trim());
+}
+
+function territoryTreeFromUnknown(v: unknown): { zone: string; region: string; cities: string[] }[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((item) => {
+      if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
+      const row = item as Record<string, unknown>;
+      const zone = typeof row.zone === "string" ? row.zone.trim() : "";
+      const region = typeof row.region === "string" ? row.region.trim() : "";
+      const cities = stringArrayFromUnknown(row.cities);
+      if (!zone || !region) return null;
+      return { zone, region, cities };
+    })
+    .filter((x): x is { zone: string; region: string; cities: string[] } => x != null);
+}
+
+function parseTerritoryNode(item: unknown): TerritoryNodeDto | null {
+  if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
+  const row = item as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!id || !name) return null;
+  const codeRaw = typeof row.code === "string" ? row.code.trim().toUpperCase() : "";
+  const code = codeRaw && /^[A-Z0-9_]+$/.test(codeRaw) ? codeRaw.slice(0, 20) : null;
+  const comment = typeof row.comment === "string" ? row.comment.trim() : "";
+  const sort_order =
+    typeof row.sort_order === "number" && Number.isInteger(row.sort_order) ? row.sort_order : null;
+  const active = typeof row.active === "boolean" ? row.active : true;
+  const rawChildren = row.children;
+  const children = Array.isArray(rawChildren)
+    ? rawChildren.map(parseTerritoryNode).filter((x): x is TerritoryNodeDto => x != null)
+    : [];
+  return { id, name, code, comment: comment || null, sort_order, active, children };
+}
+
+function territoryNodesFromUnknown(v: unknown): TerritoryNodeDto[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(parseTerritoryNode).filter((x): x is TerritoryNodeDto => x != null);
+}
+
+function parseUnitMeasure(item: unknown): UnitMeasureDto | null {
+  if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
+  const row = item as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!id || !name) return null;
+  const title = typeof row.title === "string" ? row.title.trim() : "";
+  const codeRaw = typeof row.code === "string" ? row.code.trim().toUpperCase() : "";
+  const code = codeRaw && /^[A-Z0-9_]+$/.test(codeRaw) ? codeRaw.slice(0, 20) : null;
+  const sort_order =
+    typeof row.sort_order === "number" && Number.isInteger(row.sort_order) ? row.sort_order : null;
+  const comment = typeof row.comment === "string" ? row.comment.trim() : "";
+  const active = typeof row.active === "boolean" ? row.active : true;
+  return { id, name, title: title || null, code, sort_order, comment: comment || null, active };
+}
+
+function unitMeasuresFromUnknown(v: unknown): UnitMeasureDto[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(parseUnitMeasure).filter((x): x is UnitMeasureDto => x != null);
+}
+
+function simpleHash36(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
+}
+
+function parseClientRefEntry(item: unknown): ClientRefEntryDto | null {
+  if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
+  const row = item as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!id || !name) return null;
+  const codeRaw = typeof row.code === "string" ? row.code.trim().toUpperCase() : "";
+  const code = codeRaw && /^[A-Z0-9_]+$/.test(codeRaw) ? codeRaw.slice(0, 20) : null;
+  const sort_order =
+    typeof row.sort_order === "number" && Number.isInteger(row.sort_order) ? row.sort_order : null;
+  const comment = typeof row.comment === "string" ? row.comment.trim() : "";
+  const active = typeof row.active === "boolean" ? row.active : true;
+  const colorRaw = typeof row.color === "string" ? row.color.trim() : "";
+  const color = colorRaw ? colorRaw.slice(0, 32) : null;
+  return { id, name, code, sort_order, comment: comment || null, active, color };
+}
+
+export function clientRefEntriesFromUnknown(v: unknown): ClientRefEntryDto[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(parseClientRefEntry).filter((x): x is ClientRefEntryDto => x != null);
+}
+
+function legacyStringsToClientRefEntries(strings: string[], prefix: string): ClientRefEntryDto[] {
+  return strings.map((s, i) => ({
+    id: `legacy-${prefix}-${i}-${simpleHash36(s)}`,
+    name: s,
+    code: null,
+    sort_order: null,
+    comment: null,
+    active: true,
+    color: null
+  }));
+}
+
+function resolveClientRefEntries(
+  ref: Record<string, unknown>,
+  key: "client_format_entries" | "client_type_entries" | "client_category_entries",
+  legacyStrings: string[],
+  legacyPrefix: string
+): ClientRefEntryDto[] {
+  const parsed = clientRefEntriesFromUnknown(ref[key]);
+  if (parsed.length > 0) return parsed;
+  return legacyStringsToClientRefEntries(legacyStrings, legacyPrefix);
+}
+
+type ClientRefEntryPatch = {
+  id: string;
+  name: string;
+  code?: string | null;
+  sort_order?: number | null;
+  comment?: string | null;
+  active?: boolean;
+  color?: string | null;
+};
+
+function toClientRefEntryDto(e: ClientRefEntryPatch): ClientRefEntryDto {
+  return {
+    id: e.id.trim(),
+    name: e.name.trim(),
+    code: e.code ?? null,
+    sort_order: e.sort_order ?? null,
+    comment: e.comment ?? null,
+    active: e.active ?? true,
+    color: e.color ?? null
+  };
+}
+
+export function activeValuesFromClientRefEntries(entries: ClientRefEntryDto[]): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.active === false) continue;
+    const v = (e.code && e.code.trim() !== "" ? e.code.trim() : e.name.trim()) || "";
+    if (v) out.push(v);
+  }
+  return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b, "uz"));
+}
+
+function parseBranch(item: unknown): BranchDto | null {
+  if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
+  const row = item as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (!id || !name) return null;
+  const codeRaw = typeof row.code === "string" ? row.code.trim().toUpperCase() : "";
+  const code = codeRaw && /^[A-Z0-9_]+$/.test(codeRaw) ? codeRaw.slice(0, 20) : null;
+  const sort_order =
+    typeof row.sort_order === "number" && Number.isInteger(row.sort_order) ? row.sort_order : null;
+  const comment = typeof row.comment === "string" ? row.comment.trim() : "";
+  const active = typeof row.active === "boolean" ? row.active : true;
+  const territory = typeof row.territory === "string" ? row.territory.trim() : "";
+  const city = typeof row.city === "string" ? row.city.trim() : "";
+  const cashbox = typeof row.cashbox === "string" ? row.cashbox.trim() : "";
+  const user_links = Array.isArray(row.user_links)
+    ? row.user_links
+        .map((x) => {
+          if (x == null || typeof x !== "object" || Array.isArray(x)) return null;
+          const r = x as Record<string, unknown>;
+          const role = typeof r.role === "string" ? r.role.trim() : "";
+          if (!role) return null;
+          const user_ids = Array.isArray(r.user_ids)
+            ? r.user_ids.filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n > 0)
+            : [];
+          return { role, user_ids: Array.from(new Set(user_ids)) };
+        })
+        .filter((x): x is { role: string; user_ids: number[] } => x != null)
+    : [];
+  return {
+    id,
+    name,
+    code,
+    sort_order,
+    comment: comment || null,
+    active,
+    territory: territory || null,
+    city: city || null,
+    cashbox: cashbox || null,
+    user_links
+  };
+}
+
+function branchesFromUnknown(v: unknown): BranchDto[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(parseBranch).filter((x): x is BranchDto => x != null);
+}
+
+function flattenActiveTerritoryNames(nodes: TerritoryNodeDto[]): string[] {
+  const out: string[] = [];
+  const walk = (list: TerritoryNodeDto[]) => {
+    for (const n of list) {
+      if (n.active !== false && n.name.trim()) out.push(n.name.trim());
+      if (n.children.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return Array.from(new Set(out));
+}
+
+function legacyRowsToNodes(rows: { zone: string; region: string; cities: string[] }[]): TerritoryNodeDto[] {
+  return rows.map((r, i) => ({
+    id: `legacy-z-${i}`,
+    name: r.zone,
+    code: null,
+    comment: null,
+    sort_order: null,
+    active: true,
+    children: [
+      {
+        id: `legacy-z-${i}-r`,
+        name: r.region,
+        code: null,
+        comment: null,
+        sort_order: null,
+        active: true,
+        children: r.cities.map((c, j) => ({
+          id: `legacy-z-${i}-c-${j}`,
+          name: c,
+          code: null,
+          comment: null,
+          sort_order: null,
+          active: true,
+          children: []
+        }))
+      }
+    ]
+  }));
 }
 
 export async function getTenantProfile(tenantId: number): Promise<TenantProfileDto> {
@@ -86,6 +391,14 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
   const st = asRecord(row.settings);
   const ff = asRecord(st.feature_flags);
   const ref = asRecord(st.references);
+  let territory_nodes = territoryNodesFromUnknown(ref.territory_nodes);
+  const territory_tree = territoryTreeFromUnknown(ref.territory_tree);
+  if (territory_nodes.length === 0 && territory_tree.length > 0) {
+    territory_nodes = legacyRowsToNodes(territory_tree);
+  }
+  const client_formats = stringArrayFromUnknown(ref.client_formats);
+  const client_type_codes = stringArrayFromUnknown(ref.client_type_codes);
+  const client_categories = stringArrayFromUnknown(ref.client_categories);
   return {
     name: row.name,
     phone: row.phone,
@@ -96,11 +409,23 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
       payment_types: stringArrayFromUnknown(ref.payment_types),
       return_reasons: stringArrayFromUnknown(ref.return_reasons),
       regions: stringArrayFromUnknown(ref.regions),
-      client_categories: stringArrayFromUnknown(ref.client_categories),
-      client_type_codes: stringArrayFromUnknown(ref.client_type_codes),
-      client_formats: stringArrayFromUnknown(ref.client_formats),
+      client_categories,
+      client_type_codes,
+      client_formats,
+      client_format_entries: resolveClientRefEntries(ref, "client_format_entries", client_formats, "fmt"),
+      client_type_entries: resolveClientRefEntries(ref, "client_type_entries", client_type_codes, "typ"),
+      client_category_entries: resolveClientRefEntries(ref, "client_category_entries", client_categories, "cat"),
       sales_channels: stringArrayFromUnknown(ref.sales_channels),
-      client_product_category_refs: stringArrayFromUnknown(ref.client_product_category_refs)
+      client_product_category_refs: stringArrayFromUnknown(ref.client_product_category_refs),
+      client_districts: stringArrayFromUnknown(ref.client_districts),
+      client_neighborhoods: stringArrayFromUnknown(ref.client_neighborhoods),
+      client_zones: stringArrayFromUnknown(ref.client_zones),
+      client_logistics_services: stringArrayFromUnknown(ref.client_logistics_services),
+      territory_levels: stringArrayFromUnknown(ref.territory_levels),
+      territory_nodes,
+      unit_measures: unitMeasuresFromUnknown(ref.unit_measures),
+      branches: branchesFromUnknown(ref.branches),
+      territory_tree
     }
   };
 }
@@ -122,8 +447,21 @@ export async function patchTenantProfile(
       client_formats?: string[];
       sales_channels?: string[];
       client_product_category_refs?: string[];
+      client_districts?: string[];
+      client_neighborhoods?: string[];
+      client_zones?: string[];
+      client_logistics_services?: string[];
+      territory_levels?: string[];
+      territory_nodes?: TerritoryNodeDto[];
+      unit_measures?: UnitMeasureDto[];
+      branches?: BranchDto[];
+      client_format_entries?: ClientRefEntryPatch[];
+      client_type_entries?: ClientRefEntryPatch[];
+      client_category_entries?: ClientRefEntryPatch[];
+      territory_tree?: { zone: string; region: string; cities: string[] }[];
     };
-  }>
+  }>,
+  actorUserId: number | null = null
 ): Promise<TenantProfileDto> {
   const row = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -182,6 +520,50 @@ export async function patchTenantProfile(
       if (patch.references.client_product_category_refs != null) {
         merged.client_product_category_refs = patch.references.client_product_category_refs;
       }
+      if (patch.references.client_districts != null) {
+        merged.client_districts = patch.references.client_districts;
+      }
+      if (patch.references.client_neighborhoods != null) {
+        merged.client_neighborhoods = patch.references.client_neighborhoods;
+      }
+      if (patch.references.client_zones != null) {
+        merged.client_zones = patch.references.client_zones;
+      }
+      if (patch.references.client_logistics_services != null) {
+        merged.client_logistics_services = patch.references.client_logistics_services;
+      }
+      if (patch.references.territory_levels != null) {
+        merged.territory_levels = patch.references.territory_levels;
+      }
+      if (patch.references.territory_nodes != null) {
+        merged.territory_nodes = patch.references.territory_nodes;
+        // Mavjud mijoz modullarida ishlatiladigan `regions` ro'yxatini ham yangilab boramiz.
+        merged.regions = flattenActiveTerritoryNames(patch.references.territory_nodes);
+      }
+      if (patch.references.unit_measures != null) {
+        merged.unit_measures = patch.references.unit_measures;
+      }
+      if (patch.references.branches != null) {
+        merged.branches = patch.references.branches;
+      }
+      if (patch.references.client_format_entries != null) {
+        const norm = patch.references.client_format_entries.map(toClientRefEntryDto);
+        merged.client_format_entries = norm;
+        merged.client_formats = activeValuesFromClientRefEntries(norm);
+      }
+      if (patch.references.client_type_entries != null) {
+        const norm = patch.references.client_type_entries.map(toClientRefEntryDto);
+        merged.client_type_entries = norm;
+        merged.client_type_codes = activeValuesFromClientRefEntries(norm);
+      }
+      if (patch.references.client_category_entries != null) {
+        const norm = patch.references.client_category_entries.map(toClientRefEntryDto);
+        merged.client_category_entries = norm;
+        merged.client_categories = activeValuesFromClientRefEntries(norm);
+      }
+      if (patch.references.territory_tree != null) {
+        merged.territory_tree = patch.references.territory_tree;
+      }
       nextSettings.references = merged;
     }
     data.settings = nextSettings as Prisma.InputJsonValue;
@@ -191,6 +573,14 @@ export async function patchTenantProfile(
     await prisma.tenant.update({
       where: { id: tenantId },
       data
+    });
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.tenant_settings,
+      entityId: tenantId,
+      action: "patch.profile",
+      payload: { changed_keys: Object.keys(patch) }
     });
   }
 

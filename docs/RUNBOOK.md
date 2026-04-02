@@ -10,6 +10,11 @@
    - `db:deploy` bajaradi
    - API + web dev serverni ishga tushiradi
 
+## Production muhit (qisqa)
+- **`CORS_ALLOWED_ORIGINS`** — vergul bilan ajratilgan ruxsat etilgan `Origin` lar (majburiy, aks holda backend ishga tushmaydi).
+- **`AUTH_LOGIN_RATE_MAX`** / **`AUTH_LOGIN_RATE_WINDOW_MS`** — login endpointiga IP bo‘yicha limit (default: 30 / 15 daqiqa).
+- **DB pool:** [DATABASE_POOL.md](./DATABASE_POOL.md) · **SLO / loglar:** [SLO_AND_OBSERVABILITY.md](./SLO_AND_OBSERVABILITY.md)
+
 ## Health tekshiruvlar
 - Liveness: `GET http://127.0.0.1:4000/health`
 - Readiness: `GET http://127.0.0.1:4000/ready`

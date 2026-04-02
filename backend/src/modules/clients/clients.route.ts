@@ -28,9 +28,21 @@ const checkBodySchema = z.object({
   phone: z.string().nullable().optional()
 });
 
+const optionalRefString = z.string().max(500).nullable().optional();
+
 const createClientBodySchema = z.object({
   name: z.string().min(1).max(500),
-  phone: z.string().max(80).nullable().optional()
+  phone: z.string().max(80).nullable().optional(),
+  category: optionalRefString,
+  client_type_code: optionalRefString,
+  region: optionalRefString,
+  district: optionalRefString,
+  neighborhood: optionalRefString,
+  zone: optionalRefString,
+  client_format: optionalRefString,
+  sales_channel: optionalRefString,
+  product_category_ref: optionalRefString,
+  logistics_service: optionalRefString
 });
 
 const mergeBodySchema = z.object({
@@ -213,7 +225,17 @@ export async function registerClientRoutes(app: FastifyInstance) {
         const actorUserId = Number.isFinite(sub) && sub > 0 ? sub : null;
         const { id } = await createClientMinimal(request.tenant!.id, actorUserId, {
           name: parsed.data.name,
-          phone: parsed.data.phone ?? null
+          phone: parsed.data.phone ?? null,
+          category: parsed.data.category,
+          client_type_code: parsed.data.client_type_code,
+          region: parsed.data.region,
+          district: parsed.data.district,
+          neighborhood: parsed.data.neighborhood,
+          zone: parsed.data.zone,
+          client_format: parsed.data.client_format,
+          sales_channel: parsed.data.sales_channel,
+          product_category_ref: parsed.data.product_category_ref,
+          logistics_service: parsed.data.logistics_service
         });
         return reply.status(201).send({ id });
       } catch (e) {

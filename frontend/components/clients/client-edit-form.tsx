@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { mergeRefOptions } from "@/lib/merge-ref-options";
 import { cn } from "@/lib/utils";
 
 type ClientDetailApi = ClientRow & {
@@ -102,17 +103,6 @@ function toggleWeekday(slot: AgentSlotForm, day: number): number[] {
   if (set.has(day)) set.delete(day);
   else set.add(day);
   return Array.from(set).sort((a, b) => a - b);
-}
-
-function mergeRefOptions(current: string, list: string[] | undefined): string[] {
-  const s = new Set<string>();
-  for (const x of list ?? []) {
-    const t = x?.trim();
-    if (t) s.add(t);
-  }
-  const c = current.trim();
-  if (c) s.add(c);
-  return Array.from(s).sort((a, b) => a.localeCompare(b, "uz"));
 }
 
 function Caption({ children, variant }: { children: ReactNode; variant?: "write" | "pick" }) {
@@ -630,14 +620,15 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
               <p className="mt-1 text-xs text-muted-foreground">
                 Ro‘yxatlarni administrator{" "}
                 <SpravochnikAdminLink href="/settings/spravochnik/client-lists">mijoz spravochniklari</SpravochnikAdminLink>{" "}
-                va <SpravochnikAdminLink href="/settings/company#ref-regions">kompaniya hududlari</SpravochnikAdminLink>{" "}
+                (toifa, tuman, mahalla, zona, logistika va boshqalar) va{" "}
+                <SpravochnikAdminLink href="/settings/territories">kompaniya hududlari</SpravochnikAdminLink>{" "}
                 bo‘limlarida to‘ldiradi.
               </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Toifa</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-category">Qiymatlar</SpravochnikAdminLink>
+                    <SpravochnikAdminLink href="/settings/client-categories">Qiymatlar</SpravochnikAdminLink>
                   </div>
                   <select
                     className={selectCls}
@@ -656,7 +647,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Tur (kod)</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-type">Qiymatlar</SpravochnikAdminLink>
+                    <SpravochnikAdminLink href="/settings/client-types">Qiymatlar</SpravochnikAdminLink>
                   </div>
                   <select
                     className={selectCls}
@@ -675,7 +666,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Teritoriya</Label>
-                    <SpravochnikAdminLink href="/settings/company#ref-regions">Hududlar</SpravochnikAdminLink>
+                    <SpravochnikAdminLink href="/settings/territories">Hududlar</SpravochnikAdminLink>
                   </div>
                   <select
                     className={selectCls}
@@ -694,7 +685,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Mijoz formati</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-format">Qiymatlar</SpravochnikAdminLink>
+                    <SpravochnikAdminLink href="/settings/client-formats">Qiymatlar</SpravochnikAdminLink>
                   </div>
                   <select
                     className={selectCls}
@@ -716,11 +707,16 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
               <Caption>Manzil (batafsil, ixtiyoriy)</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Tuman, mahalla, zona ro‘yxati avtomatik to‘planadi; yangi qiymatni birinchi marta shu yerda tanlab saqlang.
+                Oldindan ro‘yxat:{" "}
+                <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">mijoz spravochniklari</SpravochnikAdminLink>
+                . Mavjud mijozlardagi qiymatlar ham tanlovga qo‘shiladi.
               </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label>Tuman</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Tuman</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">Qiymatlar</SpravochnikAdminLink>
+                  </div>
                   <select
                     className={selectCls}
                     value={district}
@@ -736,7 +732,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Mahalla</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Mahalla</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">Qiymatlar</SpravochnikAdminLink>
+                  </div>
                   <select
                     className={selectCls}
                     value={neighborhood}
@@ -752,7 +751,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Zona</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Zona</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-zone">Qiymatlar</SpravochnikAdminLink>
+                  </div>
                   <select
                     className={selectCls}
                     value={zone}
@@ -1124,7 +1126,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label>Logistika xizmati</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="mb-0">Logistika xizmati</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-logistics">Qiymatlar</SpravochnikAdminLink>
+                </div>
                 <select
                   className={selectCls}
                   value={logisticsService}

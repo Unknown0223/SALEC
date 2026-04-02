@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { prisma } from "../../config/database";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
@@ -160,7 +161,11 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await createBonusRule(request.tenant!.id, parsed.data);
+        const row = await createBonusRule(
+          request.tenant!.id,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.status(201).send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -188,7 +193,12 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "EmptyBody" });
       }
       try {
-        const row = await updateBonusRule(request.tenant!.id, id, parsed.data);
+        const row = await updateBonusRule(
+          request.tenant!.id,
+          id,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -214,7 +224,12 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await setBonusRuleActive(request.tenant!.id, id, parsed.data.is_active);
+        const row = await setBonusRuleActive(
+          request.tenant!.id,
+          id,
+          parsed.data.is_active,
+          actorUserIdOrNull(request)
+        );
         return reply.send(row);
       } catch (e) {
         if (e instanceof Error && e.message === "NOT_FOUND") {
@@ -235,7 +250,11 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "InvalidId" });
       }
       try {
-        const row = await softDeactivateBonusRule(request.tenant!.id, id);
+        const row = await softDeactivateBonusRule(
+          request.tenant!.id,
+          id,
+          actorUserIdOrNull(request)
+        );
         return reply.send(row);
       } catch (e) {
         if (e instanceof Error && e.message === "NOT_FOUND") {

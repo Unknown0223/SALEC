@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 const DEFAULT_PRICE_TYPE = "retail";
 
@@ -52,7 +53,8 @@ export type PriceInputItem = { price_type: string; price: number };
 export async function syncProductPrices(
   tenantId: number,
   productId: number,
-  items: PriceInputItem[]
+  items: PriceInputItem[],
+  actorUserId: number | null = null
 ): Promise<PriceRow[]> {
   const product = await prisma.product.findFirst({
     where: { id: productId, tenant_id: tenantId }
@@ -82,6 +84,18 @@ export async function syncProductPrices(
     });
   });
 
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.product_price,
+    entityId: productId,
+    action: "sync",
+    payload: {
+      item_count: items.length,
+      types: items.map((i) => i.price_type.trim())
+    }
+  });
+
   return listProductPrices(tenantId, productId);
 }
 
@@ -95,7 +109,8 @@ function priceImportHeaderToKey(h: string): string | null {
 
 export async function importProductPricesFromXlsx(
   tenantId: number,
-  buffer: Buffer | Uint8Array
+  buffer: Buffer | Uint8Array,
+  actorUserId: number | null = null
 ): Promise<{ upserted: number; errors: string[] }> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(Buffer.from(buffer) as never);
@@ -172,6 +187,17 @@ export async function importProductPricesFromXlsx(
     } catch (e) {
       errors.push(`Qator ${r}: ${e instanceof Error ? e.message : "xato"}`);
     }
+  }
+
+  if (upserted > 0) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.product_price,
+      entityId: "bulk",
+      action: "import.xlsx",
+      payload: { upserted, error_count: errors.length }
+    });
   }
 
   return { upserted, errors };

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { env } from "../../config/env";
 import { getAccessUser, jwtAccessVerify } from "./auth.prehandlers";
 import { login, logout, refresh } from "./auth.service";
 
@@ -15,8 +16,17 @@ const refreshSchema = z.object({
 
 const AUTH_PREFIXES = ["/auth", "/api/auth"] as const;
 
+const loginRouteOpts = {
+  config: {
+    rateLimit: {
+      max: env.AUTH_LOGIN_RATE_MAX,
+      timeWindow: env.AUTH_LOGIN_RATE_WINDOW_MS
+    }
+  }
+};
+
 function registerAuthAtBase(app: FastifyInstance, base: string) {
-  app.post(`${base}/login`, async (request, reply) => {
+  app.post(`${base}/login`, loginRouteOpts, async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });

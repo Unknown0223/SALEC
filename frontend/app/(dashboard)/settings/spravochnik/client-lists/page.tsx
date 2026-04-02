@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
@@ -16,11 +15,12 @@ type TenantProfile = {
     payment_types: string[];
     return_reasons: string[];
     regions: string[];
-    client_categories: string[];
-    client_type_codes: string[];
-    client_formats: string[];
     sales_channels: string[];
     client_product_category_refs: string[];
+    client_districts: string[];
+    client_neighborhoods: string[];
+    client_zones: string[];
+    client_logistics_services: string[];
   };
 };
 
@@ -38,11 +38,12 @@ export default function ClientListsSpravochnikPage() {
   const hydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
-  const [cat, setCat] = useState("");
-  const [types, setTypes] = useState("");
-  const [formats, setFormats] = useState("");
   const [sales, setSales] = useState("");
   const [prodCat, setProdCat] = useState("");
+  const [districts, setDistricts] = useState("");
+  const [neighborhoods, setNeighborhoods] = useState("");
+  const [zones, setZones] = useState("");
+  const [logisticsSvcs, setLogisticsSvcs] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
@@ -56,11 +57,12 @@ export default function ClientListsSpravochnikPage() {
   useEffect(() => {
     if (!data?.references) return;
     const r = data.references;
-    setCat((r.client_categories ?? []).join("\n"));
-    setTypes((r.client_type_codes ?? []).join("\n"));
-    setFormats((r.client_formats ?? []).join("\n"));
     setSales((r.sales_channels ?? []).join("\n"));
     setProdCat((r.client_product_category_refs ?? []).join("\n"));
+    setDistricts((r.client_districts ?? []).join("\n"));
+    setNeighborhoods((r.client_neighborhoods ?? []).join("\n"));
+    setZones((r.client_zones ?? []).join("\n"));
+    setLogisticsSvcs((r.client_logistics_services ?? []).join("\n"));
   }, [data]);
 
   const save = useMutation({
@@ -68,11 +70,12 @@ export default function ClientListsSpravochnikPage() {
       if (!tenantSlug) throw new Error("no");
       const { data: body } = await api.patch<TenantProfile>(`/api/${tenantSlug}/settings/profile`, {
         references: {
-          client_categories: splitLines(cat),
-          client_type_codes: splitLines(types),
-          client_formats: splitLines(formats),
           sales_channels: splitLines(sales),
-          client_product_category_refs: splitLines(prodCat)
+          client_product_category_refs: splitLines(prodCat),
+          client_districts: splitLines(districts),
+          client_neighborhoods: splitLines(neighborhoods),
+          client_zones: splitLines(zones),
+          client_logistics_services: splitLines(logisticsSvcs)
         }
       });
       return body;
@@ -106,6 +109,16 @@ export default function ClientListsSpravochnikPage() {
           <Link className="text-primary underline-offset-4 hover:underline" href="/settings/spravochnik/supervisors">
             Supervizorlar
           </Link>
+          <span className="text-muted-foreground">|</span>
+          <Link className="text-primary underline-offset-4 hover:underline" href="/settings/client-formats">
+            Формат клиента
+          </Link>
+          <Link className="text-primary underline-offset-4 hover:underline" href="/settings/client-types">
+            Тип клиента
+          </Link>
+          <Link className="text-primary underline-offset-4 hover:underline" href="/settings/client-categories">
+            Категория клиента
+          </Link>
         </div>
       </div>
 
@@ -122,17 +135,23 @@ export default function ClientListsSpravochnikPage() {
             <ul className="mt-2 list-disc space-y-1 pl-4">
               <li>Har qatorga bitta qiymat yoki vergul/nuqtali vergul bilan bir nechta.</li>
               <li>Mavjud mijozlarda allaqachon bor qiymatlar ham tanlovda ko‘rinadi (avtomatik).</li>
-              <li>«Teritoriya» uchun asosiy ro‘yxat: Kompaniya sozlamalaridagi hududlar + mijozlardagi viloyat.</li>
+              <li>«Teritoriya» (viloyat): Kompaniya sozlamalaridagi hududlar + mijozlardagi qiymatlar.</li>
+              <li>Tuman, mahalla, zona, logistika: shu sahifada yaratiladi — mijoz kartasida tanlanadi.</li>
+              <li>
+                Mijoz <strong>formati</strong>, <strong>turi</strong> va <strong>kategoriyasi</strong> endi sozlamalar
+                katalogidagi alohida bo‘limlarda (jadval + modal).
+              </li>
             </ul>
           </section>
 
           {(
             [
-              ["ref-category", "Mijoz toifasi (category)", cat, setCat, "Masalan: A, B, retail"],
-              ["ref-type", "Mijoz turi (kod)", types, setTypes, "Masalan: FOOD-HPC"],
-              ["ref-format", "Mijoz formati", formats, setFormats, "Masalan: Superettes"],
               ["ref-sales", "Savdo kanali", sales, setSales, "Masalan: TRAD TRADE"],
-              ["ref-prod-cat", "Mahsulot toifasi (mijozga)", prodCat, setProdCat, "Qo‘shimcha varaqdagi dropdown"]
+              ["ref-prod-cat", "Mahsulot toifasi (mijozga)", prodCat, setProdCat, "Qo‘shimcha varaqdagi dropdown"],
+              ["ref-district", "Tuman", districts, setDistricts, "Mijoz manzili — tuman"],
+              ["ref-neighborhood", "Mahalla", neighborhoods, setNeighborhoods, "Mijoz manzili — mahalla"],
+              ["ref-zone", "Zona", zones, setZones, "Mijoz manzili — zona (masalan savdo zonasi)"],
+              ["ref-logistics", "Logistika xizmati", logisticsSvcs, setLogisticsSvcs, "Mijoz kartasidagi logistika tanlovi"]
             ] as const
           ).map(([anchor, title, val, setVal, ph]) => (
             <section key={anchor} id={anchor} className="scroll-mt-20 grid gap-2">

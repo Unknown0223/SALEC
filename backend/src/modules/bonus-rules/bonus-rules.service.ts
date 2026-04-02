@@ -1,5 +1,6 @@
 import type { BonusRule, BonusRuleCondition } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 type RuleWithConditions = BonusRule & { conditions: BonusRuleCondition[] };
 
@@ -261,7 +262,11 @@ function ruleScalarsFromInput(
   };
 }
 
-export async function createBonusRule(tenantId: number, input: CreateBonusRuleInput): Promise<BonusRuleRow> {
+export async function createBonusRule(
+  tenantId: number,
+  input: CreateBonusRuleInput,
+  actorUserId: number | null = null
+): Promise<BonusRuleRow> {
   const conditions = normalizeConditions(input.type, input);
   const buyForVal =
     conditions && conditions.length > 0 ? Math.floor(conditions[0].step_qty) : (input.buy_qty ?? null);
@@ -302,13 +307,22 @@ export async function createBonusRule(tenantId: number, input: CreateBonusRuleIn
 
   const full = await fetchBonusRuleFull(tenantId, created);
   if (!full) throw new Error("NOT_FOUND");
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.bonus_rule,
+    entityId: full.id,
+    action: "create",
+    payload: { name: full.name, type: full.type, is_active: full.is_active }
+  });
   return full;
 }
 
 export async function updateBonusRule(
   tenantId: number,
   id: number,
-  input: UpdateBonusRuleInput
+  input: UpdateBonusRuleInput,
+  actorUserId: number | null = null
 ): Promise<BonusRuleRow> {
   const existing = await prisma.bonusRule.findFirst({
     where: { id, tenant_id: tenantId },
@@ -472,10 +486,22 @@ export async function updateBonusRule(
 
   const full = await fetchBonusRuleFull(tenantId, id);
   if (!full) throw new Error("NOT_FOUND");
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.bonus_rule,
+    entityId: id,
+    action: "update",
+    payload: { changed_keys: Object.keys(input) }
+  });
   return full;
 }
 
-export async function softDeactivateBonusRule(tenantId: number, id: number): Promise<BonusRuleRow> {
+export async function softDeactivateBonusRule(
+  tenantId: number,
+  id: number,
+  actorUserId: number | null = null
+): Promise<BonusRuleRow> {
   const existing = await prisma.bonusRule.findFirst({
     where: { id, tenant_id: tenantId }
   });
@@ -488,13 +514,22 @@ export async function softDeactivateBonusRule(tenantId: number, id: number): Pro
   });
   const full = await fetchBonusRuleFull(tenantId, id);
   if (!full) throw new Error("NOT_FOUND");
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.bonus_rule,
+    entityId: id,
+    action: "soft_delete",
+    payload: { is_active: false, name: full.name }
+  });
   return full;
 }
 
 export async function setBonusRuleActive(
   tenantId: number,
   id: number,
-  is_active: boolean
+  is_active: boolean,
+  actorUserId: number | null = null
 ): Promise<BonusRuleRow> {
   const existing = await prisma.bonusRule.findFirst({
     where: { id, tenant_id: tenantId }
@@ -508,6 +543,14 @@ export async function setBonusRuleActive(
   });
   const full = await fetchBonusRuleFull(tenantId, id);
   if (!full) throw new Error("NOT_FOUND");
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.bonus_rule,
+    entityId: id,
+    action: "patch.active",
+    payload: { is_active }
+  });
   return full;
 }
 

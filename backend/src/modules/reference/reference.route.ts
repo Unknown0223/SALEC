@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
+import { actorUserIdOrNull } from "../../lib/request-actor";
 import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
   createProductCategoryRow,
@@ -19,14 +20,24 @@ const catalogRoles = ["admin", "operator"] as const;
 const adminRoles = ["admin"] as const;
 
 const createCategoryBody = z.object({
-  name: z.string().min(1),
-  parent_id: z.number().int().positive().nullable().optional()
+  name: z.string().min(1).max(500),
+  parent_id: z.number().int().positive().nullable().optional(),
+  code: z.string().max(24).nullable().optional(),
+  sort_order: z.number().int().nullable().optional(),
+  default_unit: z.string().max(64).nullable().optional(),
+  is_active: z.boolean().optional(),
+  comment: z.string().max(4000).nullable().optional()
 });
 
 const patchCategoryBody = z
   .object({
-    name: z.string().min(1).optional(),
-    parent_id: z.number().int().positive().nullable().optional()
+    name: z.string().min(1).max(500).optional(),
+    parent_id: z.number().int().positive().nullable().optional(),
+    code: z.string().max(24).nullable().optional(),
+    sort_order: z.number().int().nullable().optional(),
+    default_unit: z.string().max(64).nullable().optional(),
+    is_active: z.boolean().optional(),
+    comment: z.string().max(4000).nullable().optional()
   })
   .refine((o) => Object.keys(o).length > 0, { message: "empty" });
 
@@ -65,7 +76,7 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await createWarehouseRow(request.tenant!.id, parsed.data);
+        const row = await createWarehouseRow(request.tenant!.id, parsed.data, actorUserIdOrNull(request));
         return reply.status(201).send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -90,7 +101,12 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await updateWarehouseRow(request.tenant!.id, id, parsed.data);
+        const row = await updateWarehouseRow(
+          request.tenant!.id,
+          id,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -113,7 +129,7 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "InvalidId" });
       }
       try {
-        await deleteWarehouseRow(request.tenant!.id, id);
+        await deleteWarehouseRow(request.tenant!.id, id, actorUserIdOrNull(request));
         return reply.status(204).send();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -157,14 +173,23 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
       try {
         const row = await createProductCategoryRow(
           request.tenant!.id,
-          parsed.data.name,
-          parsed.data.parent_id ?? null
+          {
+            name: parsed.data.name,
+            parent_id: parsed.data.parent_id ?? null,
+            code: parsed.data.code ?? null,
+            sort_order: parsed.data.sort_order ?? null,
+            default_unit: parsed.data.default_unit ?? null,
+            is_active: parsed.data.is_active,
+            comment: parsed.data.comment ?? null
+          },
+          actorUserIdOrNull(request)
         );
         return reply.status(201).send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "EMPTY_NAME") return reply.status(400).send({ error: "EmptyName" });
         if (msg === "BAD_PARENT") return reply.status(400).send({ error: "BadParent" });
+        if (msg === "BAD_CODE") return reply.status(400).send({ error: "BadCode" });
         throw e;
       }
     }
@@ -184,7 +209,12 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
       }
       try {
-        const row = await updateProductCategoryRow(request.tenant!.id, id, parsed.data);
+        const row = await updateProductCategoryRow(
+          request.tenant!.id,
+          id,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
         return reply.send(row);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
@@ -192,6 +222,7 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         if (msg === "EMPTY_NAME" || msg === "BAD_PARENT") {
           return reply.status(400).send({ error: msg === "EMPTY_NAME" ? "EmptyName" : "BadParent" });
         }
+        if (msg === "BAD_CODE") return reply.status(400).send({ error: "BadCode" });
         if (msg === "EMPTY_PATCH") return reply.status(400).send({ error: "EmptyBody" });
         throw e;
       }
@@ -208,11 +239,12 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: "InvalidId" });
       }
       try {
-        await deleteProductCategoryRow(request.tenant!.id, id);
+        await deleteProductCategoryRow(request.tenant!.id, id, actorUserIdOrNull(request));
         return reply.status(204).send();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "HAS_CHILDREN") return reply.status(409).send({ error: "HasChildren" });
         if (msg === "CATEGORY_IN_USE") return reply.status(409).send({ error: "CategoryInUse" });
         throw e;
       }

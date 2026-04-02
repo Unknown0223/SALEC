@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../../config/database";
+import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 type StaffKind = "agent" | "expeditor" | "supervisor";
 
@@ -146,7 +147,8 @@ export async function listStaff(tenantId: number, kind: StaffKind): Promise<Staf
 export async function patchAgentSupervisor(
   tenantId: number,
   agentUserId: number,
-  supervisorUserId: number | null
+  supervisorUserId: number | null,
+  actorUserId: number | null = null
 ): Promise<StaffRow> {
   const agent = await prisma.user.findFirst({
     where: { id: agentUserId, tenant_id: tenantId, role: "agent" }
@@ -172,6 +174,15 @@ export async function patchAgentSupervisor(
     data: { supervisor_user_id: supervisorUserId }
   });
 
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.user,
+    entityId: agentUserId,
+    action: "patch.supervisor",
+    payload: { supervisor_user_id: supervisorUserId }
+  });
+
   const rows = await listStaff(tenantId, "agent");
   const row = rows.find((x) => x.id === agentUserId);
   if (!row) {
@@ -180,7 +191,12 @@ export async function patchAgentSupervisor(
   return row;
 }
 
-export async function createStaff(tenantId: number, kind: StaffKind, input: CreateStaffInput): Promise<StaffRow> {
+export async function createStaff(
+  tenantId: number,
+  kind: StaffKind,
+  input: CreateStaffInput,
+  actorUserId: number | null = null
+): Promise<StaffRow> {
   const login = input.login.trim().toLowerCase();
   if (!login) throw new Error("BAD_LOGIN");
   if (input.password.length < 6) throw new Error("BAD_PASSWORD");
@@ -230,6 +246,19 @@ export async function createStaff(tenantId: number, kind: StaffKind, input: Crea
       app_access: input.app_access ?? true,
       territory: input.territory?.trim() || null,
       is_active: input.is_active ?? true
+    }
+  });
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.user,
+    entityId: created.id,
+    action: "create",
+    payload: {
+      role: kindRole(kind),
+      login: created.login,
+      password_set: true
     }
   });
 

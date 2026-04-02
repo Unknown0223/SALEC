@@ -77,4 +77,10 @@ npm run dev
 | CI va lokal parollar farq qilishi mumkin | GitHub Actions da `postgres:postgres`; lokal compose `0223` — ikkalasi ham `.env` / workflow orqali boshqariladi. |
 | Redis hozircha ixtiyoriy | Keyingi bosqichlarda navbat/kesh uchun ishlatiladi. |
 
+---
+
+## Production: sekin SQL so‘rovlarni loglash
+
+PostgreSQL da vaqtincha `log_min_duration_statement` (masalan, 500 ms) yoqib, sekin querylarni toping. Batafsil: [docs/SLO_AND_OBSERVABILITY.md](../docs/SLO_AND_OBSERVABILITY.md).
+
 Seed paroli (test): tenant `test1`, login `admin`, parol `secret123`.

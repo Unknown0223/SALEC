@@ -3,7 +3,8 @@
 import { OrderSseListener } from "@/components/dashboard/order-sse-listener";
 import { dashboardNavGroups } from "@/components/dashboard/nav-config";
 import { Button } from "@/components/ui/button";
-import { useAuthStore } from "@/lib/auth-store";
+import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
+import type { NavItem } from "@/components/dashboard/nav-config";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -13,10 +14,16 @@ function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function navItemVisible(item: NavItem, role: string | null): boolean {
+  if (!item.roles?.length) return true;
+  return role != null && item.roles.includes(role);
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { tenantSlug, clearSession } = useAuthStore();
+  const effectiveRole = useEffectiveRole();
 
   function logout() {
     clearSession();
@@ -44,7 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {group.title}
               </p>
               <div className="flex flex-col gap-0.5">
-                {group.items.map((item) => {
+                {group.items.filter((item) => navItemVisible(item, effectiveRole)).map((item) => {
                   const active = isNavActive(pathname, item.href);
                   return (
                     <Link
@@ -90,7 +97,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
           <nav className="flex gap-1.5 overflow-x-auto pb-0.5">
-            {dashboardNavGroups.flatMap((g) => g.items).map((item) => {
+            {dashboardNavGroups
+              .flatMap((g) => g.items)
+              .filter((item) => navItemVisible(item, effectiveRole))
+              .map((item) => {
               const active = isNavActive(pathname, item.href);
               return (
                 <Link

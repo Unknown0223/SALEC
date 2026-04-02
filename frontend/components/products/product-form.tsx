@@ -37,6 +37,24 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
   const [retailPrice, setRetailPrice] = useState("");
   const [wholesalePrice, setWholesalePrice] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [productGroupId, setProductGroupId] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [manufacturerId, setManufacturerId] = useState("");
+  const [segmentId, setSegmentId] = useState("");
+  const [weightKg, setWeightKg] = useState("");
+  const [volumeM3, setVolumeM3] = useState("");
+  const [qtyPerBlock, setQtyPerBlock] = useState("");
+  const [dimensionUnit, setDimensionUnit] = useState<"cm" | "m">("cm");
+  const [widthCm, setWidthCm] = useState("");
+  const [heightCm, setHeightCm] = useState("");
+  const [lengthCm, setLengthCm] = useState("");
+  const [ikpuCode, setIkpuCode] = useState("");
+  const [hsCode, setHsCode] = useState("");
+  const [sellCode, setSellCode] = useState("");
+  const [comment, setComment] = useState("");
+  const [sortOrder, setSortOrder] = useState("");
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const productQ = useQuery({
@@ -61,6 +79,23 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
     enabled: Boolean(tenantSlug)
   });
 
+  const catalogOpts = (path: string) => ({
+    queryKey: ["catalog-opts", path, tenantSlug],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: "1", limit: "500", is_active: "true" });
+      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
+        `/api/${tenantSlug}/${path}?${params}`
+      );
+      return data.data;
+    },
+    enabled: Boolean(tenantSlug)
+  });
+
+  const { data: productGroups = [] } = useQuery(catalogOpts("catalog/product-groups"));
+  const { data: brands = [] } = useQuery(catalogOpts("catalog/brands"));
+  const { data: manufacturers = [] } = useQuery(catalogOpts("catalog/manufacturers"));
+  const { data: segments = [] } = useQuery(catalogOpts("catalog/segments"));
+
   useEffect(() => {
     if (isEdit) {
       const product = productQ.data;
@@ -78,6 +113,23 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
       const w = product.prices?.find((x) => x.price_type === "wholesale");
       setRetailPrice(r?.price ?? "");
       setWholesalePrice(w?.price ?? "");
+      setProductGroupId(product.product_group_id != null ? String(product.product_group_id) : "");
+      setBrandId(product.brand_id != null ? String(product.brand_id) : "");
+      setManufacturerId(product.manufacturer_id != null ? String(product.manufacturer_id) : "");
+      setSegmentId(product.segment_id != null ? String(product.segment_id) : "");
+      setWeightKg(product.weight_kg ?? "");
+      setVolumeM3(product.volume_m3 ?? "");
+      setQtyPerBlock(product.qty_per_block != null ? String(product.qty_per_block) : "");
+      setDimensionUnit(product.dimension_unit === "m" ? "m" : "cm");
+      setWidthCm(product.width_cm ?? "");
+      setHeightCm(product.height_cm ?? "");
+      setLengthCm(product.length_cm ?? "");
+      setIkpuCode(product.ikpu_code ?? "");
+      setHsCode(product.hs_code ?? "");
+      setSellCode(product.sell_code ?? "");
+      setComment(product.comment ?? "");
+      setSortOrder(product.sort_order != null ? String(product.sort_order) : "");
+      setIsBlocked(Boolean(product.is_blocked));
       return;
     }
     setLocalError(null);
@@ -90,6 +142,23 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
     setRetailPrice("");
     setWholesalePrice("");
     setCategoryId(initialCategoryId && /^\d+$/.test(initialCategoryId) ? initialCategoryId : "");
+    setProductGroupId("");
+    setBrandId("");
+    setManufacturerId("");
+    setSegmentId("");
+    setWeightKg("");
+    setVolumeM3("");
+    setQtyPerBlock("");
+    setDimensionUnit("cm");
+    setWidthCm("");
+    setHeightCm("");
+    setLengthCm("");
+    setIkpuCode("");
+    setHsCode("");
+    setSellCode("");
+    setComment("");
+    setSortOrder("");
+    setIsBlocked(false);
   }, [isEdit, productQ.data, initialCategoryId]);
 
   const mutation = useMutation({
@@ -105,14 +174,49 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
         if (!Number.isFinite(cid) || cid < 1) throw new Error("Kategoriya noto‘g‘ri");
         resolvedCategory = cid;
       }
+      if (!isEdit && resolvedCategory === null) {
+        throw new Error("Kategoriya tanlash majburiy (*)");
+      }
 
-      const payload = {
+      const fkIdOrNull = (v: string) => {
+        const t = v.trim();
+        if (t === "") return null;
+        const n = Number.parseInt(t, 10);
+        if (!Number.isFinite(n) || n < 1) throw new Error("Tanlov noto‘g‘ri");
+        return n;
+      };
+      const intOrNull = (v: string) => {
+        const t = v.trim();
+        if (t === "") return null;
+        const n = Number.parseInt(t, 10);
+        if (!Number.isFinite(n)) throw new Error("Butun son noto‘g‘ri");
+        return n;
+      };
+
+      const payload: Record<string, unknown> = {
         sku: sku.trim(),
         name: name.trim(),
         unit: unitResolved || "dona",
         barcode: barcode.trim() || null,
         is_active: isActive,
-        category_id: resolvedCategory
+        category_id: resolvedCategory,
+        product_group_id: productGroupId.trim() === "" ? null : fkIdOrNull(productGroupId),
+        brand_id: brandId.trim() === "" ? null : fkIdOrNull(brandId),
+        manufacturer_id: manufacturerId.trim() === "" ? null : fkIdOrNull(manufacturerId),
+        segment_id: segmentId.trim() === "" ? null : fkIdOrNull(segmentId),
+        weight_kg: weightKg.trim() === "" ? null : weightKg.trim(),
+        volume_m3: volumeM3.trim() === "" ? null : volumeM3.trim(),
+        qty_per_block: qtyPerBlock.trim() === "" ? null : intOrNull(qtyPerBlock),
+        dimension_unit: dimensionUnit,
+        width_cm: widthCm.trim() === "" ? null : widthCm.trim(),
+        height_cm: heightCm.trim() === "" ? null : heightCm.trim(),
+        length_cm: lengthCm.trim() === "" ? null : lengthCm.trim(),
+        ikpu_code: ikpuCode.trim() || null,
+        hs_code: hsCode.trim() || null,
+        sell_code: sellCode.trim() || null,
+        comment: comment.trim() || null,
+        sort_order: sortOrder.trim() === "" ? null : intOrNull(sortOrder),
+        is_blocked: isBlocked
       };
       if (!payload.sku || !payload.name) {
         throw new Error("SKU va nom majburiy");
@@ -205,11 +309,15 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="pf-name">Nomi</Label>
+          <Label htmlFor="pf-name">
+            Nomi <span className="text-destructive">*</span>
+          </Label>
           <Input id="pf-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="pf-category">Kategoriya</Label>
+          <Label htmlFor="pf-category">
+            Kategoriya <span className="text-destructive">*</span>
+          </Label>
           <select
             id="pf-category"
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -226,7 +334,9 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
           </select>
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="pf-unit">Birlik</Label>
+          <Label htmlFor="pf-unit">
+            Birlik <span className="text-destructive">*</span>
+          </Label>
           <select
             id="pf-unit"
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -260,6 +370,172 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
             disabled={mutation.isPending}
           />
         </div>
+
+        <button
+          type="button"
+          className="text-left text-sm font-medium text-primary underline-offset-4 hover:underline"
+          onClick={() => setExtraOpen((v) => !v)}
+        >
+          {extraOpen ? "▼" : "▶"} Qo‘shimcha (группа, бренд, ИКПУ, габариты…)
+        </button>
+
+        {extraOpen ? (
+          <div className="grid gap-3 rounded-md border border-border bg-muted/20 p-3">
+            <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
+              <div className="grid gap-1.5">
+                <Label>Группа товаров</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={productGroupId}
+                  onChange={(e) => setProductGroupId(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {productGroups.map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Бренд</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={brandId}
+                  onChange={(e) => setBrandId(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {brands.map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Производитель</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={manufacturerId}
+                  onChange={(e) => setManufacturerId(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {manufacturers.map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Сегмент</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={segmentId}
+                  onChange={(e) => setSegmentId(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {segments.map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid gap-1.5">
+                <Label>Вес (kg)</Label>
+                <Input value={weightKg} onChange={(e) => setWeightKg(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Объём (m³)</Label>
+                <Input value={volumeM3} onChange={(e) => setVolumeM3(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Кол-во в блоке</Label>
+                <Input
+                  value={qtyPerBlock}
+                  onChange={(e) => setQtyPerBlock(e.target.value.replace(/[^0-9]/g, ""))}
+                  disabled={mutation.isPending}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Габариты</Label>
+              <div className="flex flex-wrap gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="dimu"
+                    checked={dimensionUnit === "cm"}
+                    onChange={() => setDimensionUnit("cm")}
+                  />
+                  см
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="dimu"
+                    checked={dimensionUnit === "m"}
+                    onChange={() => setDimensionUnit("m")}
+                  />
+                  м
+                </label>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <Input placeholder="Ширина" value={widthCm} onChange={(e) => setWidthCm(e.target.value)} />
+                <Input placeholder="Высота" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} />
+                <Input placeholder="Длина" value={lengthCm} onChange={(e) => setLengthCm(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label>ИКПУ</Label>
+                <Input value={ikpuCode} onChange={(e) => setIkpuCode(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>ТН ВЭД</Label>
+                <Input value={hsCode} onChange={(e) => setHsCode(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Sell code</Label>
+                <Input value={sellCode} onChange={(e) => setSellCode(e.target.value)} disabled={mutation.isPending} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Сортировка</Label>
+                <Input
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value.replace(/[^0-9-]/g, ""))}
+                  disabled={mutation.isPending}
+                />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Комментарий</Label>
+              <textarea
+                className="min-h-[64px] rounded-md border bg-background px-2 py-1 text-sm"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                disabled={mutation.isPending}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={isBlocked}
+                onChange={(e) => setIsBlocked(e.target.checked)}
+                disabled={mutation.isPending}
+              />
+              Блок / ограничение (is_blocked)
+            </label>
+          </div>
+        ) : null}
+
         <div className="grid gap-2 rounded-md border border-border bg-muted/30 p-3">
           <p className="text-xs font-medium text-muted-foreground">Narxlar (UZS, `retail` / `wholesale`)</p>
           <div className="grid grid-cols-2 gap-2">
