@@ -68,7 +68,8 @@ export const settingsSections: SettingsSection[] = [
       makeItem("finansy", "Валюты", "available", 0),
       makeItem("finansy", "Способ оплаты", "available", 1),
       makeItem("finansy", "Тип цены", "available", 2),
-      makeItem("finansy", "Цена", "available", 3)
+      makeItem("finansy", "Цена", "available", 3),
+      makeItem("finansy", "Кассы", "available", 4)
     ]
   },
   {
@@ -132,7 +133,8 @@ export const settingsSections: SettingsSection[] = [
     slug: "spravochniki-personal",
     items: [
       makeItem("spravochniki-personal", "Справочники", "available", 0),
-      makeItem("spravochniki-personal", "Компания", "available", 1)
+      makeItem("spravochniki-personal", "Компания", "available", 1),
+      makeItem("spravochniki-personal", "Должности веб-сотрудников", "available", 2)
     ]
   },
   {
@@ -155,6 +157,7 @@ const existingHrefByItemTitle: Record<string, string> = {
   "тип цены": "/settings/price-types",
   "валюты": "/settings/currencies",
   "цена": "/settings/prices",
+  "кассы": "/settings/cash-desks",
   "направление торговли": "/settings/sales-directions/trade",
   "канал продаж": "/settings/sales-directions/sales-channels",
   "группа kpi": "/settings/sales-directions/kpi-groups",
@@ -169,8 +172,16 @@ const existingHrefByItemTitle: Record<string, string> = {
   "экспедиторы": "/settings/spravochnik/expeditors",
   "супервайзер": "/settings/spravochnik/supervisors",
   "супервизоры": "/settings/spravochnik/supervisors",
+  "оператор": "/settings/spravochnik/operators",
+  "операторы": "/settings/spravochnik/operators",
+  "веб-сотрудники": "/settings/spravochnik/operators",
+  "веб сотрудники": "/settings/spravochnik/operators",
   "компания": "/settings/company",
-  "аудит": "/settings/audit"
+  "аудит": "/settings/audit",
+  "должности веб-сотрудников": "/settings/web-staff-position-presets",
+  "должности веб сотрудников": "/settings/web-staff-position-presets",
+  "lavozimlar": "/settings/web-staff-position-presets",
+  "веб ходим лавозимлари": "/settings/web-staff-position-presets"
 };
 
 export function resolveSettingsItemHref(item: SettingsItem): string {

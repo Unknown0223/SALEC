@@ -34,20 +34,33 @@ function filterSettingsItem(item: SettingsItem, q: string): SettingsItem | null 
   return item.title.toLowerCase().includes(qq) ? item : null;
 }
 
-/** Asosiy yon paneldagi «Пользователи» → bu sahifalarda sozlamalar ikkinchi paneli kerak emas */
-export function isUsersStaffSpravochnikPath(pathname: string): boolean {
+/**
+ * Spravochnik — o‘zining navigatsiyasi; umumiy sozlamalar yon paneli kerak emas.
+ */
+export function isSettingsSpravochnikBranchPath(pathname: string): boolean {
   const path = pathname.split("?")[0] ?? "";
-  const prefixes = [
-    "/settings/spravochnik/agents",
-    "/settings/spravochnik/expeditors",
-    "/settings/spravochnik/supervisors"
-  ];
-  return prefixes.some((p) => path === p || path.startsWith(`${p}/`));
+  return path === "/settings/spravochnik" || path.startsWith("/settings/spravochnik/");
+}
+
+function normalizeSettingsPathname(pathname: string): string {
+  const p = pathname.split("?")[0] ?? "";
+  if (p.length > 1 && p.endsWith("/")) return p.slice(0, -1);
+  return p;
+}
+
+/**
+ * Ikkinchi «Sozlamalar» paneli faqat `/settings` hub sahifasida.
+ * Modul sahifalari (/settings/cash-desks, /settings/territories va h.k.) — to‘liq kenglik.
+ */
+export function shouldShowSettingsSecondaryAside(pathname: string): boolean {
+  const path = normalizeSettingsPathname(pathname);
+  if (isSettingsSpravochnikBranchPath(pathname)) return false;
+  return path === "/settings";
 }
 
 export function SettingsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const hideSettingsAside = isUsersStaffSpravochnikPath(pathname);
+  const hideSettingsAside = !shouldShowSettingsSecondaryAside(pathname);
   const role = useEffectiveRole();
   const [search, setSearch] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});

@@ -109,24 +109,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </button>
                     {usersOpen && (
                       <ul className="ml-2 flex flex-col gap-0.5 border-l border-sidebar-border/80 py-0.5 pl-2">
-                        {dashboardUsersNav.items.map((item) => {
-                          const active = isNavActive(pathname, item.href);
-                          return (
-                            <li key={item.href}>
-                              <Link
-                                href={item.href}
-                                className={cn(
-                                  "block rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-                                  active
-                                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                                )}
-                              >
-                                {item.label}
-                              </Link>
-                            </li>
-                          );
-                        })}
+                        {dashboardUsersNav.items
+                          .filter((item) => navItemVisible(item, effectiveRole))
+                          .map((item) => {
+                            const active = isNavActive(pathname, item.href);
+                            return (
+                              <li key={item.href}>
+                                <Link
+                                  href={item.href}
+                                  className={cn(
+                                    "block rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                                    active
+                                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                                      : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                                  )}
+                                >
+                                  {item.label}
+                                </Link>
+                              </li>
+                            );
+                          })}
                       </ul>
                     )}
                 </div>
@@ -179,23 +181,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </Link>
                 );
               })}
-            {dashboardUsersNav.items.map((item) => {
-              const active = isNavActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+            {dashboardUsersNav.items
+              .filter((item) => navItemVisible(item, effectiveRole))
+              .map((item) => {
+                const active = isNavActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
           </nav>
         </header>
 

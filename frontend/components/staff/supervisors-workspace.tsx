@@ -14,7 +14,12 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { LogOut, Pencil, RefreshCw, Settings2, UserMinus } from "lucide-react";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
+import { FilterSelect } from "@/components/ui/filter-select";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
+import { ListOrdered, LogOut, Pencil, RefreshCw, Settings2, UserMinus } from "lucide-react";
 
 export type SuperviseeRow = { id: number; fio: string; code: string | null };
 
@@ -66,6 +71,25 @@ const COLS = [
   "Максимальное количество сессий"
 ] as const;
 
+const SUPERVISOR_TABLE_ID = "staff.supervisors.v1";
+const SUPERVISOR_COLUMN_IDS = [
+  "fio",
+  "supervisees",
+  "code",
+  "login",
+  "pinfl",
+  "branch",
+  "position",
+  "apk_version",
+  "app_access",
+  "active_sessions",
+  "max_sessions"
+] as const;
+const SUPERVISOR_COLUMNS = SUPERVISOR_COLUMN_IDS.map((id, i) => ({
+  id,
+  label: COLS[i] ?? id
+}));
+
 const VISIBLE_AGENTS = 3;
 
 type Props = { tenantSlug: string };
@@ -99,9 +123,18 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const [draftPos, setDraftPos] = useState("");
   const [appliedPos, setAppliedPos] = useState("");
   const [search, setSearch] = useState("");
-  const [pageSize, setPageSize] = useState(10);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: SUPERVISOR_TABLE_ID,
+    defaultColumnOrder: [...SUPERVISOR_COLUMN_IDS],
+    defaultPageSize: 10,
+    allowedPageSizes: [10, 20, 25, 50, 100]
+  });
+  const pageSize = tablePrefs.pageSize;
 
   const [editRow, setEditRow] = useState<SupervisorRow | null>(null);
   const [sessionSup, setSessionSup] = useState<SupervisorRow | null>(null);
@@ -227,23 +260,101 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const allPageSelected =
     pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
 
+  function supervisorExportCellString(r: SupervisorRow, colId: string): string {
+    switch (colId) {
+      case "fio":
+        return r.fio;
+      case "supervisees":
+        return r.supervisees.map((s) => `${s.code ?? ""} ${s.fio}`.trim()).join("; ");
+      case "code":
+        return r.code ?? "";
+      case "login":
+        return r.login;
+      case "pinfl":
+        return r.pinfl ?? "";
+      case "branch":
+        return r.branch ?? "";
+      case "position":
+        return r.position ?? "";
+      case "apk_version":
+        return r.apk_version ?? "";
+      case "app_access":
+        return r.app_access ? "Да" : "Нет";
+      case "active_sessions":
+        return String(r.active_session_count);
+      case "max_sessions":
+        return String(r.max_sessions);
+      default:
+        return "";
+    }
+  }
+
+  function renderSupervisorDataCell(colId: string, r: SupervisorRow) {
+    switch (colId) {
+      case "fio":
+        return r.fio;
+      case "supervisees":
+        return <SuperviseeCell list={r.supervisees} />;
+      case "code":
+        return <span className="font-mono">{r.code ?? "—"}</span>;
+      case "login":
+        return <span className="font-mono">{r.login}</span>;
+      case "pinfl":
+        return <span className="font-mono">{r.pinfl ?? "—"}</span>;
+      case "branch":
+        return r.branch ?? "—";
+      case "position":
+        return r.position ?? "—";
+      case "apk_version":
+        return r.apk_version ?? "—";
+      case "app_access":
+        return (
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">Вкл / выкл</span>
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={r.app_access}
+              onChange={(e) => {
+                patchMut.mutate({ id: r.id, body: { app_access: e.target.checked } });
+              }}
+            />
+          </label>
+        );
+      case "active_sessions":
+        return (
+          <button
+            type="button"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+            onClick={() => setSessionSup(r)}
+          >
+            {r.active_session_count}
+          </button>
+        );
+      case "max_sessions":
+        return r.max_sessions;
+      default:
+        return "—";
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Должность
-          <select
-            className="h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm"
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="sr-only">Должность</span>
+          <FilterSelect
+            aria-label="Должность"
+            emptyLabel="Должность"
             value={draftPos}
             onChange={(e) => setDraftPos(e.target.value)}
           >
-            <option value="">—</option>
             {(filterOptQ.data?.positions ?? []).map((p) => (
               <option key={p} value={p}>
                 {p}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         </label>
         <Button type="button" size="sm" onClick={applyFilters}>
           Применить
@@ -295,12 +406,23 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
             }}
           />
         </label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 px-2 text-xs"
+          title="Управление столбцами"
+          onClick={() => setColumnDialogOpen(true)}
+        >
+          <ListOrdered className="size-3.5" />
+          Столбцы
+        </Button>
         <select
           className="h-8 rounded-md border border-input bg-background px-2 text-xs"
           value={pageSize}
-          onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
+          onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
         >
-          {[10, 25, 50].map((n) => (
+          {[10, 20, 25, 50, 100].map((n) => (
             <option key={n} value={n}>
               {n}
             </option>
@@ -318,28 +440,15 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
           size="sm"
           className="h-8 text-xs"
           onClick={() => {
-            const header = [...COLS, "Действия"].join("\t");
-            const lines = filteredRows.map((r) =>
-              [
-                r.fio,
-                r.supervisees.map((s) => `${s.code ?? ""} ${s.fio}`.trim()).join("; "),
-                r.code ?? "",
-                r.login,
-                r.pinfl ?? "",
-                r.branch ?? "",
-                r.position ?? "",
-                r.apk_version ?? "",
-                r.app_access ? "Да" : "Нет",
-                String(r.active_session_count),
-                String(r.max_sessions)
-              ].join("\t")
+            const order = tablePrefs.visibleColumnOrder;
+            const headers = order.map((id) => SUPERVISOR_COLUMNS.find((c) => c.id === id)?.label ?? id);
+            const rows = filteredRows.map((r) => order.map((colId) => supervisorExportCellString(r, colId)));
+            downloadXlsxSheet(
+              `supervisors_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+              "Супервайзеры",
+              headers,
+              rows
             );
-            const blob = new Blob([header + "\n" + lines.join("\n")], { type: "text/tab-separated-values" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "supervisors.tsv";
-            a.click();
-            URL.revokeObjectURL(a.href);
           }}
         >
           Excel
@@ -358,19 +467,35 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
         </Button>
       </div>
 
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Управление столбцами"
+        description="Выберите видимые столбцы и порядок. Сохраняется для вашей учётной записи."
+        columns={SUPERVISOR_COLUMNS}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full min-w-[1400px] text-xs">
           <thead className="bg-muted/50">
             <tr>
               <th className="w-8 px-2 py-2" />
-              {COLS.map((c) => (
-                <th
-                  key={c}
-                  className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
-                >
-                  {c}
-                </th>
-              ))}
+              {tablePrefs.visibleColumnOrder.map((colId) => {
+                const meta = SUPERVISOR_COLUMNS.find((c) => c.id === colId);
+                return (
+                  <th
+                    key={colId}
+                    className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
+                  >
+                    {meta?.label ?? colId}
+                  </th>
+                );
+              })}
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">
                 Действия
               </th>
@@ -391,74 +516,49 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
                     }}
                   />
                 </td>
-                <td className="px-2 py-2">{r.fio}</td>
-                <td className="px-2 py-2">
-                  <SuperviseeCell list={r.supervisees} />
-                </td>
-                <td className="px-2 py-2 font-mono">{r.code ?? "—"}</td>
-                <td className="px-2 py-2 font-mono">{r.login}</td>
-                <td className="px-2 py-2 font-mono">{r.pinfl ?? "—"}</td>
-                <td className="px-2 py-2">{r.branch ?? "—"}</td>
-                <td className="px-2 py-2">{r.position ?? "—"}</td>
-                <td className="px-2 py-2">{r.apk_version ?? "—"}</td>
-                <td className="px-2 py-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground">Вкл / выкл</span>
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-primary"
-                      checked={r.app_access}
-                      onChange={(e) => {
-                        patchMut.mutate({ id: r.id, body: { app_access: e.target.checked } });
-                      }}
-                    />
-                  </label>
-                </td>
-                <td className="px-2 py-2">
-                  <button
-                    type="button"
-                    className="font-medium text-primary underline-offset-2 hover:underline"
-                    onClick={() => setSessionSup(r)}
-                  >
-                    {r.active_session_count}
-                  </button>
-                </td>
-                <td className="px-2 py-2">{r.max_sessions}</td>
-                <td className="px-2 py-2">
-                  <div className="flex items-center gap-1">
+                {tablePrefs.visibleColumnOrder.map((colId) => (
+                  <td key={colId} className="px-2 py-2">
+                    {renderSupervisorDataCell(colId, r)}
+                  </td>
+                ))}
+                <td className="px-2 py-2 text-right">
+                  <TableRowActionGroup className="justify-end" ariaLabel="Supervisor">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="size-7"
+                      className="text-muted-foreground hover:text-foreground"
                       title="Сессии и лимит"
+                      aria-label="Сессии и лимит"
                       onClick={() => setSessionSup(r)}
                     >
-                      <Settings2 className="size-3.5" />
+                      <Settings2 className="size-3.5" aria-hidden />
                     </Button>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="icon-sm"
-                      className="size-7"
+                      className="text-muted-foreground hover:text-foreground"
                       title="Редактировать"
+                      aria-label="Редактировать"
                       onClick={() => setEditRow(r)}
                     >
-                      <Pencil className="size-3.5" />
+                      <Pencil className="size-3.5" aria-hidden />
                     </Button>
                     {tab === "active" && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="size-7 text-destructive"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         title="Деактивировать"
+                        aria-label="Деактивировать"
                         onClick={() => setDeactivateRow(r)}
                       >
-                        <UserMinus className="size-3.5" />
+                        <UserMinus className="size-3.5" aria-hidden />
                       </Button>
                     )}
-                  </div>
+                  </TableRowActionGroup>
                 </td>
               </tr>
             ))}
@@ -653,18 +753,19 @@ function SupervisorEditDialog({
           <Input placeholder="ПИНФЛ" value={pinfl} onChange={(e) => setPinfl(e.target.value)} />
           <label className="text-xs text-muted-foreground">
             Филиал
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Филиал"
+              aria-label="Филиал"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
             >
-              <option value="">—</option>
               {branchOptions.map((b) => (
                 <option key={b} value={b}>
                   {b}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
             Должность

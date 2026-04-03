@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import type { ClientRow } from "@/lib/client-types";
 import type { ProductRow } from "@/lib/product-types";
@@ -251,55 +252,58 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-2 md:col-span-3">
                 <Label htmlFor="oc-client">Klient</Label>
-                <select
+                <FilterSelect
                   id="oc-client"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Klient"
+                  aria-label="Klient"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   disabled={mutation.isPending || loadingLists}
                 >
-                  <option value="">— tanlang —</option>
                   {clients.map((c) => (
                     <option key={c.id} value={String(c.id)}>
                       {c.name}
                       {c.phone ? ` · ${c.phone}` : ""}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="oc-warehouse">Ombor</Label>
-                <select
+                <FilterSelect
                   id="oc-warehouse"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Ombor"
+                  aria-label="Ombor"
                   value={warehouseId}
                   onChange={(e) => setWarehouseId(e.target.value)}
                   disabled={mutation.isPending || loadingLists}
                 >
-                  <option value="">— tanlang —</option>
                   {warehouses.map((w) => (
                     <option key={w.id} value={String(w.id)}>
                       {w.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="oc-agent">Agent</Label>
-                <select
+                <FilterSelect
                   id="oc-agent"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Agent"
+                  aria-label="Agent"
                   value={agentId}
                   onChange={(e) => setAgentId(e.target.value)}
                   disabled={mutation.isPending || loadingLists}
                 >
-                  <option value="">— tanlang —</option>
                   {agentUsers.map((u) => (
                     <option key={u.id} value={String(u.id)}>
                       {u.login} · {u.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="flex items-end">
                 <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -319,20 +323,21 @@ export function OrderCreateDialog({ open, onOpenChange, tenantSlug, onCreated }:
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="oc-category">Kategoriya</Label>
-                <select
+                <FilterSelect
                   id="oc-category"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Kategoriya"
+                  aria-label="Kategoriya"
                   value={selectedCategoryId}
                   onChange={(e) => setSelectedCategoryId(e.target.value)}
                   disabled={mutation.isPending || loadingLists}
                 >
-                  <option value="">— barchasi —</option>
                   {categories.map((c) => (
                     <option key={c.id} value={String(c.id)}>
                       {c.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
                 <p className="text-xs text-muted-foreground">Tanlangan pozitsiyalar</p>

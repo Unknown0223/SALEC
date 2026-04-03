@@ -2,6 +2,7 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -17,6 +18,7 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -231,9 +233,19 @@ export function FinanceCurrenciesSettings() {
                     <td className="px-3 py-2">{r.is_default ? "✓" : "—"}</td>
                     <td className="px-3 py-2 text-right">
                       {isAdmin ? (
-                        <Button variant="outline" size="sm" onClick={() => openEdit(r)}>
-                          ✎
-                        </Button>
+                        <TableRowActionGroup className="justify-end" ariaLabel="Valyuta">
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Tahrirlash"
+                            aria-label="Tahrirlash"
+                            onClick={() => openEdit(r)}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                        </TableRowActionGroup>
                       ) : null}
                     </td>
                   </tr>

@@ -11,10 +11,12 @@ import { registerOrderStreamRoutes } from "./modules/orders/order-stream.route";
 import { registerReferenceRoutes } from "./modules/reference/reference.route";
 import { registerTenantSettingsRoutes } from "./modules/tenant-settings/tenant-settings.route";
 import { registerStockRoutes } from "./modules/stock/stock.route";
+import { registerCashDeskRoutes } from "./modules/cash-desks/cash-desks.route";
 import { registerProductCatalogRoutes } from "./modules/products/product-catalog.route";
 import { registerProductPriceRoutes } from "./modules/products/product-prices.route";
 import { registerProductRoutes } from "./modules/products/products.route";
 import { registerAuditEventRoutes } from "./modules/audit-events/audit-events.route";
+import { registerUserUiRoutes } from "./modules/users/user-ui.route";
 import { registerStaffRoutes } from "./modules/staff/staff.route";
 import { registerSalesDirectionRoutes } from "./modules/sales-directions/sales-directions.route";
 import { env } from "./config/env";
@@ -37,6 +39,7 @@ export function buildApp() {
   app.register(tenantPlugin);
   app.register(requestObservabilityPlugin);
   app.register(registerAuthRoutes);
+  app.register(registerUserUiRoutes);
   app.register(registerClientRoutes);
   app.register(registerProductPriceRoutes);
   app.register(registerProductCatalogRoutes);
@@ -50,6 +53,7 @@ export function buildApp() {
   app.register(registerTenantSettingsRoutes);
   app.register(registerAuditEventRoutes);
   app.register(registerStockRoutes);
+  app.register(registerCashDeskRoutes);
 
   app.get("/health", async () => ({
     status: "ok",

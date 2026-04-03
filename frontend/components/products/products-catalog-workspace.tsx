@@ -9,11 +9,23 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { getUserFacingError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { QueryErrorState } from "@/components/common/query-error-state";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
+import {
+  PRODUCT_ITEMS_COLUMNS,
+  PRODUCT_ITEMS_COLUMN_IDS,
+  PRODUCT_ITEMS_TABLE_ID,
+  productItemsExportCell
+} from "@/lib/products-catalog-columns";
+import { ListOrdered, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { CatalogInterchangeableTab } from "./catalog-interchangeable-tab";
 import { CatalogSimpleTab } from "./catalog-simple-tab";
 import { ProductQuickAddDialog } from "./product-quick-add-dialog";
@@ -33,17 +45,6 @@ function isTabId(v: string | null): v is TabId {
   return TABS.some((t) => t.id === v);
 }
 
-function downloadCsv(filename: string, headers: string[], rows: string[][]) {
-  const esc = (c: string) => `"${c.replace(/"/g, '""')}"`;
-  const body = [headers.map(esc).join(";"), ...rows.map((r) => r.map(esc).join(";"))].join("\n");
-  const blob = new Blob(["\ufeff", body], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
 function retailPriceLabel(row: ProductRow): string {
   const p = row.prices?.find((x) => x.price_type === "retail");
   return p != null ? p.price : "—";
@@ -54,10 +55,9 @@ type ItemsProps = {
   isAdmin: boolean;
   statusTab: "active" | "inactive";
   search: string;
-  pageSize: number;
 };
 
-function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsProps) {
+function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
   const router = useRouter();
   const pathname = usePathname();
   const productsBasePath = pathname.startsWith("/settings/products")
@@ -71,6 +71,16 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsPro
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: PRODUCT_ITEMS_TABLE_ID,
+    defaultColumnOrder: [...PRODUCT_ITEMS_COLUMN_IDS],
+    defaultPageSize: 10,
+    allowedPageSizes: [10, 15, 20, 30, 50, 100]
+  });
+  const pageSize = tablePrefs.pageSize;
 
   const isActiveFilter = statusTab === "active" ? "true" : "false";
 
@@ -166,34 +176,45 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsPro
   const total = listQ.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  function renderProductCell(colId: string, r: ProductRow): ReactNode {
+    switch (colId) {
+      case "name":
+        return r.name;
+      case "category":
+        return <span className="text-xs text-muted-foreground">{r.category?.name ?? "—"}</span>;
+      case "product_group":
+        return <span className="text-xs text-muted-foreground">{r.product_group?.name ?? "—"}</span>;
+      case "unit":
+        return <span className="text-xs">{r.unit}</span>;
+      case "sort_order":
+        return <span className="text-xs">{r.sort_order ?? "—"}</span>;
+      case "brand":
+        return <span className="text-xs text-muted-foreground">{r.brand?.name ?? "—"}</span>;
+      case "segment":
+        return <span className="text-xs text-muted-foreground">{r.segment?.name ?? "—"}</span>;
+      case "sku":
+        return <span className="font-mono text-xs">{r.sku}</span>;
+      case "ikpu_code":
+        return <span className="font-mono text-xs">{r.ikpu_code ?? "—"}</span>;
+      case "hs_code":
+        return <span className="font-mono text-xs">{r.hs_code ?? "—"}</span>;
+      case "price":
+        return <span className="font-mono text-xs">{retailPriceLabel(r)}</span>;
+      default:
+        return "—";
+    }
+  }
+
   function exportExcel() {
-    const headers = [
-      "SKU",
-      "Название",
-      "Категория",
-      "Группа",
-      "Бренд",
-      "Сегмент",
-      "Ед.",
-      "Chakana",
-      "ИКПУ",
-      "ТН ВЭД",
-      "Активный"
-    ];
-    const dataRows = rows.map((r) => [
-      r.sku,
-      r.name,
-      r.category?.name ?? "",
-      r.product_group?.name ?? "",
-      r.brand?.name ?? "",
-      r.segment?.name ?? "",
-      r.unit,
-      retailPriceLabel(r),
-      r.ikpu_code ?? "",
-      r.hs_code ?? "",
-      r.is_active ? "1" : "0"
-    ]);
-    downloadCsv("products.csv", headers, dataRows);
+    const order = tablePrefs.visibleColumnOrder;
+    const headers = order.map((id) => PRODUCT_ITEMS_COLUMNS.find((c) => c.id === id)?.label ?? id);
+    const dataRows = rows.map((r) => order.map((colId) => productItemsExportCell(r, colId)));
+    downloadXlsxSheet(
+      `products_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      "Товары",
+      headers,
+      dataRows
+    );
   }
 
   const inputCls =
@@ -311,7 +332,32 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsPro
               </Button>
             </>
           ) : null}
-          <Button type="button" size="sm" variant="outline" onClick={exportExcel}>
+          <Button type="button" size="sm" variant="outline" onClick={() => setColumnDialogOpen(true)}>
+            <ListOrdered className="mr-1 h-4 w-4" />
+            Ustunlar
+          </Button>
+          <label className="grid gap-0.5 text-xs text-muted-foreground">
+            Sahifa
+            <select
+              className={`${inputCls} h-9 min-w-[4rem]`}
+              value={pageSize}
+              onChange={(e) => {
+                tablePrefs.setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+            >
+              {[10, 15, 20, 30, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button type="button" size="sm" variant="outline" onClick={() => void listQ.refetch()}>
+            <RefreshCw className="mr-1 h-4 w-4" />
+            Yangilash
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={exportExcel} disabled={rows.length === 0}>
             Excel
           </Button>
         </div>
@@ -329,6 +375,19 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsPro
 
       {importMsg ? <p className="text-xs text-muted-foreground">{importMsg}</p> : null}
 
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Ustunlarni boshqarish"
+        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi (server)."
+        columns={PRODUCT_ITEMS_COLUMNS}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
+
       <p className="text-xs text-muted-foreground">
         <Link href="/settings/product-categories" className="text-primary underline-offset-4 hover:underline">
           Категория продукта
@@ -343,83 +402,85 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search, pageSize }: ItemsPro
         />
       ) : (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full min-w-[960px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-muted/40 text-left">
               <tr>
-                <th className="px-2 py-2 font-medium">Название</th>
-                <th className="px-2 py-2 font-medium">Категория</th>
-                <th className="px-2 py-2 font-medium">Группа</th>
-                <th className="px-2 py-2 font-medium">Ед.</th>
-                <th className="px-2 py-2 font-medium">Сорт.</th>
-                <th className="px-2 py-2 font-medium">Бренд</th>
-                <th className="px-2 py-2 font-medium">Сегмент</th>
-                <th className="px-2 py-2 font-medium">Код</th>
-                <th className="px-2 py-2 font-medium">ИКПУ</th>
-                <th className="px-2 py-2 font-medium">ТН ВЭД</th>
-                <th className="px-2 py-2 font-medium text-right">Цена</th>
+                {tablePrefs.visibleColumnOrder.map((colId) => {
+                  const label = PRODUCT_ITEMS_COLUMNS.find((c) => c.id === colId)?.label ?? colId;
+                  return (
+                    <th
+                      key={colId}
+                      className={cn("px-2 py-2 font-medium", colId === "price" && "text-right")}
+                    >
+                      {label}
+                    </th>
+                  );
+                })}
                 <th className="px-2 py-2 text-right font-medium"> </th>
               </tr>
             </thead>
             <tbody>
               {listQ.isLoading ? (
                 <tr>
-                  <td colSpan={12} className="px-3 py-6 text-center text-muted-foreground">
+                  <td
+                    colSpan={tablePrefs.visibleColumnOrder.length + 1}
+                    className="px-3 py-6 text-center text-muted-foreground"
+                  >
                     Yuklanmoqda…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">
+                  <td
+                    colSpan={tablePrefs.visibleColumnOrder.length + 1}
+                    className="px-3 py-8 text-center text-muted-foreground"
+                  >
                     Пусто
                   </td>
                 </tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r.id} className="border-t">
-                    <td className="px-2 py-1.5">{r.name}</td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {r.category?.name ?? "—"}
-                    </td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {r.product_group?.name ?? "—"}
-                    </td>
-                    <td className="px-2 py-1.5 text-xs">{r.unit}</td>
-                    <td className="px-2 py-1.5 text-xs">{r.sort_order ?? "—"}</td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {r.brand?.name ?? "—"}
-                    </td>
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {r.segment?.name ?? "—"}
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs">{r.sku}</td>
-                    <td className="px-2 py-1.5 font-mono text-xs">{r.ikpu_code ?? "—"}</td>
-                    <td className="px-2 py-1.5 font-mono text-xs">{r.hs_code ?? "—"}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-xs">
-                      {retailPriceLabel(r)}
-                    </td>
+                    {tablePrefs.visibleColumnOrder.map((colId) => (
+                      <td
+                        key={colId}
+                        className={cn(
+                          "px-2 py-1.5",
+                          colId === "price" && "text-right"
+                        )}
+                      >
+                        {renderProductCell(colId, r)}
+                      </td>
+                    ))}
                     <td className="px-2 py-1.5 text-right">
                       {isAdmin ? (
-                        <div className="flex justify-end gap-1">
+                        <TableRowActionGroup className="justify-end" ariaLabel="Mahsulot">
                           <Button
                             type="button"
-                            size="sm"
+                            size="icon-sm"
                             variant="outline"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Tahrirlash"
+                            aria-label="Tahrirlash"
                             onClick={() => router.push(`/products/${r.id}/edit`)}
                           >
-                            ✎
+                            <Pencil className="size-3.5" aria-hidden />
                           </Button>
                           <Button
                             type="button"
-                            size="sm"
-                            variant="outline"
+                            size="icon-sm"
+                            variant="ghost"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                             disabled={deleteMut.isPending}
+                            title="O‘chirish"
+                            aria-label="O‘chirish"
                             onClick={() => {
                               if (window.confirm(`«${r.name}» o‘chirilsinmi?`)) deleteMut.mutate(r.id);
                             }}
                           >
-                            ×
+                            <Trash2 className="size-3.5" aria-hidden />
                           </Button>
-                        </div>
+                        </TableRowActionGroup>
                       ) : null}
                     </td>
                   </tr>
@@ -510,7 +571,6 @@ function ProductsCatalogWorkspaceInner({
             isAdmin={isAdmin}
             statusTab={statusTab}
             search={search}
-            pageSize={pageSize}
           />
         );
       case "product-groups":

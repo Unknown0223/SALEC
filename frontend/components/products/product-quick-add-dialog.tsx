@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import {
   PRODUCT_UNIT_CUSTOM,
@@ -256,19 +257,20 @@ export function ProductQuickAddDialog({ open, onOpenChange, tenantSlug, onDone }
               <Label>
                 Категория <span className="text-destructive">*</span>
               </Label>
-              <select
-                className="h-9 rounded-md border bg-background px-2 text-sm"
+              <FilterSelect
+                className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                emptyLabel="Категория"
+                aria-label="Категория"
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
               >
-                <option value="">— tanlang —</option>
                 {(catsQ.data ?? []).map((c) => (
                   <option key={c.id} value={String(c.id)}>
                     {c.name}
                     {c.code ? ` (${c.code})` : ""}
                   </option>
                 ))}
-              </select>
+              </FilterSelect>
             </div>
             <div className="grid gap-1.5">
               <Label>
@@ -376,48 +378,51 @@ export function ProductQuickAddDialog({ open, onOpenChange, tenantSlug, onDone }
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label>Группа товаров</Label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                <FilterSelect
+                  className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Группа товаров"
+                  aria-label="Группа товаров"
                   value={groupId}
                   onChange={(e) => setGroupId(e.target.value)}
                 >
-                  <option value="">—</option>
                   {groups.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label>Бренд</Label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                <FilterSelect
+                  className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Бренд"
+                  aria-label="Бренд"
                   value={brandId}
                   onChange={(e) => setBrandId(e.target.value)}
                 >
-                  <option value="">—</option>
                   {brands.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label>Сегмент</Label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                <FilterSelect
+                  className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Сегмент"
+                  aria-label="Сегмент"
                   value={segmentId}
                   onChange={(e) => setSegmentId(e.target.value)}
                 >
-                  <option value="">—</option>
                   {segments.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             </div>
             <div className="grid gap-1.5">

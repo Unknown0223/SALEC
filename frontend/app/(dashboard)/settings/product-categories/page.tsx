@@ -2,6 +2,7 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -17,7 +18,10 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { PRODUCT_UNIT_OPTIONS } from "@/lib/product-units";
 import { cn } from "@/lib/utils";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -64,17 +68,6 @@ function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("ru-RU");
-}
-
-function downloadCsv(filename: string, headers: string[], rows: string[][]) {
-  const esc = (c: string) => `"${c.replace(/"/g, '""')}"`;
-  const body = [headers.map(esc).join(";"), ...rows.map((r) => r.map(esc).join(";"))].join("\n");
-  const blob = new Blob(["\ufeff", body], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
 }
 
 export default function ProductCategoriesSettingsPage() {
@@ -259,9 +252,11 @@ export default function ProductCategoriesSettingsPage() {
         : "Добавить подкатегорию";
 
   function exportExcel() {
+    const date = new Date().toISOString().slice(0, 10);
     if (mainTab === "category") {
-      downloadCsv(
-        "product-categories.csv",
+      downloadXlsxSheet(
+        `product_categories_${statusTab}_${date}.xlsx`,
+        "Категории",
         ["Название", "Код", "Дата создания", "Ед.изм.", "Сортировка", "Комментарий", "Активный"],
         filtered.map((r) => [
           r.name,
@@ -274,8 +269,9 @@ export default function ProductCategoriesSettingsPage() {
         ])
       );
     } else if (mainTab === "group") {
-      downloadCsv(
-        "product-category-groups.csv",
+      downloadXlsxSheet(
+        `product_category_groups_${statusTab}_${date}.xlsx`,
+        "Группы",
         ["Название", "Категория", "Сортировка", "Комментарий", "Активный"],
         filtered.map((r) => [
           r.name,
@@ -286,8 +282,9 @@ export default function ProductCategoriesSettingsPage() {
         ])
       );
     } else {
-      downloadCsv(
-        "product-subcategories.csv",
+      downloadXlsxSheet(
+        `product_subcategories_${statusTab}_${date}.xlsx`,
+        "Подкатегории",
         ["Название", "Код", "Дата создания", "Ед.изм.", "Сортировка", "Комментарий", "Группа", "Активный"],
         filtered.map((r) => [
           r.name,
@@ -426,9 +423,19 @@ export default function ProductCategoriesSettingsPage() {
                     <td className="px-3 py-2">{r.comment ?? "—"}</td>
                     <td className="px-3 py-2 text-right">
                       {isAdmin ? (
-                        <Button variant="outline" size="sm" onClick={() => openEdit(r)}>
-                          ✎
-                        </Button>
+                        <TableRowActionGroup className="justify-end" ariaLabel="Kategoriya">
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Tahrirlash"
+                            aria-label="Tahrirlash"
+                            onClick={() => openEdit(r)}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                        </TableRowActionGroup>
                       ) : null}
                     </td>
                   </tr>
@@ -472,18 +479,19 @@ export default function ProductCategoriesSettingsPage() {
             {mainTab !== "category" ? (
               <div className="grid gap-1.5">
                 <Label>{mainTab === "group" ? "Категория" : "Группа категорий"}</Label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                <FilterSelect
+                  className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel={mainTab === "group" ? "Категория" : "Группа категорий"}
+                  aria-label={mainTab === "group" ? "Категория" : "Группа категорий"}
                   value={parentId}
                   onChange={(e) => setParentId(e.target.value)}
                 >
-                  <option value="">— tanlang —</option>
                   {(mainTab === "group" ? roots : groups).map((x) => (
-                    <option key={x.id} value={x.id}>
+                    <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             ) : null}
             <div className="grid gap-1.5">
@@ -513,18 +521,19 @@ export default function ProductCategoriesSettingsPage() {
             {mainTab !== "group" ? (
               <div className="grid gap-1.5">
                 <Label>Единицы измерения</Label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
+                <FilterSelect
+                  className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Единицы измерения"
+                  aria-label="Единицы измерения"
                   value={defaultUnit}
                   onChange={(e) => setDefaultUnit(e.target.value)}
                 >
-                  <option value="">—</option>
                   {unitOptions.map((u) => (
                     <option key={u} value={u}>
                       {u}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             ) : null}
             <div className="grid gap-1.5">

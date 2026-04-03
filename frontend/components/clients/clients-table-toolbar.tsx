@@ -1,14 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { filterPanelSelectClassName } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
-import {
-  CLIENT_TABLE_COLUMNS,
-  getDefaultColumnVisibility,
-  saveColumnVisibility
-} from "@/lib/client-table-columns";
-import { Filter, LayoutGrid, ListOrdered, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
+import { Filter, ListOrdered, Search } from "lucide-react";
 
 type Props = {
   search: string;
@@ -68,8 +64,8 @@ type Props = {
   onPageLimitChange: (v: number) => void;
   filtersVisible: boolean;
   onFiltersVisibleChange: (v: boolean) => void;
-  columnVisibility: Record<string, boolean>;
-  onColumnVisibilityChange: (v: Record<string, boolean>) => void;
+  /** Ustunlar — serverdagi `ui_preferences` dialogi */
+  onOpenColumnSettings: () => void;
 };
 
 export function ClientsTableToolbar({
@@ -129,51 +125,8 @@ export function ClientsTableToolbar({
   onPageLimitChange,
   filtersVisible,
   onFiltersVisibleChange,
-  columnVisibility,
-  onColumnVisibilityChange
+  onOpenColumnSettings
 }: Props) {
-  const [colMenuOpen, setColMenuOpen] = useState(false);
-  const [colSearch, setColSearch] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function close(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setColMenuOpen(false);
-    }
-    if (colMenuOpen) document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [colMenuOpen]);
-
-  const filteredCols = useMemo(() => {
-    const q = colSearch.trim().toLowerCase();
-    if (!q) return CLIENT_TABLE_COLUMNS;
-    return CLIENT_TABLE_COLUMNS.filter((c) => c.label.toLowerCase().includes(q));
-  }, [colSearch]);
-
-  const selectAllVisible = () => {
-    const next = { ...columnVisibility };
-    for (const c of filteredCols) {
-      next[c.id] = true;
-    }
-    onColumnVisibilityChange(next);
-    saveColumnVisibility(next);
-  };
-
-  const clearAllVisible = () => {
-    const next = { ...columnVisibility };
-    for (const c of filteredCols) {
-      next[c.id] = false;
-    }
-    onColumnVisibilityChange(next);
-    saveColumnVisibility(next);
-  };
-
-  const resetDefaults = () => {
-    const d = getDefaultColumnVisibility();
-    onColumnVisibilityChange(d);
-    saveColumnVisibility(d);
-  };
-
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -201,72 +154,26 @@ export function ClientsTableToolbar({
             Filtr
           </Button>
 
-          <div className="relative" ref={menuRef}>
-            <Button
-              type="button"
-              variant={colMenuOpen ? "secondary" : "outline"}
-              size="sm"
-              className="gap-1"
-              onClick={() => setColMenuOpen((o) => !o)}
-              title="Ustunlar"
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Ustunlar
-            </Button>
-            {colMenuOpen ? (
-              <div className="absolute right-0 z-50 mt-1 w-72 rounded-lg border bg-popover p-2 shadow-lg">
-                <div className="relative mb-2">
-                  <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Qidiruv"
-                    className="h-8 pl-7 text-xs"
-                    value={colSearch}
-                    onChange={(e) => setColSearch(e.target.value)}
-                  />
-                </div>
-                <div className="mb-2 flex flex-wrap gap-1">
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={selectAllVisible}>
-                    Barchasini tanlash
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={clearAllVisible}>
-                    Tozalash
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={resetDefaults}>
-                    Standart
-                  </Button>
-                </div>
-                <div className="max-h-64 space-y-1 overflow-y-auto pr-1 text-xs">
-                  {filteredCols.map((c) => (
-                    <label
-                      key={c.id}
-                      className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-muted/80"
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5 rounded border-input accent-primary"
-                        checked={columnVisibility[c.id] === true}
-                        onChange={() => {
-                          const next = { ...columnVisibility, [c.id]: !columnVisibility[c.id] };
-                          onColumnVisibilityChange(next);
-                          saveColumnVisibility(next);
-                        }}
-                      />
-                      <span className="leading-tight">{c.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            onClick={onOpenColumnSettings}
+            title="Ustunlar (tartib va ko‘rinish — akkaunt bo‘yicha saqlanadi)"
+          >
+            <ListOrdered className="h-4 w-4" />
+            Ustunlar
+          </Button>
 
           <label className="flex items-center gap-1 text-xs text-muted-foreground">
             <span className="whitespace-nowrap">Sahifa</span>
             <select
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              className="h-9 min-w-[4.5rem] rounded-md border border-input bg-background px-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={pageLimit}
               onChange={(e) => onPageLimitChange(Number(e.target.value))}
             >
-              {[10, 30, 50, 100].map((n) => (
+              {[10, 20, 30, 50, 100].map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>
@@ -281,7 +188,7 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Holat
             <select
-              className="h-10 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={activeFilter}
               onChange={(e) => onActiveFilterChange(e.target.value as "all" | "true" | "false")}
             >
@@ -311,11 +218,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Toifa (category)
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={categoryFilter}
               onChange={(e) => onCategoryFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Toifa (category)</option>
               {categoryOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -326,11 +233,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Viloyat
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={regionFilter}
               onChange={(e) => onRegionFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Viloyat</option>
               {regionOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -341,11 +248,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Tuman
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={districtFilter}
               onChange={(e) => onDistrictFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Tuman</option>
               {districtOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -356,11 +263,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Mahalla
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={neighborhoodFilter}
               onChange={(e) => onNeighborhoodFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Mahalla</option>
               {neighborhoodOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -371,11 +278,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Zona
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={zoneFilter}
               onChange={(e) => onZoneFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Zona</option>
               {zoneOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -386,11 +293,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Mijoz turi
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={clientTypeFilter}
               onChange={(e) => onClientTypeFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Mijoz turi</option>
               {clientTypeOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -401,11 +308,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Format
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={clientFormatFilter}
               onChange={(e) => onClientFormatFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Format</option>
               {clientFormatOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -416,11 +323,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Savdo kanali
             <select
-              className="h-10 w-44 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={salesChannelFilter}
               onChange={(e) => onSalesChannelFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Savdo kanali</option>
               {salesChannelOptions.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -431,11 +338,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Agent (istalgan qator)
             <select
-              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={agentFilter}
               onChange={(e) => onAgentFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Agent</option>
               {agentOptions.map((u) => (
                 <option key={u.id} value={String(u.id)}>
                   {u.name} ({u.login})
@@ -446,11 +353,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Dastavchik / ekspeditor
             <select
-              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={expeditorFilter}
               onChange={(e) => onExpeditorFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Dastavchik / ekspeditor</option>
               {expeditorOptions.map((u) => (
                 <option key={`ex-${u.id}`} value={String(u.id)}>
                   {u.name} ({u.login})
@@ -461,11 +368,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Supervizor
             <select
-              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={supervisorFilter}
               onChange={(e) => onSupervisorFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Supervizor</option>
               {supervisorOptions.map((u) => (
                 <option key={`sv-${u.id}`} value={String(u.id)}>
                   {u.name} ({u.login})
@@ -476,11 +383,11 @@ export function ClientsTableToolbar({
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Tashrif kuni (hafta)
             <select
-              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm"
+              className={filterPanelSelectClassName}
               value={visitWeekdayFilter}
               onChange={(e) => onVisitWeekdayFilterChange(e.target.value)}
             >
-              <option value="">Barchasi</option>
+              <option value="">Tashrif kuni (hafta)</option>
               <option value="1">Du</option>
               <option value="2">Se</option>
               <option value="3">Ch</option>
@@ -515,7 +422,7 @@ export function ClientsTableToolbar({
             </span>
             <div className="flex flex-wrap gap-1">
               <select
-                className="h-10 rounded-lg border border-input bg-background px-2 text-sm"
+                className={cn(filterPanelSelectClassName, "min-w-0 max-w-[12rem]")}
                 value={sortField}
                 onChange={(e) =>
                   onSortFieldChange(e.target.value as "name" | "phone" | "id" | "created_at" | "region")
@@ -528,7 +435,7 @@ export function ClientsTableToolbar({
                 <option value="region">Viloyat</option>
               </select>
               <select
-                className="h-10 rounded-lg border border-input bg-background px-2 text-sm"
+                className={cn(filterPanelSelectClassName, "min-w-0 max-w-[10rem]")}
                 value={sortOrder}
                 onChange={(e) => onSortOrderChange(e.target.value as "asc" | "desc")}
               >

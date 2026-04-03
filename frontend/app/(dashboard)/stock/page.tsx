@@ -6,6 +6,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api, apiBaseURL } from "@/lib/api";
@@ -331,19 +332,20 @@ function StockPageContent() {
                 <h3 className="text-sm font-medium">Qo‘lda prihod (kirim)</h3>
                 <div className="space-y-2">
                   <Label htmlFor="wh-receipt">Ombor</Label>
-                  <select
+                  <FilterSelect
                     id="wh-receipt"
-                    className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                    className="flex h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    emptyLabel="Ombor"
+                    aria-label="Ombor"
                     value={receiptWarehouseId}
                     onChange={(e) => setReceiptWarehouseId(e.target.value)}
                   >
-                    <option value="">— tanlang —</option>
                     {warehouses.map((w) => (
                       <option key={w.id} value={String(w.id)}>
                         {w.name}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                   <p className="text-muted-foreground text-xs">
                     Ombor tanlanganda barcha mahsulotlar ro‘yxatga chiqadi — faqat kerakli qatorlarga miqdor yozing (0
                     yoki bo‘sh qatorlar yuborilmaydi).

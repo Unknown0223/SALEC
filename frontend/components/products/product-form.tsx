@@ -12,6 +12,7 @@ import {
   resolveUnitFromForm,
   splitUnitForForm
 } from "@/lib/product-units";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -318,20 +319,21 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
           <Label htmlFor="pf-category">
             Kategoriya <span className="text-destructive">*</span>
           </Label>
-          <select
+          <FilterSelect
             id="pf-category"
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            emptyLabel="Kategoriya"
+            aria-label="Kategoriya"
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
             disabled={mutation.isPending}
           >
-            <option value="">— Tanlanmagan —</option>
             {categories.map((c) => (
               <option key={c.id} value={String(c.id)}>
                 {c.name}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="pf-unit">
@@ -384,67 +386,71 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
             <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
               <div className="grid gap-1.5">
                 <Label>Группа товаров</Label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <FilterSelect
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Группа товаров"
+                  aria-label="Группа товаров"
                   value={productGroupId}
                   onChange={(e) => setProductGroupId(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {productGroups.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label>Бренд</Label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <FilterSelect
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Бренд"
+                  aria-label="Бренд"
                   value={brandId}
                   onChange={(e) => setBrandId(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {brands.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label>Производитель</Label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <FilterSelect
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Производитель"
+                  aria-label="Производитель"
                   value={manufacturerId}
                   onChange={(e) => setManufacturerId(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {manufacturers.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label>Сегмент</Label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <FilterSelect
+                  className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                  emptyLabel="Сегмент"
+                  aria-label="Сегмент"
                   value={segmentId}
                   onChange={(e) => setSegmentId(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {segments.map((x) => (
                     <option key={x.id} value={String(x.id)}>
                       {x.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

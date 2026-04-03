@@ -3,6 +3,7 @@
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -259,19 +260,20 @@ export function ProductBulkAddPanel({
                     </p>
                     <div className="border-t border-border/60 pt-1.5">
                       <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">Kategoriya</p>
-                      <select
-                        className="mb-1 h-7 w-full rounded border border-input bg-background px-1 text-[11px]"
+                      <FilterSelect
+                        className="mb-1 h-7 w-full min-w-0 max-w-none rounded border border-input bg-background px-1 text-[11px]"
+                        emptyLabel="Kategoriya"
+                        aria-label="Kategoriya"
                         value={bulkCategoryId}
                         onChange={(e) => setBulkCategoryId(e.target.value)}
                       >
-                        <option value="">—</option>
                         {cats.map((c) => (
                           <option key={c.id} value={String(c.id)}>
                             {c.name}
                             {c.code ? ` (${c.code})` : ""}
                           </option>
                         ))}
-                      </select>
+                      </FilterSelect>
                       <Button
                         type="button"
                         size="sm"
@@ -354,19 +356,20 @@ export function ProductBulkAddPanel({
                     />
                   </td>
                   <td className="px-1 py-2 align-middle">
-                    <select
-                      className="h-8 w-full max-w-[140px] rounded border bg-background px-1"
+                    <FilterSelect
+                      className="h-8 w-full min-w-[6rem] max-w-[140px] rounded border border-input bg-background px-1 text-xs"
+                      emptyLabel="Kategoriya"
+                      aria-label="Kategoriya"
                       value={r.categoryId}
                       onChange={(e) => updateRow(i, { categoryId: e.target.value })}
                     >
-                      <option value="">—</option>
                       {cats.map((c) => (
                         <option key={c.id} value={String(c.id)}>
                           {c.name}
                           {c.code ? ` (${c.code})` : ""}
                         </option>
                       ))}
-                    </select>
+                    </FilterSelect>
                   </td>
                   <td className="px-1 py-2 align-middle">
                     <Input

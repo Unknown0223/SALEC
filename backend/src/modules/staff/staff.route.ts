@@ -5,6 +5,8 @@ import { actorUserIdOrNull } from "../../lib/request-actor";
 import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import type { ListStaffFilters } from "./staff.service";
 import {
+  bulkPatchWebPanelStaffMaxSessions,
+  bulkRevokeWebPanelStaffSessions,
   createStaff,
   getStaffRow,
   listAgentFilterOptions,
@@ -13,14 +15,21 @@ import {
   listStaff,
   listStaffSessions,
   listSupervisorFilterOptions,
+  listWebPanelStaffFilterOptions,
+  listWebStaffPositionPresetsAdmin,
+  listWebStaffPositionPresetHistory,
+  createWebStaffPositionPreset,
+  patchWebStaffPositionPreset,
   patchAgent,
   patchExpeditor,
+  patchOperator,
   patchSupervisor,
   revokeAgentSessions,
   revokeStaffSessions
 } from "./staff.service";
 
 const catalogRoles = ["admin", "operator"] as const;
+const adminRoles = ["admin"] as const;
 
 const agentEntitlementsSchema = z
   .object({
@@ -155,6 +164,88 @@ function parseSupervisorListFilters(q: Record<string, string | undefined>): List
   if (q.position?.trim()) filters.position = q.position.trim();
   return filters;
 }
+
+function parseOperatorListFilters(q: Record<string, string | undefined>): ListStaffFilters {
+  const filters: ListStaffFilters = {};
+  if (q.is_active === "true") filters.is_active = true;
+  else if (q.is_active === "false") filters.is_active = false;
+  if (q.branch?.trim()) filters.branch = q.branch.trim();
+  if (q.position?.trim()) filters.position = q.position.trim();
+  return filters;
+}
+
+const createOperatorBodySchema = z
+  .object({
+    first_name: z.string().min(1),
+    last_name: z.string().nullable().optional(),
+    middle_name: z.string().nullable().optional(),
+    login: z.string().min(1),
+    password: z.string().min(6),
+    phone: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    code: z.string().max(24).nullable().optional(),
+    pinfl: z.string().max(24).nullable().optional(),
+    branch: z.string().max(128).nullable().optional(),
+    position: z.string().max(128).nullable().optional(),
+    can_authorize: z.boolean().optional(),
+    is_active: z.boolean().optional(),
+    app_access: z.boolean().optional(),
+    max_sessions: z.number().int().min(1).max(99).optional(),
+    cash_desk_id: z.number().int().positive().optional(),
+    cash_desk_link_role: z.enum(["cashier", "manager", "operator"]).optional()
+  })
+  .refine(
+    (o) =>
+      (o.cash_desk_id == null && o.cash_desk_link_role == null) ||
+      (o.cash_desk_id != null && o.cash_desk_link_role != null),
+    { message: "cash_desk_pair", path: ["cash_desk_id"] }
+  );
+
+const patchOperatorBody = z
+  .object({
+    first_name: z.string().min(1).optional(),
+    last_name: z.string().nullable().optional(),
+    middle_name: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    code: z.string().max(24).nullable().optional(),
+    pinfl: z.string().max(24).nullable().optional(),
+    branch: z.string().max(128).nullable().optional(),
+    position: z.string().max(128).nullable().optional(),
+    can_authorize: z.boolean().optional(),
+    is_active: z.boolean().optional(),
+    app_access: z.boolean().optional(),
+    max_sessions: z.number().int().min(1).max(99).optional(),
+    password: z.string().min(6).optional()
+  })
+  .refine((o) => Object.keys(o).length > 0, { message: "empty" });
+
+const bulkWebPanelRevokeBody = z.object({
+  user_ids: z.array(z.number().int().positive()).min(1).max(200)
+});
+
+const bulkWebPanelMaxSessionsBody = z.object({
+  updates: z
+    .array(
+      z.object({
+        user_id: z.number().int().positive(),
+        max_sessions: z.number().int().min(1).max(99)
+      })
+    )
+    .min(1)
+    .max(200)
+});
+
+const createWebStaffPositionPresetBody = z.object({
+  label: z.string().min(1).max(128)
+});
+
+const patchWebStaffPositionPresetBody = z
+  .object({
+    label: z.string().min(1).max(128).optional(),
+    is_active: z.boolean().optional()
+  })
+  .refine((o) => o.label !== undefined || o.is_active !== undefined, { message: "empty" });
 
 export async function registerStaffRoutes(app: FastifyInstance) {
   app.get(
@@ -607,6 +698,300 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/operators",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const filters = parseOperatorListFilters(q);
+      const data = await listStaff(request.tenant!.id, "operator", filters);
+      return reply.send({ data });
+    }
+  );
+
+  /** `meta` — `:id` bilan adashmasligi uchun (masalan filter-options). */
+  app.get(
+    "/api/:slug/operators/meta/filter-options",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const data = await listWebPanelStaffFilterOptions(request.tenant!.id);
+      return reply.send({ data });
+    }
+  );
+
+  app.get(
+    "/api/:slug/operators/meta/position-presets",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      try {
+        const data = await listWebStaffPositionPresetsAdmin(request.tenant!.id);
+        return reply.send({ data });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        throw e;
+      }
+    }
+  );
+
+  /** Statik `history` UUID dan oldin — ba’zi muhitlarda `:presetId/history` 404 berardi */
+  app.get(
+    "/api/:slug/operators/meta/position-presets/history/:presetId",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const presetId = (request.params as { presetId?: string }).presetId ?? "";
+      try {
+        const result = await listWebStaffPositionPresetHistory(request.tenant!.id, presetId);
+        return reply.send(result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "BAD_PRESET_ID") return reply.status(400).send({ error: "BadPresetId" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/operators/meta/position-presets",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = createWebStaffPositionPresetBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await createWebStaffPositionPreset(
+          request.tenant!.id,
+          parsed.data.label,
+          actorUserIdOrNull(request)
+        );
+        return reply.status(201).send({ data: row });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "BAD_LABEL") return reply.status(400).send({ error: "BadLabel" });
+        if (msg === "PRESET_LIMIT") return reply.status(400).send({ error: "PresetLimit" });
+        throw e;
+      }
+    }
+  );
+
+  app.patch(
+    "/api/:slug/operators/meta/position-presets/:presetId",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const presetId = (request.params as { presetId?: string }).presetId ?? "";
+      const parsed = patchWebStaffPositionPresetBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await patchWebStaffPositionPreset(
+          request.tenant!.id,
+          presetId,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
+        return reply.send({ data: row });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "BAD_PRESET_ID") return reply.status(400).send({ error: "BadPresetId" });
+        if (msg === "BAD_LABEL") return reply.status(400).send({ error: "BadLabel" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/operators/bulk/sessions/revoke",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = bulkWebPanelRevokeBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        await bulkRevokeWebPanelStaffSessions(
+          request.tenant!.id,
+          parsed.data.user_ids,
+          actorUserIdOrNull(request)
+        );
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "EMPTY_IDS") return reply.status(400).send({ error: "EmptyIds" });
+        if (msg === "BAD_USER_IDS") return reply.status(400).send({ error: "BadUserIds" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/operators/bulk/max-sessions",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = bulkWebPanelMaxSessionsBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        await bulkPatchWebPanelStaffMaxSessions(
+          request.tenant!.id,
+          parsed.data.updates,
+          actorUserIdOrNull(request)
+        );
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "EMPTY_IDS") return reply.status(400).send({ error: "EmptyIds" });
+        if (msg === "BAD_USER_IDS") return reply.status(400).send({ error: "BadUserIds" });
+        if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
+        if (msg === "TOO_MANY_UPDATES") return reply.status(400).send({ error: "TooManyUpdates" });
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/operators/:id(\\d+)",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const row = await getStaffRow(request.tenant!.id, "operator", id);
+      if (!row) {
+        return reply.status(404).send({ error: "NotFound" });
+      }
+      return reply.send({ data: row });
+    }
+  );
+
+  app.post(
+    "/api/:slug/operators",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = createOperatorBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await createStaff(
+          request.tenant!.id,
+          "operator",
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
+        return reply.status(201).send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "BAD_LOGIN") return reply.status(400).send({ error: "BadLogin" });
+        if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
+        if (msg === "BAD_FIRST_NAME") return reply.status(400).send({ error: "BadFirstName" });
+        if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
+        if (msg === "CashDeskNotFound") return reply.status(400).send({ error: "CashDeskNotFound" });
+        if (msg === "UserRoleMismatch") return reply.status(400).send({ error: "UserRoleMismatch" });
+        if (msg === "InvalidLinkRole") return reply.status(400).send({ error: "InvalidLinkRole" });
+        if (msg === "CashDeskUserLinkExists")
+          return reply.status(409).send({ error: "CashDeskUserLinkExists" });
+        throw e;
+      }
+    }
+  );
+
+  app.patch(
+    "/api/:slug/operators/:id(\\d+)",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = patchOperatorBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await patchOperator(request.tenant!.id, id, parsed.data, actorUserIdOrNull(request));
+        return reply.send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
+        if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/operators/:id(\\d+)/sessions",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        const data = await listStaffSessions(request.tenant!.id, id, "operator");
+        return reply.send({ data });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/operators/:id(\\d+)/sessions/revoke",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = revokeSessionsBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        if ("all" in parsed.data && parsed.data.all) {
+          await revokeStaffSessions(request.tenant!.id, id, "operator", { all: true }, actorUserIdOrNull(request));
+        } else if ("token_ids" in parsed.data) {
+          await revokeStaffSessions(
+            request.tenant!.id,
+            id,
+            "operator",
+            { tokenIds: parsed.data.token_ids },
+            actorUserIdOrNull(request)
+          );
+        }
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "EMPTY_REVOKE") return reply.status(400).send({ error: "EmptyRevoke" });
         throw e;
       }
     }

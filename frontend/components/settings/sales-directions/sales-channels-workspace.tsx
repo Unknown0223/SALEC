@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Pencil, RefreshCw } from "lucide-react";
 
 export type SalesChannelRow = {
@@ -132,14 +133,14 @@ export function SalesChannelsWorkspace({ tenantSlug }: Props) {
           size="sm"
           className="h-8 text-xs"
           onClick={() => {
-            const h = ["Название", "Код"].join("\t");
-            const lines = filteredRows.map((r) => [r.name, r.code ?? ""].join("\t"));
-            const blob = new Blob([h + "\n" + lines.join("\n")], { type: "text/tab-separated-values" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "sales-channels.tsv";
-            a.click();
-            URL.revokeObjectURL(a.href);
+            const headers = ["Название", "Код"];
+            const rows = filteredRows.map((r) => [r.name, r.code ?? ""]);
+            downloadXlsxSheet(
+              `sales_channels_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+              "Каналы",
+              headers,
+              rows
+            );
           }}
         >
           Excel

@@ -42,6 +42,14 @@ export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "_actions", label: "Действия" }
 ];
 
+/** `ui_preferences` / ustunlar dialogi uchun (_actions bundan mustasno) */
+export const CLIENT_TABLE_PREF_COLUMN_IDS = CLIENT_TABLE_COLUMNS.map((c) => c.id).filter((id) => id !== "_actions");
+
+export function getDefaultHiddenClientColumnIds(): string[] {
+  const vis = getDefaultColumnVisibility();
+  return CLIENT_TABLE_PREF_COLUMN_IDS.filter((id) => !vis[id]);
+}
+
 /** Eski saqlangan ustunlar (v1) bilan aralashmasin */
 const LS_KEY = "salesdoc.clients.table.columns.v2";
 

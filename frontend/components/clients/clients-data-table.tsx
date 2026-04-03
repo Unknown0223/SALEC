@@ -21,15 +21,24 @@ import {
   getDefaultColumnVisibility,
   type ClientColumnId
 } from "@/lib/client-table-columns";
-import { Button } from "@/components/ui/button";
+import {
+  dataTableStickyActionsTd2,
+  dataTableStickyActionsTh2,
+  TableRowActionGroup
+} from "@/components/data-table/table-row-actions";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Pencil, UserRound } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 type Props = {
   rows: ClientRow[];
+  /** Eski rejim: visibility bo‘yicha; `orderedVisibleColumnIds` berilsa ustunlar tartibi server prefs dan */
   visibility: Record<string, boolean>;
+  /** `useUserTablePrefs.visibleColumnOrder` — Amallar ustuni avtomatik qo‘shiladi */
+  orderedVisibleColumnIds?: string[];
   onEdit: (row: ClientRow) => void;
   /** Guruh amallari: birinchi ustunda tanlash */
   bulkSelect?: boolean;
@@ -150,6 +159,7 @@ function cellContent(row: ClientRow, colId: ClientColumnId): ReactNode {
 export function ClientsDataTable({
   rows,
   visibility,
+  orderedVisibleColumnIds,
   onEdit,
   bulkSelect = false,
   selectedIds,
@@ -158,11 +168,23 @@ export function ClientsDataTable({
 }: Props) {
   const headerCbRef = useRef<HTMLInputElement>(null);
 
-  let cols = CLIENT_TABLE_COLUMNS.filter((c) => visibility[c.id] === true);
-  if (cols.length === 0) {
-    const d = getDefaultColumnVisibility();
-    cols = CLIENT_TABLE_COLUMNS.filter((c) => d[c.id] === true);
-  }
+  const cols = useMemo(() => {
+    if (orderedVisibleColumnIds?.length) {
+      const dataCols = orderedVisibleColumnIds
+        .map((id) => CLIENT_TABLE_COLUMNS.find((c) => c.id === id))
+        .filter(
+          (c): c is (typeof CLIENT_TABLE_COLUMNS)[number] => c != null && c.id !== "_actions"
+        );
+      const actions = CLIENT_TABLE_COLUMNS.find((c) => c.id === "_actions");
+      return actions ? [...dataCols, actions] : dataCols;
+    }
+    let c = CLIENT_TABLE_COLUMNS.filter((x) => visibility[x.id] === true);
+    if (c.length === 0) {
+      const d = getDefaultColumnVisibility();
+      c = CLIENT_TABLE_COLUMNS.filter((x) => d[x.id] === true);
+    }
+    return c;
+  }, [orderedVisibleColumnIds, visibility]);
 
   const sel = selectedIds ?? new Set<number>();
   const allOnPage = rows.length > 0 && rows.every((r) => sel.has(r.id));
@@ -197,8 +219,7 @@ export function ClientsDataTable({
                 key={c.id}
                 className={cn(
                   "whitespace-nowrap px-2 py-2 font-medium",
-                  c.id === "_actions" &&
-                    "sticky right-0 z-10 bg-muted/95 text-right shadow-[inset_1px_0_0_hsl(var(--border))]"
+                  c.id === "_actions" && dataTableStickyActionsTh2
                 )}
               >
                 {c.label}
@@ -231,23 +252,36 @@ export function ClientsDataTable({
                   <td
                     key={c.id}
                     className={cn(
-                      "max-w-[14rem] px-2 py-2 align-top",
-                      c.id === "_actions" &&
-                        "sticky right-0 z-10 bg-background shadow-[inset_1px_0_0_hsl(var(--border))]"
+                      "px-2 py-2 align-top",
+                      c.id !== "_actions" && "max-w-[14rem]",
+                      c.id === "_actions" && dataTableStickyActionsTd2
                     )}
                   >
                     {c.id === "_actions" ? (
-                      <div className="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
-                        <Button type="button" size="sm" variant="outline" onClick={() => onEdit(row)}>
-                          Tahrir
+                      <TableRowActionGroup>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="outline"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => onEdit(row)}
+                          title="Tahrirlash"
+                          aria-label="Tahrirlash"
+                        >
+                          <Pencil className="size-3.5" aria-hidden />
                         </Button>
                         <Link
                           href={`/clients/${row.id}`}
-                          className="text-xs text-primary underline-offset-2 hover:underline"
+                          className={cn(
+                            buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                            "text-primary hover:bg-primary/10 hover:text-primary"
+                          )}
+                          title="Kartochka"
+                          aria-label="Kartochka"
                         >
-                          Karta
+                          <UserRound className="size-3.5" aria-hidden />
                         </Link>
-                      </div>
+                      </TableRowActionGroup>
                     ) : (
                       cellContent(row, c.id)
                     )}

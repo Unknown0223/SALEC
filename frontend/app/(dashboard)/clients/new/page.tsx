@@ -2,6 +2,7 @@
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -204,190 +205,200 @@ export default function NewClientPage() {
                   <Label className="mb-0 text-xs">Toifa</Label>
                   <RefAdminLink href="/settings/client-categories">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Toifa"
+                  aria-label="Toifa"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {catOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Tur (kod)</Label>
                   <RefAdminLink href="/settings/client-types">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Tur (kod)"
+                  aria-label="Tur (kod)"
                   value={clientTypeCode}
                   onChange={(e) => setClientTypeCode(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {typeOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Viloyat / territoriya</Label>
                   <RefAdminLink href="/settings/territories">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Viloyat / territoriya"
+                  aria-label="Viloyat / territoriya"
                   value={region}
                   onChange={(e) => setRegion(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {terrOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Mijoz formati</Label>
                   <RefAdminLink href="/settings/client-formats">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Mijoz formati"
+                  aria-label="Mijoz formati"
                   value={clientFormat}
                   onChange={(e) => setClientFormat(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {formatOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Savdo kanali</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-sales">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Savdo kanali"
+                  aria-label="Savdo kanali"
                   value={salesChannel}
                   onChange={(e) => setSalesChannel(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {salesOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Mahsulot toifasi</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Mahsulot toifasi"
+                  aria-label="Mahsulot toifasi"
                   value={productCategoryRef}
                   onChange={(e) => setProductCategoryRef(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {prodCatOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Tuman</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-district">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Tuman"
+                  aria-label="Tuman"
                   value={district}
                   onChange={(e) => setDistrict(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {distOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Mahalla</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Mahalla"
+                  aria-label="Mahalla"
                   value={neighborhood}
                   onChange={(e) => setNeighborhood(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {neiOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Zona</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-zone">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Zona"
+                  aria-label="Zona"
                   value={zone}
                   onChange={(e) => setZone(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {zoneOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5 sm:col-span-2">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0 text-xs">Logistika xizmati</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-logistics">+</RefAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Logistika xizmati"
+                  aria-label="Logistika xizmati"
                   value={logisticsService}
                   onChange={(e) => setLogisticsService(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  <option value="">—</option>
                   {logOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             </div>
           )}

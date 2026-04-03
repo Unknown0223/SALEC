@@ -17,7 +17,10 @@ export const dashboardNavGroups: NavGroup[] = [
   },
   {
     title: "Sozlamalar",
-    items: [{ href: "/settings", label: "Sozlamalar" }]
+    items: [
+      { href: "/settings", label: "Sozlamalar" },
+      { href: "/settings/cash-desks", label: "Kassalar (кассы)" }
+    ]
   }
 ];
 
@@ -27,7 +30,8 @@ export const dashboardUsersNav: { sectionTitle: string; items: NavItem[] } = {
   items: [
     { href: "/settings/spravochnik/agents", label: "Агент" },
     { href: "/settings/spravochnik/expeditors", label: "Экспедиторы" },
-    { href: "/settings/spravochnik/supervisors", label: "Супервайзер" }
+    { href: "/settings/spravochnik/supervisors", label: "Супервайзер" },
+    { href: "/settings/spravochnik/operators", label: "Веб-сотрудники", roles: ["admin"] }
   ]
 };
 

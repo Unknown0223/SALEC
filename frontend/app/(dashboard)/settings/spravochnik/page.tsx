@@ -1,7 +1,7 @@
 "use client";
 
 import { buttonVariants } from "@/components/ui/button";
-import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { useState } from "react";
 export default function SpravochnikPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
+  const effectiveRole = useEffectiveRole();
   const [msg, setMsg] = useState<string | null>(null);
 
   const users = useQuery({
@@ -107,6 +108,14 @@ export default function SpravochnikPage() {
               >
                 Supervizorlar
               </Link>
+              {effectiveRole === "admin" ? (
+                <Link
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                  href="/settings/spravochnik/operators"
+                >
+                  Veb xodimlar
+                </Link>
+              ) : null}
             </div>
             {users.isLoading ? (
               <p className="text-xs text-muted-foreground">Yuklanmoqda</p>

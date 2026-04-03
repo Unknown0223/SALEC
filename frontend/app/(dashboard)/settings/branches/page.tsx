@@ -2,6 +2,7 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -13,13 +14,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Users } from "lucide-react";
 
 type TerritoryNode = {
   id: string;
@@ -301,10 +303,30 @@ export default function BranchesSettingsPage() {
                     <td className="px-3 py-2">{r.comment ?? "-"}</td>
                     <td className="px-3 py-2 text-right">
                       {isAdmin ? (
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => openUsersModal(r)}>👥</Button>
-                          <Button variant="outline" size="sm" onClick={() => openEdit(r)}>✎</Button>
-                        </div>
+                        <TableRowActionGroup className="justify-end" ariaLabel="Filial">
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            type="button"
+                            title="Foydalanuvchilar"
+                            aria-label="Foydalanuvchilar"
+                            onClick={() => openUsersModal(r)}
+                          >
+                            <Users className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            type="button"
+                            title="Tahrirlash"
+                            aria-label="Tahrirlash"
+                            onClick={() => openEdit(r)}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                        </TableRowActionGroup>
                       ) : null}
                     </td>
                   </tr>
@@ -335,21 +357,35 @@ export default function BranchesSettingsPage() {
             </div>
             <div className="grid gap-1.5">
               <Label>Территория</Label>
-              <select className="h-9 rounded-md border px-2 text-sm" value={territory} onChange={(e) => setTerritory(e.target.value)}>
-                <option value="">—</option>
+              <FilterSelect
+                className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                emptyLabel="Территория"
+                aria-label="Территория"
+                value={territory}
+                onChange={(e) => setTerritory(e.target.value)}
+              >
                 {territoryOptions.map((v) => (
-                  <option key={v} value={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
                 ))}
-              </select>
+              </FilterSelect>
             </div>
             <div className="grid gap-1.5">
               <Label>Город</Label>
-              <select className="h-9 rounded-md border px-2 text-sm" value={city} onChange={(e) => setCity(e.target.value)}>
-                <option value="">—</option>
+              <FilterSelect
+                className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                emptyLabel="Город"
+                aria-label="Город"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+              >
                 {cityOptions.map((v) => (
-                  <option key={v} value={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
                 ))}
-              </select>
+              </FilterSelect>
             </div>
             <div className="grid gap-1.5">
               <Label>Касса</Label>

@@ -1,10 +1,16 @@
+import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { createCashDeskUserLink } from "../cash-desks/cash-desks.service";
 import { listActiveTradeDirectionLabels } from "../sales-directions/sales-directions.service";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import { listTenantAuditEvents } from "../audit-events/audit-events.service";
 
-type StaffKind = "agent" | "expeditor" | "supervisor";
+type StaffKind = "agent" | "expeditor" | "supervisor" | "operator";
+
+/** Veb-panel xodimlari (`User.role`). Yangi veb-rol qo‘shilganda shu ro‘yxat va JWT/auth bilan moslang. */
+export const WEB_PANEL_STAFF_ROLES = ["operator"] as const;
 
 export type AgentEntitlements = {
   price_types?: string[];
@@ -62,6 +68,10 @@ export type StaffRow = {
   supervisee_count: number;
   /** Supervisor ostidagi agentlar (faqat `kind === "supervisor"` da to‘ldiriladi) */
   supervisees: Array<{ id: number; fio: string; code: string | null }>;
+  /** Jadval tahriri (F.I.Sh alohida maydonlar) */
+  first_name?: string | null;
+  last_name?: string | null;
+  middle_name?: string | null;
 };
 
 export type CreateStaffInput = {
@@ -93,6 +103,9 @@ export type CreateStaffInput = {
   max_sessions?: number;
   kpi_color?: string | null;
   agent_entitlements?: AgentEntitlements;
+  /** Faqat `kind === "operator"`: yaratilganda kassaga bog‘lash */
+  cash_desk_id?: number | null;
+  cash_desk_link_role?: "cashier" | "manager" | "operator" | null;
 };
 
 export type ListStaffFilters = {
@@ -111,6 +124,7 @@ export type ListStaffFilters = {
 function kindRole(kind: StaffKind): string {
   if (kind === "agent") return "agent";
   if (kind === "supervisor") return "supervisor";
+  if (kind === "operator") return "operator";
   return "expeditor";
 }
 
@@ -496,7 +510,10 @@ export async function listStaff(
     supervisor_user_id: u.supervisor_user_id,
     supervisor_name: u.supervisor?.name ?? null,
     supervisee_count: kind === "supervisor" ? superviseeCountMap.get(u.id) ?? 0 : 0,
-    supervisees: kind === "supervisor" ? superviseesBySupervisor.get(u.id) ?? [] : []
+    supervisees: kind === "supervisor" ? superviseesBySupervisor.get(u.id) ?? [] : [],
+    first_name: u.first_name,
+    last_name: u.last_name,
+    middle_name: u.middle_name
   }));
 }
 
@@ -564,6 +581,79 @@ export async function createStaff(
 
   const exists = await prisma.user.findFirst({ where: { tenant_id: tenantId, login } });
   if (exists) throw new Error("LOGIN_EXISTS");
+
+  /** Veb-operator: mobil maydonlarsiz, asosan panel */
+  if (kind === "operator") {
+    const passwordHashOp = await bcrypt.hash(input.password, 10);
+    const ms =
+      input.max_sessions != null && Number.isInteger(input.max_sessions) && input.max_sessions >= 1
+        ? input.max_sessions
+        : 4;
+    const displayName = [input.last_name, input.first_name, input.middle_name]
+      .filter((x) => x && String(x).trim().length > 0)
+      .join(" ")
+      .trim();
+    const createdOp = await prisma.user.create({
+      data: {
+        tenant_id: tenantId,
+        name: displayName || firstName,
+        first_name: firstName,
+        last_name: input.last_name?.trim() || null,
+        middle_name: input.middle_name?.trim() || null,
+        login,
+        password_hash: passwordHashOp,
+        role: "operator",
+        phone: input.phone?.trim() || null,
+        email: input.email?.trim() || null,
+        can_authorize: input.can_authorize ?? true,
+        is_active: input.is_active ?? true,
+        app_access: input.app_access ?? false,
+        max_sessions: ms,
+        product: null,
+        agent_type: null,
+        code: input.code?.trim().slice(0, 24) || null,
+        pinfl: input.pinfl?.trim().slice(0, 24) || null,
+        consignment: false,
+        apk_version: null,
+        device_name: null,
+        price_type: null,
+        agent_price_types: [],
+        agent_entitlements: {},
+        warehouse_id: null,
+        return_warehouse_id: null,
+        trade_direction: null,
+        branch: input.branch?.trim().slice(0, 128) || null,
+        position: input.position?.trim().slice(0, 128) || null,
+        territory: null,
+        kpi_color: null,
+        supervisor_user_id: null
+      }
+    });
+
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.user,
+      entityId: createdOp.id,
+      action: "create",
+      payload: {
+        role: "operator",
+        login: createdOp.login,
+        password_set: true
+      }
+    });
+
+    const deskId = input.cash_desk_id;
+    const deskLinkRole = input.cash_desk_link_role;
+    if (deskId != null && deskLinkRole) {
+      await createCashDeskUserLink(tenantId, deskId, createdOp.id, deskLinkRole);
+    }
+
+    const rowsOp = await listStaff(tenantId, "operator");
+    const rowOp = rowsOp.find((x) => x.id === createdOp.id);
+    if (!rowOp) throw new Error("NOT_FOUND");
+    return rowOp;
+  }
 
   if (input.warehouse_id != null) {
     const wh = await prisma.warehouse.findFirst({ where: { id: input.warehouse_id, tenant_id: tenantId } });
@@ -962,10 +1052,97 @@ export async function patchSupervisor(
   return row;
 }
 
+export type PatchOperatorInput = {
+  first_name?: string;
+  last_name?: string | null;
+  middle_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  code?: string | null;
+  pinfl?: string | null;
+  branch?: string | null;
+  position?: string | null;
+  can_authorize?: boolean;
+  is_active?: boolean;
+  app_access?: boolean;
+  max_sessions?: number;
+  password?: string;
+};
+
+export async function patchOperator(
+  tenantId: number,
+  operatorId: number,
+  input: PatchOperatorInput,
+  actorUserId: number | null = null
+): Promise<StaffRow> {
+  const existing = await prisma.user.findFirst({
+    where: { id: operatorId, tenant_id: tenantId, role: "operator" }
+  });
+  if (!existing) {
+    throw new Error("NOT_FOUND");
+  }
+
+  const data: Prisma.UserUpdateInput = {};
+
+  if (input.first_name !== undefined) data.first_name = input.first_name.trim();
+  if (input.last_name !== undefined) data.last_name = input.last_name?.trim() || null;
+  if (input.middle_name !== undefined) data.middle_name = input.middle_name?.trim() || null;
+  if (input.phone !== undefined) data.phone = input.phone?.trim() || null;
+  if (input.email !== undefined) data.email = input.email?.trim() || null;
+  if (input.code !== undefined) data.code = input.code?.trim().slice(0, 24) || null;
+  if (input.pinfl !== undefined) data.pinfl = input.pinfl?.trim().slice(0, 24) || null;
+  if (input.branch !== undefined) data.branch = input.branch?.trim().slice(0, 128) || null;
+  if (input.position !== undefined) data.position = input.position?.trim().slice(0, 128) || null;
+  if (input.can_authorize !== undefined) data.can_authorize = input.can_authorize;
+  if (input.is_active !== undefined) data.is_active = input.is_active;
+  if (input.app_access !== undefined) data.app_access = input.app_access;
+  if (input.max_sessions !== undefined) {
+    const n = input.max_sessions;
+    if (!Number.isInteger(n) || n < 1 || n > 99) throw new Error("BAD_MAX_SESSIONS");
+    data.max_sessions = n;
+  }
+  if (input.password !== undefined && input.password.trim().length > 0) {
+    if (input.password.length < 6) throw new Error("BAD_PASSWORD");
+    data.password_hash = await bcrypt.hash(input.password, 10);
+  }
+
+  if (Object.keys(data).length > 0) {
+    if (input.first_name !== undefined || input.last_name !== undefined || input.middle_name !== undefined) {
+      const first =
+        input.first_name !== undefined ? input.first_name.trim() : existing.first_name ?? "";
+      const last = input.last_name !== undefined ? input.last_name?.trim() || null : existing.last_name;
+      const mid =
+        input.middle_name !== undefined ? input.middle_name?.trim() || null : existing.middle_name;
+      data.name =
+        [last, first, mid].filter((x) => x && String(x).trim().length > 0).join(" ").trim() ||
+        existing.name;
+    }
+
+    await prisma.user.update({
+      where: { id: operatorId },
+      data
+    });
+
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.user,
+      entityId: operatorId,
+      action: "patch.operator",
+      payload: { keys: Object.keys(data).filter((k) => k !== "password_hash") }
+    });
+  }
+
+  const rows = await listStaff(tenantId, "operator");
+  const row = rows.find((x) => x.id === operatorId);
+  if (!row) throw new Error("NOT_FOUND");
+  return row;
+}
+
 export async function listStaffSessions(
   tenantId: number,
   userId: number,
-  role: "agent" | "expeditor" | "supervisor"
+  role: "agent" | "expeditor" | "supervisor" | "operator"
 ): Promise<SessionRowDto[]> {
   const u = await prisma.user.findFirst({
     where: { id: userId, tenant_id: tenantId, role }
@@ -996,7 +1173,7 @@ export async function listAgentSessions(tenantId: number, agentId: number): Prom
 export async function revokeStaffSessions(
   tenantId: number,
   userId: number,
-  role: "agent" | "expeditor" | "supervisor",
+  role: "agent" | "expeditor" | "supervisor" | "operator",
   mode: { tokenIds?: number[]; all?: boolean },
   actorUserId: number | null = null
 ): Promise<void> {
@@ -1045,6 +1222,501 @@ export async function revokeAgentSessions(
   actorUserId: number | null = null
 ): Promise<void> {
   await revokeStaffSessions(tenantId, agentId, "agent", mode, actorUserId);
+}
+
+function asTenantSettingsRecord(v: unknown): Record<string, unknown> {
+  if (v != null && typeof v === "object" && !Array.isArray(v)) {
+    return { ...(v as Record<string, unknown>) };
+  }
+  return {};
+}
+
+const WEB_STAFF_PRESET_MAX = 50;
+
+/** `tenant_audit_events.entity_type` — bitta lavozim shabloni tarixini filtrlash uchun */
+export const WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY = "web_staff_position_preset";
+
+export type WebStaffPositionPresetDto = {
+  id: string;
+  label: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  created_by_user_id: number | null;
+  deactivated_at: string | null;
+  deactivated_by_user_id: number | null;
+};
+
+export type WebStaffPositionPresetAdminDto = WebStaffPositionPresetDto & {
+  created_by_label: string | null;
+  deactivated_by_label: string | null;
+  /** `User.position` shu shablon `label` bilan mos (trim) keladigan veb-panel xodimlari soni */
+  linked_operator_count: number;
+};
+
+function parseIsoDateString(v: unknown): string | null {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
+function parseOptionalUserId(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) return null;
+  return v;
+}
+
+function parsePresetObject(o: Record<string, unknown>, fallbackOrder: number): WebStaffPositionPresetDto | null {
+  const id = typeof o.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(o.id) ? o.id : null;
+  const label = typeof o.label === "string" ? o.label.trim().slice(0, 128) : "";
+  if (!id || !label) return null;
+  const is_active = o.is_active !== false;
+  const sort_order =
+    typeof o.sort_order === "number" && Number.isFinite(o.sort_order) ? Math.floor(o.sort_order) : fallbackOrder;
+  const created_at = parseIsoDateString(o.created_at) ?? "";
+  return {
+    id,
+    label,
+    is_active,
+    sort_order,
+    created_at,
+    created_by_user_id: parseOptionalUserId(o.created_by_user_id),
+    deactivated_at: parseIsoDateString(o.deactivated_at),
+    deactivated_by_user_id: parseOptionalUserId(o.deactivated_by_user_id)
+  };
+}
+
+function presetsFromStringArray(arr: string[]): WebStaffPositionPresetDto[] {
+  const labels = [...new Set(arr.map((s) => s.trim()).filter(Boolean).map((s) => s.slice(0, 128)))].slice(
+    0,
+    WEB_STAFF_PRESET_MAX
+  );
+  const now = new Date().toISOString();
+  return labels.map((label, i) => ({
+    id: randomUUID(),
+    label,
+    is_active: true,
+    sort_order: i,
+    created_at: now,
+    created_by_user_id: null,
+    deactivated_at: null,
+    deactivated_by_user_id: null
+  }));
+}
+
+function ensureCreatedAtOnPresets(presets: WebStaffPositionPresetDto[]): {
+  presets: WebStaffPositionPresetDto[];
+  changed: boolean;
+} {
+  const now = new Date().toISOString();
+  let changed = false;
+  const next = presets.map((p) => {
+    const ca = typeof p.created_at === "string" ? p.created_at.trim() : "";
+    if (ca && parseIsoDateString(ca)) return p;
+    changed = true;
+    return { ...p, created_at: now, created_by_user_id: p.created_by_user_id ?? null };
+  });
+  return { presets: next, changed };
+}
+
+async function enrichPresetsWithUserLabels(
+  tenantId: number,
+  presets: WebStaffPositionPresetDto[]
+): Promise<WebStaffPositionPresetAdminDto[]> {
+  const ids = new Set<number>();
+  for (const p of presets) {
+    if (p.created_by_user_id != null) ids.add(p.created_by_user_id);
+    if (p.deactivated_by_user_id != null) ids.add(p.deactivated_by_user_id);
+  }
+  const [actorUsers, panelStaffPositions] = await Promise.all([
+    ids.size > 0
+      ? prisma.user.findMany({
+          where: { tenant_id: tenantId, id: { in: [...ids] } },
+          select: { id: true, name: true, login: true }
+        })
+      : Promise.resolve([] as { id: number; name: string; login: string }[]),
+    prisma.user.findMany({
+      where: { tenant_id: tenantId, role: { in: [...WEB_PANEL_STAFF_ROLES] } },
+      select: { position: true }
+    })
+  ]);
+
+  const labelById = new Map<number, string>();
+  for (const u of actorUsers) {
+    const n = u.name?.trim();
+    labelById.set(u.id, n && n.length > 0 ? n : u.login);
+  }
+
+  const operatorCountByPositionLabel = new Map<string, number>();
+  for (const row of panelStaffPositions) {
+    const t = row.position?.trim() ?? "";
+    if (!t) continue;
+    operatorCountByPositionLabel.set(t, (operatorCountByPositionLabel.get(t) ?? 0) + 1);
+  }
+
+  return presets.map((p) => ({
+    ...p,
+    created_by_label:
+      p.created_by_user_id != null
+        ? (labelById.get(p.created_by_user_id) ?? `ID ${p.created_by_user_id}`)
+        : null,
+    deactivated_by_label:
+      p.deactivated_by_user_id != null
+        ? (labelById.get(p.deactivated_by_user_id) ?? `ID ${p.deactivated_by_user_id}`)
+        : null,
+    linked_operator_count: operatorCountByPositionLabel.get(p.label) ?? 0
+  }));
+}
+
+/** JSON: string[] (eski) yoki obyekt massivi */
+function parsePresetsArray(raw: unknown): { presets: WebStaffPositionPresetDto[]; needsMigrate: boolean } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { presets: [], needsMigrate: false };
+  }
+  if (typeof raw[0] === "string") {
+    return { presets: presetsFromStringArray(raw as string[]), needsMigrate: true };
+  }
+  const out: WebStaffPositionPresetDto[] = [];
+  raw.forEach((item, i) => {
+    if (item == null || typeof item !== "object" || Array.isArray(item)) return;
+    const p = parsePresetObject(item as Record<string, unknown>, i);
+    if (p) out.push(p);
+  });
+  return { presets: out.slice(0, WEB_STAFF_PRESET_MAX), needsMigrate: false };
+}
+
+async function persistWebStaffPositionPresets(
+  tenantId: number,
+  presets: WebStaffPositionPresetDto[],
+  actorUserId: number | null,
+  action: string
+): Promise<void> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  if (!row) throw new Error("NOT_FOUND");
+
+  const nextSettings = {
+    ...asTenantSettingsRecord(row.settings),
+    web_staff_position_presets: presets.map((p) => ({
+      id: p.id,
+      label: p.label,
+      is_active: p.is_active,
+      sort_order: p.sort_order,
+      created_at: p.created_at,
+      created_by_user_id: p.created_by_user_id,
+      deactivated_at: p.deactivated_at,
+      deactivated_by_user_id: p.deactivated_by_user_id
+    }))
+  };
+
+  await prisma.tenant.update({
+    where: { id: tenantId },
+    data: { settings: nextSettings as Prisma.InputJsonValue }
+  });
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.tenant_settings,
+    entityId: tenantId,
+    action,
+    payload: { count: presets.length }
+  });
+}
+
+async function resolveWebStaffPresetsFromSettings(tenantId: number, settings: unknown): Promise<WebStaffPositionPresetDto[]> {
+  const { presets: parsed, needsMigrate } = parsePresetsArray(asTenantSettingsRecord(settings).web_staff_position_presets);
+  const { presets: withCreated, changed: needCreated } = ensureCreatedAtOnPresets(parsed);
+  let presets = withCreated;
+  if (needsMigrate) {
+    await persistWebStaffPositionPresets(tenantId, presets, null, "migrate.web_staff_position_presets");
+  } else if (needCreated) {
+    await persistWebStaffPositionPresets(tenantId, presets, null, "hydrate.web_staff_position_preset_timestamps");
+  }
+  return presets.sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label, "ru"));
+}
+
+async function loadWebStaffPositionPresets(tenantId: number): Promise<WebStaffPositionPresetDto[]> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  if (!row) throw new Error("NOT_FOUND");
+
+  return resolveWebStaffPresetsFromSettings(tenantId, row.settings);
+}
+
+function activePresetLabels(presets: WebStaffPositionPresetDto[]): string[] {
+  return [...new Set(presets.filter((p) => p.is_active).map((p) => p.label))].sort((a, b) =>
+    a.localeCompare(b, "ru")
+  );
+}
+
+export async function listWebPanelStaffFilterOptions(tenantId: number): Promise<{
+  branches: string[];
+  positions: string[];
+  /** Tenant bo‘yicha saqlangan lavozim nomlari (shablonlar) */
+  position_presets: string[];
+}> {
+  const [rows, tenant] = await Promise.all([
+    prisma.user.findMany({
+      where: { tenant_id: tenantId, role: { in: [...WEB_PANEL_STAFF_ROLES] } },
+      select: { branch: true, position: true }
+    }),
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true, settings: true }
+    })
+  ]);
+  const presetRows =
+    tenant != null
+      ? await resolveWebStaffPresetsFromSettings(tenant.id, tenant.settings)
+      : [];
+  const presetLabelActive = activePresetLabels(presetRows);
+  const branches = new Set<string>();
+  const positions = new Set<string>();
+  for (const p of presetLabelActive) positions.add(p);
+  for (const r of rows) {
+    if (r.branch?.trim()) branches.add(r.branch.trim());
+    if (r.position?.trim()) positions.add(r.position.trim());
+  }
+  const sort = (a: string, b: string) => a.localeCompare(b, "ru");
+  const positionsArr = [...positions].sort(sort);
+  return {
+    branches: [...branches].sort(sort),
+    positions: positionsArr,
+    /** Faqat faol shablonlar nomi (formalar / filtr datalist) */
+    position_presets: presetLabelActive
+  };
+}
+
+export async function listWebStaffPositionPresetsAdmin(tenantId: number): Promise<WebStaffPositionPresetAdminDto[]> {
+  const presets = await loadWebStaffPositionPresets(tenantId);
+  return enrichPresetsWithUserLabels(tenantId, presets);
+}
+
+export async function listWebStaffPositionPresetHistory(tenantId: number, presetId: string) {
+  const id = presetId.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("BAD_PRESET_ID");
+  }
+  return listTenantAuditEvents(tenantId, {
+    entity_type: WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY,
+    entity_id: id,
+    page: 1,
+    limit: 200
+  });
+}
+
+export async function createWebStaffPositionPreset(
+  tenantId: number,
+  label: string,
+  actorUserId: number | null = null
+): Promise<WebStaffPositionPresetAdminDto> {
+  const trimmed = label.trim().slice(0, 128);
+  if (!trimmed) throw new Error("BAD_LABEL");
+
+  const presets = await loadWebStaffPositionPresets(tenantId);
+  if (presets.length >= WEB_STAFF_PRESET_MAX) throw new Error("PRESET_LIMIT");
+
+  const maxOrder = presets.reduce((m, p) => Math.max(m, p.sort_order), -1);
+  const now = new Date().toISOString();
+  const uid = actorUserId != null && Number.isInteger(actorUserId) && actorUserId > 0 ? actorUserId : null;
+  const created: WebStaffPositionPresetDto = {
+    id: randomUUID(),
+    label: trimmed,
+    is_active: true,
+    sort_order: maxOrder + 1,
+    created_at: now,
+    created_by_user_id: uid,
+    deactivated_at: null,
+    deactivated_by_user_id: null
+  };
+  const next = [...presets, created].sort((a, b) => a.sort_order - b.sort_order);
+  await persistWebStaffPositionPresets(tenantId, next, actorUserId, "create.web_staff_position_preset");
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY,
+    entityId: created.id,
+    action: "create",
+    payload: { label: created.label }
+  });
+
+  const [enriched] = await enrichPresetsWithUserLabels(tenantId, [created]);
+  if (!enriched) throw new Error("NOT_FOUND");
+  return enriched;
+}
+
+export async function patchWebStaffPositionPreset(
+  tenantId: number,
+  presetId: string,
+  input: { label?: string; is_active?: boolean },
+  actorUserId: number | null = null
+): Promise<WebStaffPositionPresetAdminDto> {
+  const id = presetId.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("BAD_PRESET_ID");
+  }
+
+  const presets = await loadWebStaffPositionPresets(tenantId);
+  const idx = presets.findIndex((p) => p.id === id);
+  if (idx < 0) throw new Error("NOT_FOUND");
+
+  const cur = presets[idx]!;
+  let label = cur.label;
+  if (input.label !== undefined) {
+    const t = input.label.trim().slice(0, 128);
+    if (!t) throw new Error("BAD_LABEL");
+    label = t;
+  }
+  const is_active = input.is_active !== undefined ? input.is_active : cur.is_active;
+
+  const uid = actorUserId != null && Number.isInteger(actorUserId) && actorUserId > 0 ? actorUserId : null;
+  let deactivated_at = cur.deactivated_at;
+  let deactivated_by_user_id = cur.deactivated_by_user_id;
+  if (is_active) {
+    deactivated_at = null;
+    deactivated_by_user_id = null;
+  } else if (!cur.is_active) {
+    /* no-op */
+  } else {
+    const now = new Date().toISOString();
+    deactivated_at = now;
+    deactivated_by_user_id = uid;
+  }
+
+  const updated: WebStaffPositionPresetDto = {
+    ...cur,
+    label,
+    is_active,
+    deactivated_at,
+    deactivated_by_user_id
+  };
+  const next = [...presets];
+  next[idx] = updated;
+  await persistWebStaffPositionPresets(tenantId, next, actorUserId, "patch.web_staff_position_preset");
+
+  if (input.label !== undefined && label !== cur.label) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY,
+      entityId: id,
+      action: "patch.label",
+      payload: { from: cur.label, to: label }
+    });
+  }
+  if (input.is_active === true && cur.is_active === false) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY,
+      entityId: id,
+      action: "reactivate",
+      payload: { label }
+    });
+  }
+  if (input.is_active === false && cur.is_active === true) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: WEB_STAFF_POSITION_PRESET_AUDIT_ENTITY,
+      entityId: id,
+      action: "deactivate",
+      payload: { label }
+    });
+  }
+
+  const [enriched] = await enrichPresetsWithUserLabels(tenantId, [updated]);
+  if (!enriched) throw new Error("NOT_FOUND");
+  return enriched;
+}
+
+export async function bulkRevokeWebPanelStaffSessions(
+  tenantId: number,
+  userIds: number[],
+  actorUserId: number | null = null
+): Promise<void> {
+  const uniq = [...new Set(userIds)].filter((id) => Number.isInteger(id) && id > 0);
+  if (!uniq.length) throw new Error("EMPTY_IDS");
+
+  const users = await prisma.user.findMany({
+    where: {
+      tenant_id: tenantId,
+      id: { in: uniq },
+      role: { in: [...WEB_PANEL_STAFF_ROLES] }
+    },
+    select: { id: true }
+  });
+  if (users.length !== uniq.length) throw new Error("BAD_USER_IDS");
+
+  const now = new Date();
+  await prisma.refreshToken.updateMany({
+    where: {
+      tenant_id: tenantId,
+      user_id: { in: uniq },
+      revoked_at: null
+    },
+    data: { revoked_at: now }
+  });
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.user,
+    entityId: "web_panel_bulk",
+    action: "sessions.bulk_revoke",
+    payload: { user_ids: uniq }
+  });
+}
+
+export async function bulkPatchWebPanelStaffMaxSessions(
+  tenantId: number,
+  updates: { user_id: number; max_sessions: number }[],
+  actorUserId: number | null = null
+): Promise<void> {
+  if (!updates.length) throw new Error("EMPTY_IDS");
+  if (updates.length > 200) throw new Error("TOO_MANY_UPDATES");
+
+  const byUser = new Map<number, number>();
+  for (const u of updates) {
+    if (!Number.isInteger(u.user_id) || u.user_id <= 0) throw new Error("BAD_USER_IDS");
+    const n = u.max_sessions;
+    if (!Number.isInteger(n) || n < 1 || n > 99) throw new Error("BAD_MAX_SESSIONS");
+    byUser.set(u.user_id, n);
+  }
+  const ids = [...byUser.keys()];
+
+  const found = await prisma.user.findMany({
+    where: {
+      tenant_id: tenantId,
+      id: { in: ids },
+      role: { in: [...WEB_PANEL_STAFF_ROLES] }
+    },
+    select: { id: true }
+  });
+  if (found.length !== ids.length) throw new Error("BAD_USER_IDS");
+
+  await prisma.$transaction(
+    ids.map((uid) =>
+      prisma.user.update({
+        where: { id: uid },
+        data: { max_sessions: byUser.get(uid)! }
+      })
+    )
+  );
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.user,
+    entityId: "web_panel_bulk",
+    action: "patch.operator_max_sessions_bulk",
+    payload: { count: updates.length }
+  });
 }
 
 export type PatchExpeditorInput = Omit<PatchAgentInput, "supervisor_user_id" | "agent_entitlements"> & {

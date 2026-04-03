@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Pencil, RefreshCw } from "lucide-react";
 
 type KpiListRow = {
@@ -171,23 +172,21 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
           size="sm"
           className="h-8 text-xs"
           onClick={() => {
-            const h = ["Название", "Код", "Сортировка", "Продукты", "Агенты", "Комментарий"].join("\t");
-            const lines = filteredRows.map((r) =>
-              [
-                r.name,
-                r.code ?? "",
-                String(r.sort_order),
-                r.product_total,
-                r.agent_total,
-                (r.comment ?? "").replace(/\n/g, " ")
-              ].join("\t")
+            const headers = ["Название", "Код", "Сортировка", "Продукты", "Агенты", "Комментарий"];
+            const rows = filteredRows.map((r) => [
+              r.name,
+              r.code ?? "",
+              r.sort_order,
+              r.product_total,
+              r.agent_total,
+              (r.comment ?? "").replace(/\n/g, " ")
+            ]);
+            downloadXlsxSheet(
+              `kpi_groups_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+              "KPI группы",
+              headers,
+              rows
             );
-            const blob = new Blob([h + "\n" + lines.join("\n")], { type: "text/tab-separated-values" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "kpi-groups.tsv";
-            a.click();
-            URL.revokeObjectURL(a.href);
           }}
         >
           Excel

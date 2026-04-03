@@ -1,10 +1,13 @@
 "use client";
 
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { useQuery } from "@tanstack/react-query";
+import { ListOrdered } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -19,6 +22,14 @@ type AuditRow = {
   created_at: string;
 };
 
+const AUDIT_COLUMN_META = [
+  { id: "created_at", label: "Vaqt" },
+  { id: "actor", label: "Kim" },
+  { id: "object", label: "Obyekt" },
+  { id: "action", label: "Harakat" },
+  { id: "payload", label: "Payload" }
+] as const;
+
 export default function AuditJournalPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const role = useEffectiveRole();
@@ -26,10 +37,19 @@ export default function AuditJournalPage() {
   const [page, setPage] = useState(1);
   const [entityType, setEntityType] = useState("");
   const [entityId, setEntityId] = useState("");
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: "audit.journal.v1",
+    defaultColumnOrder: [...AUDIT_COLUMN_META.map((c) => c.id)],
+    defaultPageSize: 40,
+    allowedPageSizes: [20, 40, 80, 100]
+  });
 
   const queryKey = useMemo(
-    () => ["audit-events", tenantSlug, page, entityType, entityId],
-    [tenantSlug, page, entityType, entityId]
+    () => ["audit-events", tenantSlug, page, entityType, entityId, tablePrefs.pageSize],
+    [tenantSlug, page, entityType, entityId, tablePrefs.pageSize]
   );
 
   const q = useQuery({
@@ -38,7 +58,7 @@ export default function AuditJournalPage() {
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("page", String(page));
-      params.set("limit", "40");
+      params.set("limit", String(tablePrefs.pageSize));
       if (entityType.trim()) params.set("entity_type", entityType.trim());
       if (entityId.trim()) params.set("entity_id", entityId.trim());
       const { data } = await api.get<{
@@ -117,7 +137,47 @@ export default function AuditJournalPage() {
         >
           Tozalash
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1"
+          onClick={() => setColumnDialogOpen(true)}
+        >
+          <ListOrdered className="size-3.5" />
+          Ustunlar
+        </Button>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Satr/sahifa</span>
+          <select
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={tablePrefs.pageSize}
+            onChange={(e) => {
+              tablePrefs.setPageSize(Number.parseInt(e.target.value, 10));
+              setPage(1);
+            }}
+          >
+            {[20, 40, 80, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Ustunlarni boshqarish"
+        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi."
+        columns={[...AUDIT_COLUMN_META]}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
 
       {q.isError && (
         <p className="text-sm text-destructive">Yuklashda xato — tarmoq yoki ruxsatni tekshiring.</p>
@@ -127,41 +187,57 @@ export default function AuditJournalPage() {
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="border-b border-border bg-muted/50">
             <tr>
-              <th className="px-3 py-2 font-medium">Vaqt</th>
-              <th className="px-3 py-2 font-medium">Kim</th>
-              <th className="px-3 py-2 font-medium">Obyekt</th>
-              <th className="px-3 py-2 font-medium">Harakat</th>
-              <th className="px-3 py-2 font-medium">Payload</th>
+              {tablePrefs.visibleColumnOrder.map((colId) => {
+                const meta = AUDIT_COLUMN_META.find((c) => c.id === colId);
+                return (
+                  <th key={colId} className="px-3 py-2 font-medium">
+                    {meta?.label ?? colId}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {q.isLoading ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
+                <td
+                  colSpan={Math.max(1, tablePrefs.visibleColumnOrder.length)}
+                  className="px-3 py-6 text-center text-muted-foreground"
+                >
                   Yuklanmoqda…
                 </td>
               </tr>
             ) : (
               (q.data?.data ?? []).map((row) => (
                 <tr key={row.id} className="border-b border-border/80 last:border-0">
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(row.created_at).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2">
-                    {row.actor_login ?? "—"}
-                    {row.actor_user_id != null ? (
-                      <span className="ml-1 text-xs text-muted-foreground">#{row.actor_user_id}</span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="font-mono text-xs">{row.entity_type}</span>
-                    <span className="text-muted-foreground"> / </span>
-                    <span className="font-mono text-xs">{row.entity_id}</span>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">{row.action}</td>
-                  <td className="max-w-[240px] truncate px-3 py-2 font-mono text-[11px] text-muted-foreground">
-                    {JSON.stringify(row.payload)}
-                  </td>
+                  {tablePrefs.visibleColumnOrder.map((colId) => (
+                    <td key={colId} className="px-3 py-2">
+                      {colId === "created_at" ? (
+                        <span className="whitespace-nowrap text-xs text-muted-foreground">
+                          {new Date(row.created_at).toLocaleString()}
+                        </span>
+                      ) : colId === "actor" ? (
+                        <>
+                          {row.actor_login ?? "—"}
+                          {row.actor_user_id != null ? (
+                            <span className="ml-1 text-xs text-muted-foreground">#{row.actor_user_id}</span>
+                          ) : null}
+                        </>
+                      ) : colId === "object" ? (
+                        <>
+                          <span className="font-mono text-xs">{row.entity_type}</span>
+                          <span className="text-muted-foreground"> / </span>
+                          <span className="font-mono text-xs">{row.entity_id}</span>
+                        </>
+                      ) : colId === "action" ? (
+                        <span className="font-mono text-xs">{row.action}</span>
+                      ) : colId === "payload" ? (
+                        <span className="max-w-[240px] truncate font-mono text-[11px] text-muted-foreground">
+                          {JSON.stringify(row.payload)}
+                        </span>
+                      ) : null}
+                    </td>
+                  ))}
                 </tr>
               ))
             )}

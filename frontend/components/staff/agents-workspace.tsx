@@ -17,12 +17,18 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  ListOrdered,
   LogOut,
   Pencil,
   RefreshCw,
   Settings2,
   UserMinus
 } from "lucide-react";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
+import { FilterSelect } from "@/components/ui/filter-select";
 
 export type AgentRow = {
   id: number;
@@ -110,6 +116,83 @@ const COLS = [
   "Максимальное количество сессий"
 ] as const;
 
+const AGENT_TABLE_ID = "staff.agents.v1";
+
+const AGENT_COLUMN_IDS = [
+  "fio",
+  "product",
+  "agent_type",
+  "code",
+  "pinfl",
+  "consignment",
+  "apk_version",
+  "device_name",
+  "last_sync",
+  "phone",
+  "login",
+  "price_types",
+  "warehouse",
+  "trade_direction",
+  "branch",
+  "position",
+  "created_at",
+  "app_access",
+  "active_sessions",
+  "max_sessions"
+] as const;
+
+const AGENT_COLUMNS = AGENT_COLUMN_IDS.map((id, i) => ({
+  id,
+  label: COLS[i] ?? id
+}));
+
+function agentExportCellString(r: AgentRow, colId: string): string {
+  switch (colId) {
+    case "fio":
+      return r.fio;
+    case "product":
+      return r.product ?? "";
+    case "agent_type":
+      return r.agent_type ?? "";
+    case "code":
+      return r.code ?? "";
+    case "pinfl":
+      return r.pinfl ?? "";
+    case "consignment":
+      return r.consignment ? "Да" : "Нет";
+    case "apk_version":
+      return r.apk_version ?? "";
+    case "device_name":
+      return r.device_name ?? "";
+    case "last_sync":
+      return r.last_sync_at ? new Date(r.last_sync_at).toLocaleString("ru-RU") : "";
+    case "phone":
+      return r.phone ?? "";
+    case "login":
+      return r.login;
+    case "price_types":
+      return (r.price_types?.length ? r.price_types : r.price_type ? [r.price_type] : []).join(", ");
+    case "warehouse":
+      return r.warehouse ?? "";
+    case "trade_direction":
+      return r.trade_direction ?? "";
+    case "branch":
+      return r.branch ?? "";
+    case "position":
+      return r.position ?? "";
+    case "created_at":
+      return new Date(r.created_at).toLocaleDateString("ru-RU");
+    case "app_access":
+      return r.app_access ? "Да" : "Нет";
+    case "active_sessions":
+      return String(r.active_session_count);
+    case "max_sessions":
+      return String(r.max_sessions);
+    default:
+      return "";
+  }
+}
+
 function randomPassword(len = 10) {
   const chars = "abcdefghjkmnpqrstuvwxyz23456789";
   let s = "";
@@ -129,7 +212,16 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const [appliedTd, setAppliedTd] = useState("");
   const [appliedPos, setAppliedPos] = useState("");
   const [search, setSearch] = useState("");
-  const [pageSize, setPageSize] = useState(10);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: AGENT_TABLE_ID,
+    defaultColumnOrder: [...AGENT_COLUMN_IDS],
+    defaultPageSize: 10,
+    allowedPageSizes: [10, 20, 25, 50, 100, 500, 1000]
+  });
+  const pageSize = tablePrefs.pageSize;
 
   const [addOpen, setAddOpen] = useState(false);
   const [infoRow, setInfoRow] = useState<AgentRow | null>(null);
@@ -283,53 +375,129 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
     setAppliedPos(draftPos);
   };
 
+  function renderAgentDataCell(colId: string, r: AgentRow) {
+    switch (colId) {
+      case "fio":
+        return r.fio;
+      case "product":
+        return r.product ?? "—";
+      case "agent_type":
+        return r.agent_type ?? "—";
+      case "code":
+        return <span className="font-mono">{r.code ?? "—"}</span>;
+      case "pinfl":
+        return <span className="font-mono">{r.pinfl ?? "—"}</span>;
+      case "consignment":
+        return r.consignment ? "Да" : "Нет";
+      case "apk_version":
+        return r.apk_version ?? "—";
+      case "device_name":
+        return r.device_name ?? "—";
+      case "last_sync":
+        return r.last_sync_at ? new Date(r.last_sync_at).toLocaleString("ru-RU") : "—";
+      case "phone":
+        return r.phone ?? "—";
+      case "login":
+        return <span className="font-mono">{r.login}</span>;
+      case "price_types":
+        return (
+          <div className="flex flex-wrap gap-1">
+            {(r.price_types?.length ? r.price_types : r.price_type ? [r.price_type] : []).map((p) => (
+              <span key={p} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
+                {p}
+              </span>
+            ))}
+            {!r.price_types?.length && !r.price_type && "—"}
+          </div>
+        );
+      case "warehouse":
+        return r.warehouse ?? "—";
+      case "trade_direction":
+        return r.trade_direction ?? "—";
+      case "branch":
+        return r.branch ?? "—";
+      case "position":
+        return r.position ?? "—";
+      case "created_at":
+        return new Date(r.created_at).toLocaleDateString("ru-RU");
+      case "app_access":
+        return (
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">Вкл / выкл</span>
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={r.app_access}
+              onChange={(e) => {
+                patchMut.mutate({ id: r.id, body: { app_access: e.target.checked } });
+              }}
+            />
+          </label>
+        );
+      case "active_sessions":
+        return (
+          <button
+            type="button"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+            onClick={() => setSessionAgent(r)}
+          >
+            {r.active_session_count}
+          </button>
+        );
+      case "max_sessions":
+        return r.max_sessions;
+      default:
+        return "—";
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Филиал
-          <select
-            className="h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm"
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="sr-only">Филиал</span>
+          <FilterSelect
+            aria-label="Филиал"
+            emptyLabel="Филиал"
             value={draftBranch}
             onChange={(e) => setDraftBranch(e.target.value)}
           >
-            <option value="">—</option>
             {branchOptions.map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Направление торговли
-          <select
-            className="h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm"
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="sr-only">Направление торговли</span>
+          <FilterSelect
+            aria-label="Направление торговли"
+            emptyLabel="Направление торговли"
             value={draftTd}
             onChange={(e) => setDraftTd(e.target.value)}
           >
-            <option value="">—</option>
             {(filterOptQ.data?.trade_directions ?? []).map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Должность
-          <select
-            className="h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm"
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="sr-only">Должность</span>
+          <FilterSelect
+            aria-label="Должность"
+            emptyLabel="Должность"
             value={draftPos}
             onChange={(e) => setDraftPos(e.target.value)}
           >
-            <option value="">—</option>
             {(filterOptQ.data?.positions ?? []).map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
             ))}
-          </select>
+          </FilterSelect>
         </label>
         <Button type="button" size="sm" onClick={applyFilters}>
           Применить
@@ -367,12 +535,23 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 px-2 text-xs"
+          title="Управление столбцами"
+          onClick={() => setColumnDialogOpen(true)}
+        >
+          <ListOrdered className="size-3.5" />
+          Столбцы
+        </Button>
         <select
           className="h-8 rounded-md border border-input bg-background px-2 text-xs"
           value={pageSize}
-          onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
+          onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
         >
-          {[10, 25, 50].map((n) => (
+          {[10, 20, 25, 50, 100, 500, 1000].map((n) => (
             <option key={n} value={n}>
               {n}
             </option>
@@ -390,37 +569,10 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
           size="sm"
           className="h-8 text-xs"
           onClick={() => {
-            const header = [...COLS, "Действия"].join("\t");
-            const lines = filteredRows.map((r) =>
-              [
-                r.fio,
-                r.product ?? "",
-                r.agent_type ?? "",
-                r.code ?? "",
-                r.pinfl ?? "",
-                r.consignment ? "Да" : "Нет",
-                r.apk_version ?? "",
-                r.device_name ?? "",
-                r.last_sync_at ?? "",
-                r.phone ?? "",
-                r.login,
-                (r.price_types ?? []).join(", "),
-                r.warehouse ?? "",
-                r.trade_direction ?? "",
-                r.branch ?? "",
-                r.position ?? "",
-                r.created_at,
-                r.app_access ? "Да" : "Нет",
-                String(r.active_session_count),
-                String(r.max_sessions)
-              ].join("\t")
-            );
-            const blob = new Blob([header + "\n" + lines.join("\n")], { type: "text/tab-separated-values" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "agents.tsv";
-            a.click();
-            URL.revokeObjectURL(a.href);
+            const order = tablePrefs.visibleColumnOrder;
+            const headers = order.map((id) => AGENT_COLUMNS.find((c) => c.id === id)?.label ?? id);
+            const rows = filteredRows.map((r) => order.map((colId) => agentExportCellString(r, colId)));
+            downloadXlsxSheet(`agents_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`, "Агенты", headers, rows);
           }}
         >
           Excel
@@ -439,18 +591,34 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
         </Button>
       </div>
 
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Управление столбцами"
+        description="Выберите видимые столбцы и порядок. Сохраняется для вашей учётной записи."
+        columns={AGENT_COLUMNS}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
+
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full min-w-[2200px] text-xs">
           <thead className="bg-muted/50">
             <tr>
-              {COLS.map((c) => (
-                <th
-                  key={c}
-                  className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
-                >
-                  {c}
-                </th>
-              ))}
+              {tablePrefs.visibleColumnOrder.map((colId) => {
+                const meta = AGENT_COLUMNS.find((c) => c.id === colId);
+                return (
+                  <th
+                    key={colId}
+                    className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
+                  >
+                    {meta?.label ?? colId}
+                  </th>
+                );
+              })}
               <th className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">
                 Действия
               </th>
@@ -459,102 +627,60 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
           <tbody>
             {pageRows.map((r) => (
               <tr key={r.id} className="border-t even:bg-muted/20">
-                <td className="px-2 py-2">{r.fio}</td>
-                <td className="px-2 py-2">{r.product ?? "—"}</td>
-                <td className="px-2 py-2">{r.agent_type ?? "—"}</td>
-                <td className="px-2 py-2 font-mono">{r.code ?? "—"}</td>
-                <td className="px-2 py-2 font-mono">{r.pinfl ?? "—"}</td>
-                <td className="px-2 py-2">{r.consignment ? "Да" : "Нет"}</td>
-                <td className="px-2 py-2">{r.apk_version ?? "—"}</td>
-                <td className="px-2 py-2">{r.device_name ?? "—"}</td>
-                <td className="px-2 py-2">
-                  {r.last_sync_at ? new Date(r.last_sync_at).toLocaleString("ru-RU") : "—"}
-                </td>
-                <td className="px-2 py-2">{r.phone ?? "—"}</td>
-                <td className="px-2 py-2 font-mono">{r.login}</td>
-                <td className="max-w-[10rem] px-2 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {(r.price_types?.length ? r.price_types : r.price_type ? [r.price_type] : []).map((p) => (
-                      <span key={p} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
-                        {p}
-                      </span>
-                    ))}
-                    {!r.price_types?.length && !r.price_type && "—"}
-                  </div>
-                </td>
-                <td className="px-2 py-2">{r.warehouse ?? "—"}</td>
-                <td className="px-2 py-2">{r.trade_direction ?? "—"}</td>
-                <td className="px-2 py-2">{r.branch ?? "—"}</td>
-                <td className="px-2 py-2">{r.position ?? "—"}</td>
-                <td className="px-2 py-2">{new Date(r.created_at).toLocaleDateString("ru-RU")}</td>
-                <td className="px-2 py-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground">Вкл / выкл</span>
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-primary"
-                      checked={r.app_access}
-                      onChange={(e) => {
-                        patchMut.mutate({ id: r.id, body: { app_access: e.target.checked } });
-                      }}
-                    />
-                  </label>
-                </td>
-                <td className="px-2 py-2">
-                  <button
-                    type="button"
-                    className="font-medium text-primary underline-offset-2 hover:underline"
-                    onClick={() => setSessionAgent(r)}
-                  >
-                    {r.active_session_count}
-                  </button>
-                </td>
-                <td className="px-2 py-2">{r.max_sessions}</td>
-                <td className="px-2 py-2">
-                  <div className="flex items-center gap-1">
+                {tablePrefs.visibleColumnOrder.map((colId) => (
+                  <td key={colId} className={colId === "price_types" ? "max-w-[10rem] px-2 py-2" : "px-2 py-2"}>
+                    {renderAgentDataCell(colId, r)}
+                  </td>
+                ))}
+                <td className="px-2 py-2 text-right">
+                  <TableRowActionGroup className="justify-end" ariaLabel="Agent">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="size-7"
+                      className="text-muted-foreground hover:text-foreground"
                       title="Изменить ограничения"
+                      aria-label="Изменить ограничения"
                       onClick={() => setRestrictAgent(r)}
                     >
-                      <Settings2 className="size-3.5" />
+                      <Settings2 className="size-3.5" aria-hidden />
                     </Button>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="size-7"
+                      className="text-muted-foreground hover:text-foreground"
                       title="Инфо"
+                      aria-label="Инфо"
                       onClick={() => setInfoRow(r)}
                     >
-                      <Eye className="size-3.5" />
+                      <Eye className="size-3.5" aria-hidden />
                     </Button>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="icon-sm"
-                      className="size-7"
+                      className="text-muted-foreground hover:text-foreground"
                       title="Редактировать"
+                      aria-label="Редактировать"
                       onClick={() => setEditRow(r)}
                     >
-                      <Pencil className="size-3.5" />
+                      <Pencil className="size-3.5" aria-hidden />
                     </Button>
                     {tab === "active" && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="size-7 text-destructive"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         title="Деактивировать"
+                        aria-label="Деактивировать"
                         onClick={() => setDeactivateAgent(r)}
                       >
-                        <UserMinus className="size-3.5" />
+                        <UserMinus className="size-3.5" aria-hidden />
                       </Button>
                     )}
-                  </div>
+                  </TableRowActionGroup>
                 </td>
               </tr>
             ))}
@@ -748,33 +874,35 @@ function AgentAddDialog({
           <Input placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
           <label className="text-xs text-muted-foreground">
             Склад
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Склад"
+              aria-label="Склад"
               value={warehouse_id}
               onChange={(e) => setWh(e.target.value)}
             >
-              <option value="">—</option>
               {warehouses.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
             Направление торговли
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Направление торговли"
+              aria-label="Направление торговли"
               value={trade_direction}
               onChange={(e) => setTd(e.target.value)}
             >
-              <option value="">—</option>
               {tradeDirectionOptions.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
             Тип агента
@@ -789,18 +917,19 @@ function AgentAddDialog({
           </label>
           <label className="text-xs text-muted-foreground">
             Филиал
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Филиал"
+              aria-label="Филиал"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
             >
-              <option value="">—</option>
               {branchOptions.map((b) => (
                 <option key={b} value={b}>
                   {b}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <Input placeholder="Должность" value={position} onChange={(e) => setPos(e.target.value)} />
           <Input placeholder="Код" value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} />
@@ -998,51 +1127,54 @@ function AgentEditDialog({
           <Input placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
           <label className="text-xs text-muted-foreground">
             Склад
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Склад"
+              aria-label="Склад"
               value={warehouse_id}
               onChange={(e) => setWh(e.target.value)}
             >
-              <option value="">—</option>
               {warehouses.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
             Направление торговли
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Направление торговли"
+              aria-label="Направление торговли"
               value={trade_direction}
               onChange={(e) => setTd(e.target.value)}
             >
-              <option value="">—</option>
               {tdOpts.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <Input placeholder="Тип агента" value={agent_type} onChange={(e) => setAgentType(e.target.value)} />
           <Input placeholder="Код" value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} />
           <Input placeholder="ПИНФЛ" value={pinfl} onChange={(e) => setPinfl(e.target.value)} />
           <label className="text-xs text-muted-foreground">
             Филиал
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm"
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Филиал"
+              aria-label="Филиал"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
             >
-              <option value="">—</option>
               {branchOptions.map((b) => (
                 <option key={b} value={b}>
                   {b}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </label>
           <Input placeholder="Должность" value={position} onChange={(e) => setPos(e.target.value)} />
           <Input placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} disabled />

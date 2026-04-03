@@ -1,5 +1,6 @@
 "use client";
 
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import type { CatalogSimpleRow } from "@/lib/product-types";
 import { api } from "@/lib/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type Props = {
@@ -160,9 +162,19 @@ export function CatalogSimpleTab({
                   <td className="px-3 py-2">{r.sort_order ?? "—"}</td>
                   <td className="px-3 py-2 text-right">
                     {isAdmin ? (
-                      <Button type="button" variant="outline" size="sm" onClick={() => openEdit(r)}>
-                        ✎
-                      </Button>
+                      <TableRowActionGroup className="justify-end" ariaLabel="Yozuv">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Tahrirlash"
+                          aria-label="Tahrirlash"
+                          onClick={() => openEdit(r)}
+                        >
+                          <Pencil className="size-3.5" aria-hidden />
+                        </Button>
+                      </TableRowActionGroup>
                     ) : null}
                   </td>
                 </tr>

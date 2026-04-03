@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Pencil, RefreshCw } from "lucide-react";
 
 export type TradeDirectionRow = {
@@ -142,22 +143,20 @@ export function TradeDirectionsWorkspace({ tenantSlug }: Props) {
           size="sm"
           className="h-8 text-xs"
           onClick={() => {
-            const h = ["Название", "Сортировка", "Предложение заказа", "Код", "Комментарий"].join("\t");
-            const lines = filteredRows.map((r) =>
-              [
-                r.name,
-                String(r.sort_order),
-                r.use_in_order_proposal ? "Да" : "Нет",
-                r.code ?? "",
-                (r.comment ?? "").replace(/\n/g, " ")
-              ].join("\t")
+            const headers = ["Название", "Сортировка", "Предложение заказа", "Код", "Комментарий"];
+            const rows = filteredRows.map((r) => [
+              r.name,
+              r.sort_order,
+              r.use_in_order_proposal ? "Да" : "Нет",
+              r.code ?? "",
+              (r.comment ?? "").replace(/\n/g, " ")
+            ]);
+            downloadXlsxSheet(
+              `trade_directions_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+              "Направления",
+              headers,
+              rows
             );
-            const blob = new Blob([h + "\n" + lines.join("\n")], { type: "text/tab-separated-values" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "trade-directions.tsv";
-            a.click();
-            URL.revokeObjectURL(a.href);
           }}
         >
           Excel

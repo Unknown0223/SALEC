@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { mergeRefOptions } from "@/lib/merge-ref-options";
 import { cn } from "@/lib/utils";
+import { FilterSelect } from "@/components/ui/filter-select";
 
 type ClientDetailApi = ClientRow & {
   phone_normalized?: string | null;
@@ -630,76 +631,80 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     <Label className="mb-0">Toifa</Label>
                     <SpravochnikAdminLink href="/settings/client-categories">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Toifa"
+                    aria-label="Toifa"
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {catOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Tur (kod)</Label>
                     <SpravochnikAdminLink href="/settings/client-types">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Tur (kod)"
+                    aria-label="Tur (kod)"
                     value={clientTypeCode}
                     onChange={(e) => setClientTypeCode(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {typeOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Teritoriya</Label>
                     <SpravochnikAdminLink href="/settings/territories">Hududlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Teritoriya"
+                    aria-label="Teritoriya"
                     value={region}
                     onChange={(e) => setRegion(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {terrOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Mijoz formati</Label>
                     <SpravochnikAdminLink href="/settings/client-formats">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Mijoz formati"
+                    aria-label="Mijoz formati"
                     value={clientFormat}
                     onChange={(e) => setClientFormat(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {formatOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
               </div>
             </section>
@@ -717,57 +722,60 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     <Label className="mb-0">Tuman</Label>
                     <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Tuman"
+                    aria-label="Tuman"
                     value={district}
                     onChange={(e) => setDistrict(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {distOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Mahalla</Label>
                     <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Mahalla"
+                    aria-label="Mahalla"
                     value={neighborhood}
                     onChange={(e) => setNeighborhood(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {neiOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Zona</Label>
                     <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-zone">Qiymatlar</SpravochnikAdminLink>
                   </div>
-                  <select
-                    className={selectCls}
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Zona"
+                    aria-label="Zona"
                     value={zone}
                     onChange={(e) => setZone(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    <option value="">—</option>
                     {zoneOpts.map((v) => (
                       <option key={v} value={v}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label htmlFor="ce-str">Ko‘cha</Label>
@@ -925,8 +933,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="grid gap-1.5">
                         <Label className="text-xs">Agent</Label>
-                        <select
-                          className={selectCls}
+                        <FilterSelect
+                          className={cn(selectCls, "min-w-0 max-w-none")}
+                          emptyLabel="Agent"
+                          aria-label="Agent"
                           value={slot.agentId}
                           onChange={(e) => {
                             const next = [...agentSlots];
@@ -935,18 +945,19 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                           }}
                           disabled={mutation.isPending}
                         >
-                          <option value="">—</option>
                           {(agentsPickerQ.data ?? []).map((u) => (
-                            <option key={u.id} value={u.id}>
+                            <option key={u.id} value={String(u.id)}>
                               {u.name} ({u.login})
                             </option>
                           ))}
-                        </select>
+                        </FilterSelect>
                       </div>
                       <div className="grid gap-1.5">
                         <Label className="text-xs">Dastavchik</Label>
-                        <select
-                          className={selectCls}
+                        <FilterSelect
+                          className={cn(selectCls, "min-w-0 max-w-none")}
+                          emptyLabel="Dastavchik"
+                          aria-label="Dastavchik"
                           value={slot.expeditorUserId}
                           onChange={(e) => {
                             const next = [...agentSlots];
@@ -955,13 +966,12 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                           }}
                           disabled={mutation.isPending}
                         >
-                          <option value="">—</option>
                           {(expeditorsPickerQ.data ?? []).map((u) => (
-                            <option key={u.id} value={u.id}>
+                            <option key={u.id} value={String(u.id)}>
                               {u.name} ({u.login})
                             </option>
                           ))}
-                        </select>
+                        </FilterSelect>
                       </div>
                     </div>
                     <div className="mt-3">
@@ -1017,38 +1027,40 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   <Label className="mb-0">Mahsulot toifasi</Label>
                   <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">Qiymatlar</SpravochnikAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Mahsulot toifasi"
+                  aria-label="Mahsulot toifasi"
                   value={productCategoryRef}
                   onChange={(e) => setProductCategoryRef(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {prodCatOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="mb-0">Savdo kanali</Label>
                   <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-sales">Qiymatlar</SpravochnikAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Savdo kanali"
+                  aria-label="Savdo kanali"
                   value={salesChannel}
                   onChange={(e) => setSalesChannel(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {salesOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
             </div>
           </section>
@@ -1130,19 +1142,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   <Label className="mb-0">Logistika xizmati</Label>
                   <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-logistics">Qiymatlar</SpravochnikAdminLink>
                 </div>
-                <select
-                  className={selectCls}
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Logistika xizmati"
+                  aria-label="Logistika xizmati"
                   value={logisticsService}
                   onChange={(e) => setLogisticsService(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  <option value="">—</option>
                   {logOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="ce-lic">Litsenziya muddati</Label>

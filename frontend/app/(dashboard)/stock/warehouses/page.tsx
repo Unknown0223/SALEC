@@ -1,5 +1,6 @@
 "use client";
 
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +9,7 @@ import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth
 import { api } from "@/lib/api";
 import type { AxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -214,11 +216,14 @@ export default function StockWarehousesPage() {
                       {w.address ? <p className="text-xs text-muted-foreground">Manzil: {w.address}</p> : null}
                     </div>
                     {canManage ? (
-                      <div className="flex flex-wrap gap-1">
+                      <TableRowActionGroup className="justify-end sm:justify-start" ariaLabel="Ombor">
                         <Button
                           type="button"
                           variant="outline"
-                          size="sm"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Tahrirlash"
+                          aria-label="Tahrirlash"
                           onClick={() => {
                             setEditingWhId(w.id);
                             setEditWhName(w.name);
@@ -226,12 +231,15 @@ export default function StockWarehousesPage() {
                             setEditWhAddr(w.address ?? "");
                           }}
                         >
-                          Tahrirlash
+                          <Pencil className="size-3.5" aria-hidden />
                         </Button>
                         <Button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          title="O‘chirish"
+                          aria-label="O‘chirish"
                           onClick={() => {
                             if (window.confirm(`“${w.name}” ombori o‘chirilsinmi?`)) {
                               setFeedback(null);
@@ -239,9 +247,9 @@ export default function StockWarehousesPage() {
                             }
                           }}
                         >
-                          O‘chir
+                          <Trash2 className="size-3.5" aria-hidden />
                         </Button>
-                      </div>
+                      </TableRowActionGroup>
                     ) : null}
                   </div>
                 )}

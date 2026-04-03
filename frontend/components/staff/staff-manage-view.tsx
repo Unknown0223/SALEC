@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
@@ -201,23 +202,24 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
                     <td className="px-2 py-2">{r.app_access ? "Да" : "Нет"}</td>
                     <td className="px-2 py-2">{r.client_count}</td>
                     <td className="min-w-[12rem] px-2 py-2">
-                      <select
-                        className="h-8 max-w-[14rem] rounded-md border border-input bg-background px-2 text-xs disabled:opacity-50"
+                      <FilterSelect
+                        className="h-8 min-w-[10rem] max-w-[14rem] rounded-md border border-input bg-background px-2 text-xs disabled:opacity-50"
+                        aria-label="Супервайзер"
+                        emptyLabel="Супервайзер"
                         disabled={supervisorMut.isPending || supervisorsQ.isLoading}
-                        value={r.supervisor_user_id ?? ""}
+                        value={r.supervisor_user_id != null ? String(r.supervisor_user_id) : ""}
                         onChange={(e) => {
                           const raw = e.target.value;
                           const supervisor_user_id = raw === "" ? null : Number.parseInt(raw, 10);
                           supervisorMut.mutate({ agentId: r.id, supervisor_user_id });
                         }}
                       >
-                        <option value="">—</option>
                         {(supervisorsQ.data ?? []).filter((u) => u.is_active).map((u) => (
-                          <option key={u.id} value={u.id}>
+                          <option key={u.id} value={String(u.id)}>
                             {u.fio} ({u.login})
                           </option>
                         ))}
-                      </select>
+                      </FilterSelect>
                     </td>
                   </>
                 ) : kind === "supervisor" ? (

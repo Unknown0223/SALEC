@@ -42,6 +42,7 @@ model Tenant {
   trade_directions             TradeDirection[]
   sales_channel_refs           SalesChannelRef[]
   kpi_groups                   KpiGroup[]
+  cash_desks                   CashDesk[]
 
   @@map("tenants")
 }
@@ -106,6 +107,9 @@ model User {
   expeditor_assignments ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
   tenant_audit_events   TenantAuditEvent[]       @relation("TenantAuditEventActor")
   kpi_group_links       KpiGroupAgent[]
+  /// Jadval ustunlari, sahifa o‘lchami va boshqa UI — foydalanuvchiga xos (JSON)
+  ui_preferences        Json     @default("{}")
+  cash_desk_links       CashDeskUserLink[]
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -744,4 +748,45 @@ model BonusRuleCondition {
 
   @@index([bonus_rule_id])
   @@map("bonus_rule_conditions")
+}
+
+/// Kassa (kassa punkti) — foydalanuvchilar rollari va joylashuv
+model CashDesk {
+  id          Int      @id @default(autoincrement())
+  tenant_id   Int
+  tenant      Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name        String
+  timezone    String   @default("Asia/Tashkent") @db.VarChar(64)
+  sort_order  Int?
+  code        String?  @db.VarChar(20)
+  comment     String?  @db.Text
+  latitude    Decimal? @db.Decimal(10, 7)
+  longitude   Decimal? @db.Decimal(10, 7)
+  is_active   Boolean  @default(true)
+  /// Yopilgan / yakunlangan sessiya holati (UI «статус закрытия»)
+  is_closed   Boolean  @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  links CashDeskUserLink[]
+
+  @@index([tenant_id, is_active])
+  @@map("cash_desks")
+}
+
+/// Bir kassaga biriktirilgan foydalanuvchi (bir foydalanuvchi bir kassada faqat bitta «rol slot»ida)
+model CashDeskUserLink {
+  id            Int      @id @default(autoincrement())
+  cash_desk_id  Int
+  cash_desk     CashDesk @relation(fields: [cash_desk_id], references: [id], onDelete: Cascade)
+  user_id       Int
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  /// cashier | manager | operator | supervisor | expeditor
+  link_role     String   @db.VarChar(32)
+  created_at    DateTime @default(now())
+
+  @@unique([cash_desk_id, user_id])
+  @@index([cash_desk_id, link_role])
+  @@index([user_id])
+  @@map("cash_desk_user_links")
 }

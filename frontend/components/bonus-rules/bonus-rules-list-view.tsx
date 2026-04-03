@@ -6,10 +6,15 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ListOrdered, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -49,11 +54,29 @@ type Props = {
   activeOnly: boolean;
 };
 
+const BONUS_RULE_DATA_COLUMNS = [
+  { id: "name", label: "Nomi" },
+  { id: "type", label: "Tur" },
+  { id: "summary", label: "Shart" },
+  { id: "priority", label: "Ustunlik" },
+  { id: "active", label: "Faol" }
+] as const;
+
 export function BonusRulesListView({ activeOnly }: Props) {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+
+  const bonusTableId = activeOnly ? "bonus_rules.list.active.v1" : "bonus_rules.list.inactive.v1";
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: bonusTableId,
+    defaultColumnOrder: BONUS_RULE_DATA_COLUMNS.map((c) => c.id),
+    defaultPageSize: 50,
+    allowedPageSizes: [25, 50, 100]
+  });
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [previewRuleId, setPreviewRuleId] = useState<number | null>(null);
   const [previewQty, setPreviewQty] = useState("12");
@@ -130,10 +153,34 @@ export function BonusRulesListView({ activeOnly }: Props) {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Ustunlarni boshqarish"
+        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi."
+        columns={[...BONUS_RULE_DATA_COLUMNS]}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
         <Link className={cn(buttonVariants({ size: "sm" }))} href="/bonus-rules/new">
           Yangi qoida
         </Link>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 px-2 text-xs"
+          title="Ustunlar"
+          onClick={() => setColumnDialogOpen(true)}
+        >
+          <ListOrdered className="size-3.5" />
+          Ustunlar
+        </Button>
         {data ? (
           <span className="self-center text-sm text-muted-foreground">
             Jami: <span className="font-medium text-foreground">{data.total}</span>
@@ -148,22 +195,23 @@ export function BonusRulesListView({ activeOnly }: Props) {
             <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1">
                 <span className="text-muted-foreground">Qoida</span>
-                <select
-                  className="h-10 min-w-[12rem] rounded-lg border border-input bg-background px-2"
-                  value={previewRuleId ?? ""}
+                <FilterSelect
+                  className="h-10 min-w-[12rem] max-w-[20rem] rounded-lg border border-input bg-background px-2"
+                  emptyLabel="Qoida"
+                  aria-label="Qoida"
+                  value={previewRuleId != null ? String(previewRuleId) : ""}
                   onChange={(e) => {
                     const v = e.target.value;
                     setPreviewRuleId(v ? Number(v) : null);
                     setPreviewOut(null);
                   }}
                 >
-                  <option value="">— tanlang —</option>
                   {qtyRules.map((r) => (
-                    <option key={r.id} value={r.id}>
+                    <option key={r.id} value={String(r.id)}>
                       {r.name}
                     </option>
                   ))}
-                </select>
+                </FilterSelect>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-muted-foreground">Sotib olingan miqdor</span>
@@ -244,60 +292,82 @@ export function BonusRulesListView({ activeOnly }: Props) {
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="border-b bg-muted/60">
                   <tr>
-                    <th className="px-3 py-2 font-medium">Nomi</th>
-                    <th className="px-3 py-2 font-medium">Tur</th>
-                    <th className="px-3 py-2 font-medium">Shart</th>
-                    <th className="px-3 py-2 font-medium">Ustunlik</th>
-                    <th className="px-3 py-2 font-medium">Faol</th>
-                    <th className="px-3 py-2 font-medium text-right">Amallar</th>
+                    {tablePrefs.visibleColumnOrder.map((colId) => {
+                      const meta = BONUS_RULE_DATA_COLUMNS.find((c) => c.id === colId);
+                      return (
+                        <th key={colId} className="px-3 py-2 font-medium">
+                          {meta?.label ?? colId}
+                        </th>
+                      );
+                    })}
+                    <th className="px-3 py-2 text-right font-medium">Amallar</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
+                      <td
+                        colSpan={tablePrefs.visibleColumnOrder.length + 1}
+                        className="px-3 py-8 text-center text-muted-foreground"
+                      >
                         {activeOnly ? "Faol qoida yo‘q" : "Nofaol qoida yo‘q"}
                       </td>
                     </tr>
                   ) : (
                     rows.map((row) => (
                       <tr key={row.id} className="border-b last:border-0">
-                        <td className="px-3 py-2 font-medium">{row.name}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{row.type}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{ruleSummary(row)}</td>
-                        <td className="px-3 py-2">{row.priority}</td>
-                        <td className="px-3 py-2">
-                          <input
-                            type="checkbox"
-                            checked={row.is_active}
-                            disabled={toggleMut.isPending && togglingId === row.id}
-                            onChange={(e) => {
-                              toggleMut.mutate({ id: row.id, is_active: e.target.checked });
-                            }}
-                            aria-label={`${row.name} faolligi`}
-                          />
-                        </td>
+                        {tablePrefs.visibleColumnOrder.map((colId) => (
+                          <td key={colId} className="px-3 py-2">
+                            {colId === "name" ? (
+                              <span className="font-medium">{row.name}</span>
+                            ) : colId === "type" ? (
+                              <span className="text-muted-foreground">{row.type}</span>
+                            ) : colId === "summary" ? (
+                              <span className="font-mono text-xs">{ruleSummary(row)}</span>
+                            ) : colId === "priority" ? (
+                              row.priority
+                            ) : colId === "active" ? (
+                              <input
+                                type="checkbox"
+                                checked={row.is_active}
+                                disabled={toggleMut.isPending && togglingId === row.id}
+                                onChange={(e) => {
+                                  toggleMut.mutate({ id: row.id, is_active: e.target.checked });
+                                }}
+                                aria-label={`${row.name} faolligi`}
+                              />
+                            ) : null}
+                          </td>
+                        ))}
                         <td className="px-3 py-2 text-right">
-                          <div className="flex justify-end gap-1">
+                          <TableRowActionGroup className="justify-end" ariaLabel="Qoida">
                             <Link
-                              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                               href={`/bonus-rules/${row.id}/edit`}
+                              className={cn(
+                                buttonVariants({ variant: "outline", size: "icon-sm" }),
+                                "text-muted-foreground hover:text-foreground"
+                              )}
+                              title="Tahrirlash"
+                              aria-label="Tahrirlash"
                             >
-                              Tahrir
+                              <Pencil className="size-3.5" aria-hidden />
                             </Link>
                             <Button
                               type="button"
-                              size="sm"
-                              variant="outline"
+                              size="icon-sm"
+                              variant="ghost"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                               disabled={deleteMut.isPending}
+                              title="O‘chirish (nofaol)"
+                              aria-label="O‘chirish (nofaol)"
                               onClick={() => {
                                 if (!window.confirm(`“${row.name}” ni o‘chirish (nofaol)?`)) return;
                                 deleteMut.mutate(row.id);
                               }}
                             >
-                              O‘chir
+                              <Trash2 className="size-3.5" aria-hidden />
                             </Button>
-                          </div>
+                          </TableRowActionGroup>
                         </td>
                       </tr>
                     ))

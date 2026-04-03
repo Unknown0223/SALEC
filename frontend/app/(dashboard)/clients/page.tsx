@@ -2,13 +2,21 @@
 
 import { ClientsDataTable } from "@/components/clients/clients-data-table";
 import { ClientsTableToolbar } from "@/components/clients/clients-table-toolbar";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ClientRow } from "@/lib/client-types";
-import { getDefaultColumnVisibility, loadColumnVisibility } from "@/lib/client-table-columns";
+import {
+  CLIENT_TABLE_COLUMNS,
+  CLIENT_TABLE_PREF_COLUMN_IDS,
+  getDefaultColumnVisibility,
+  getDefaultHiddenClientColumnIds,
+  loadColumnVisibility
+} from "@/lib/client-table-columns";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { CLIENT_IMPORT_MAX_FILE_BYTES } from "@/lib/client-import-limits";
 import { downloadClientsCsvPage } from "@/lib/clients-csv-export";
@@ -87,6 +95,10 @@ function appendClientsFilterParams(params: URLSearchParams, p: FilterBundle) {
   params.set("order", p.sortOrder);
 }
 
+const CLIENTS_LIST_TABLE_ID = "clients.list.v1";
+const CLIENTS_DEFAULT_HIDDEN_COLUMN_IDS = getDefaultHiddenClientColumnIds();
+const CLIENT_MANAGEABLE_COLUMNS = CLIENT_TABLE_COLUMNS.filter((c) => c.id !== "_actions");
+
 export default function ClientsPage() {
   const router = useRouter();
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -117,16 +129,56 @@ export default function ClientsPage() {
   const [createdToFilter, setCreatedToFilter] = useState("");
   const [sortField, setSortField] = useState<"name" | "phone" | "id" | "created_at" | "region">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [pageLimit, setPageLimit] = useState(30);
   const [filtersVisible, setFiltersVisible] = useState(false);
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(getDefaultColumnVisibility);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const clientsPrefsMigrated = useRef(false);
+
+  const tablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: CLIENTS_LIST_TABLE_ID,
+    defaultColumnOrder: CLIENT_TABLE_PREF_COLUMN_IDS,
+    defaultPageSize: 30,
+    allowedPageSizes: [10, 20, 30, 50, 100],
+    defaultHiddenColumnIds: CLIENTS_DEFAULT_HIDDEN_COLUMN_IDS
+  });
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   useEffect(() => {
-    setColumnVisibility(loadColumnVisibility());
-  }, []);
+    if (!tenantSlug || clientsPrefsMigrated.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get<{ data: { tables?: Record<string, unknown> } }>(
+          `/api/${tenantSlug}/me/ui-preferences`
+        );
+        if (cancelled) return;
+        if (data.data.tables?.[CLIENTS_LIST_TABLE_ID]) {
+          clientsPrefsMigrated.current = true;
+          return;
+        }
+        const ls = loadColumnVisibility();
+        const hidden = CLIENT_TABLE_PREF_COLUMN_IDS.filter((id) => !ls[id]);
+        await api.patch(`/api/${tenantSlug}/me/ui-preferences`, {
+          tables: {
+            [CLIENTS_LIST_TABLE_ID]: {
+              columnOrder: [...CLIENT_TABLE_PREF_COLUMN_IDS],
+              hiddenColumnIds: hidden,
+              pageSize: 30
+            }
+          }
+        });
+        clientsPrefsMigrated.current = true;
+        await qc.invalidateQueries({ queryKey: ["me", "ui-preferences", tenantSlug] });
+      } catch {
+        clientsPrefsMigrated.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantSlug, qc]);
 
   const filterBundle: FilterBundle = {
     search,
@@ -175,7 +227,7 @@ export default function ClientsPage() {
     createdToFilter,
     sortField,
     sortOrder,
-    pageLimit
+    tablePrefs.pageSize
   ]);
 
   const importMut = useMutation({
@@ -279,13 +331,13 @@ export default function ClientsPage() {
       createdToFilter,
       sortField,
       sortOrder,
-      pageLimit
+      tablePrefs.pageSize
     ],
     enabled: Boolean(tenantSlug),
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
-        limit: String(pageLimit)
+        limit: String(tablePrefs.pageSize)
       });
       appendClientsFilterParams(params, filterBundle);
       const { data: body } = await api.get<ClientsResponse>(
@@ -640,15 +692,27 @@ export default function ClientsPage() {
           setSortOrder(v);
           setPage(1);
         }}
-        pageLimit={pageLimit}
+        pageLimit={tablePrefs.pageSize}
         onPageLimitChange={(v) => {
-          setPageLimit(v);
+          tablePrefs.setPageSize(v);
           setPage(1);
         }}
         filtersVisible={filtersVisible}
         onFiltersVisibleChange={setFiltersVisible}
-        columnVisibility={columnVisibility}
-        onColumnVisibilityChange={setColumnVisibility}
+        onOpenColumnSettings={() => setColumnDialogOpen(true)}
+      />
+
+      <TableColumnSettingsDialog
+        open={columnDialogOpen}
+        onOpenChange={setColumnDialogOpen}
+        title="Ustunlarni boshqarish"
+        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi (server)."
+        columns={CLIENT_MANAGEABLE_COLUMNS}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
       />
 
       {data ? (
@@ -674,7 +738,8 @@ export default function ClientsPage() {
           <CardContent className="p-0">
             <ClientsDataTable
               rows={rows}
-              visibility={columnVisibility}
+              visibility={getDefaultColumnVisibility()}
+              orderedVisibleColumnIds={tablePrefs.visibleColumnOrder}
               bulkSelect={canCatalog}
               selectedIds={selectedIds}
               onToggleRow={(id, selected) => {

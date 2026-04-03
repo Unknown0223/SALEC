@@ -6,6 +6,7 @@ import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
@@ -228,18 +229,19 @@ export default function PriceMatrixPage() {
           </div>
           <div className="grid gap-1">
             <Label className="text-xs">Категория</Label>
-            <select
-              className="h-10 min-w-[240px] rounded-md border bg-background px-3 text-sm"
+            <FilterSelect
+              className="h-10 min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-3 text-sm"
+              emptyLabel="Категория"
+              aria-label="Категория"
               value={categoryId === "" ? "" : String(categoryId)}
               onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")}
             >
-              <option value="">—</option>
               {flatCats.map((c) => (
-                <option key={c.id} value={c.id}>
+                <option key={c.id} value={String(c.id)}>
                   {c.label}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
           </div>
         </div>
 
