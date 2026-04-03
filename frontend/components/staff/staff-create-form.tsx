@@ -67,6 +67,15 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
     }
   });
 
+  const priceTypesQ = useQuery({
+    queryKey: ["price-types", tenantSlug, "staff-create"],
+    enabled: Boolean(tenantSlug) && kind === "agent",
+    queryFn: async () => {
+      const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
+      return data.data;
+    }
+  });
+
   const createMut = useMutation({
     mutationFn: async () => {
       const path =
@@ -257,9 +266,15 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
             />
             <Input
               placeholder="Тип цены"
+              list="staff-create-price-types"
               value={form.price_type}
               onChange={(e) => setForm((p) => ({ ...p, price_type: e.target.value }))}
             />
+            <datalist id="staff-create-price-types">
+              {(priceTypesQ.data ?? []).map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
           </>
         ) : null}
         <div className="flex items-center justify-between text-xs">

@@ -235,7 +235,7 @@ function OrdersPageContent() {
                   <td className="px-3 py-2">{o.warehouse_name ?? "—"}</td>
                   <td className="px-3 py-2">{o.agent_name ?? "—"}</td>
                   <td className="px-3 py-2">{o.agent_code ?? "—"}</td>
-                  <td className="px-3 py-2">{o.expeditors ?? "—"}</td>
+                  <td className="px-3 py-2">{o.expeditor_display ?? o.expeditors ?? "—"}</td>
                   <td className="px-3 py-2">{o.region ?? "—"}</td>
                   <td className="px-3 py-2">{o.city ?? "—"}</td>
                   <td className="px-3 py-2">{o.zone ?? "—"}</td>

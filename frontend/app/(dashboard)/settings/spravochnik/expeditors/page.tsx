@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { StaffManageView } from "@/components/staff/staff-manage-view";
+import { ExpeditorsWorkspace } from "@/components/staff/expeditors-workspace";
 
 export default function ExpeditorsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -20,7 +20,7 @@ export default function ExpeditorsPage() {
           ← Spravochnik
         </Link>
       </div>
-      <StaffManageView kind="expeditor" tenantSlug={tenantSlug} />
+      <ExpeditorsWorkspace tenantSlug={tenantSlug} />
     </div>
   );
 }

@@ -17,24 +17,19 @@ export const dashboardNavGroups: NavGroup[] = [
   },
   {
     title: "Sozlamalar",
-    items: [
-      { href: "/settings", label: "Sozlamalar katalogi" },
-      { href: "/settings/territories", label: "Territoriyalar" },
-      { href: "/settings/units", label: "O'lchov birliklari" },
-      { href: "/settings/branches", label: "Filiallar" },
-      { href: "/settings/client-formats", label: "Mijoz formati" },
-      { href: "/settings/client-types", label: "Mijoz turi" },
-      { href: "/settings/client-categories", label: "Mijoz kategoriyasi" },
-      { href: "/settings/product-categories", label: "Mahsulot kategoriyalari" },
-      { href: "/products", label: "Mahsulotlar" },
-      { href: "/settings/spravochnik", label: "Spravochniklar" },
-      { href: "/settings/spravochnik/agents", label: "Agentlar" },
-      { href: "/settings/spravochnik/expeditors", label: "Ekspeditorlar" },
-      { href: "/settings/company", label: "Kompaniya" },
-      { href: "/settings/audit", label: "Audit jurnal", roles: ["admin"] }
-    ]
+    items: [{ href: "/settings", label: "Sozlamalar" }]
   }
 ];
+
+/** Asosiy yon panel: «Sozlamalar»dan yuqori, suriladigan bo‘lim */
+export const dashboardUsersNav: { sectionTitle: string; items: NavItem[] } = {
+  sectionTitle: "Пользователи",
+  items: [
+    { href: "/settings/spravochnik/agents", label: "Агент" },
+    { href: "/settings/spravochnik/expeditors", label: "Экспедиторы" },
+    { href: "/settings/spravochnik/supervisors", label: "Супервайзер" }
+  ]
+};
 
 export function flattenNavItems(groups: NavGroup[]): NavItem[] {
   return groups.flatMap((g) => g.items);

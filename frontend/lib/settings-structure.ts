@@ -3,6 +3,8 @@ export type SettingsItem = {
   slug: string;
   href: string;
   status: "available" | "planned";
+  /** Pastga ochiladigan pastki punktlar (masalan «Пользователи» → Агент, Экспедиторы…) */
+  children?: SettingsItem[];
 };
 
 export type SettingsSection = {
@@ -63,19 +65,19 @@ export const settingsSections: SettingsSection[] = [
     title: "Финансы",
     slug: "finansy",
     items: [
-      makeItem("finansy", "Валюты", "planned", 0),
+      makeItem("finansy", "Валюты", "available", 0),
       makeItem("finansy", "Способ оплаты", "available", 1),
       makeItem("finansy", "Тип цены", "available", 2),
-      makeItem("finansy", "Цена", "planned", 3)
+      makeItem("finansy", "Цена", "available", 3)
     ]
   },
   {
     title: "Направления продаж",
     slug: "napravleniia-prodazh",
     items: [
-      makeItem("napravleniia-prodazh", "Направление торговли", "planned", 0),
+      makeItem("napravleniia-prodazh", "Направление торговли", "available", 0),
       makeItem("napravleniia-prodazh", "Канал продаж", "available", 1),
-      makeItem("napravleniia-prodazh", "Группа KPI", "planned", 2)
+      makeItem("napravleniia-prodazh", "Группа KPI", "available", 2)
     ]
   },
   {
@@ -124,6 +126,19 @@ export const settingsSections: SettingsSection[] = [
       makeItem("baza-znanii", "Тип базы знания", "planned", 0),
       makeItem("baza-znanii", "База знаний", "planned", 1)
     ]
+  },
+  {
+    title: "Справочники и персонал",
+    slug: "spravochniki-personal",
+    items: [
+      makeItem("spravochniki-personal", "Справочники", "available", 0),
+      makeItem("spravochniki-personal", "Компания", "available", 1)
+    ]
+  },
+  {
+    title: "Система",
+    slug: "sistema",
+    items: [makeItem("sistema", "Аудит", "available", 0)]
   }
 ];
 
@@ -136,13 +151,26 @@ const existingHrefByItemTitle: Record<string, string> = {
   "категория клиента": "/settings/client-categories",
   "категория продукта": "/settings/product-categories",
   "продукт": "/settings/products",
-  "способ оплаты": "/settings/company#ref-payment-types",
-  "тип цены": "/settings/spravochnik",
-  "канал продаж": "/settings/spravochnik/client-lists#ref-sales",
+  "способ оплаты": "/settings/payment-methods",
+  "тип цены": "/settings/price-types",
+  "валюты": "/settings/currencies",
+  "цена": "/settings/prices",
+  "направление торговли": "/settings/sales-directions/trade",
+  "канал продаж": "/settings/sales-directions/sales-channels",
+  "группа kpi": "/settings/sales-directions/kpi-groups",
   "бонусы": "/settings/bonus-stack",
   "скидки": "/settings/bonus-stack",
   "rlp бонусы": "/settings/bonus-stack",
-  "причины отказа": "/settings/company#ref-return-reasons"
+  "причины отказа": "/settings/company#ref-return-reasons",
+  "справочники": "/settings/spravochnik",
+  "пользователи": "/settings/spravochnik/agents",
+  "агент": "/settings/spravochnik/agents",
+  "агенты": "/settings/spravochnik/agents",
+  "экспедиторы": "/settings/spravochnik/expeditors",
+  "супервайзер": "/settings/spravochnik/supervisors",
+  "супервизоры": "/settings/spravochnik/supervisors",
+  "компания": "/settings/company",
+  "аудит": "/settings/audit"
 };
 
 export function resolveSettingsItemHref(item: SettingsItem): string {
@@ -152,5 +180,10 @@ export function resolveSettingsItemHref(item: SettingsItem): string {
 export function findSettingsItem(sectionSlug: string, itemSlug: string): SettingsItem | null {
   const section = settingsSections.find((s) => s.slug === sectionSlug);
   if (!section) return null;
-  return section.items.find((i) => i.slug === itemSlug) ?? null;
+  for (const item of section.items) {
+    if (item.slug === itemSlug) return item;
+    const child = item.children?.find((c) => c.slug === itemSlug);
+    if (child) return child;
+  }
+  return null;
 }

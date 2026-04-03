@@ -99,6 +99,39 @@ const clientRefEntrySchema = z.object({
   color: z.string().max(32).nullable().optional()
 });
 
+const currencyEntrySchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(500),
+  code: z.string().trim().min(2).max(20),
+  sort_order: z.number().int().nullable().optional(),
+  active: z.boolean().optional(),
+  is_default: z.boolean().optional()
+});
+
+const paymentMethodEntrySchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(500),
+  code: z.string().trim().max(30).nullable().optional(),
+  currency_code: z.string().trim().min(2).max(20),
+  sort_order: z.number().int().nullable().optional(),
+  comment: z.string().max(4000).nullable().optional(),
+  color: z.string().max(32).nullable().optional(),
+  active: z.boolean().optional()
+});
+
+const priceTypeEntrySchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(500),
+  code: z.string().trim().max(20).nullable().optional(),
+  payment_method_id: z.string().min(1).max(128),
+  kind: z.enum(["sale", "purchase"]).optional(),
+  sort_order: z.number().int().nullable().optional(),
+  comment: z.string().max(4000).nullable().optional(),
+  active: z.boolean().optional(),
+  manual: z.boolean().optional(),
+  attached_clients_only: z.boolean().optional()
+});
+
 const branchSchema: z.ZodType<BranchPatch> = z.object({
   id: z.string().min(1).max(128),
   name: z.string().min(1).max(500),
@@ -162,7 +195,10 @@ const profilePatchSchema = z
               cities: z.array(z.string())
             })
           )
-          .optional()
+          .optional(),
+        currency_entries: z.array(currencyEntrySchema).max(200).optional(),
+        payment_method_entries: z.array(paymentMethodEntrySchema).max(500).optional(),
+        price_type_entries: z.array(priceTypeEntrySchema).max(500).optional()
       })
       .optional()
   })

@@ -1,5 +1,27 @@
 import { prisma } from "../../config/database";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import {
+  priceTypeEntriesFromUnknown,
+  priceTypeKey,
+  resolveCurrencyEntries,
+  resolvePaymentMethodEntries,
+  uniqueSortedPriceTypeKeys
+} from "../tenant-settings/finance-refs";
+
+function settingsRefRecord(tenantId: number): Promise<Record<string, unknown>> {
+  return prisma.tenant
+    .findUnique({ where: { id: tenantId }, select: { settings: true } })
+    .then((row) => {
+      const st = row?.settings;
+      if (st != null && typeof st === "object" && !Array.isArray(st)) {
+        const refs = (st as Record<string, unknown>).references;
+        if (refs != null && typeof refs === "object" && !Array.isArray(refs)) {
+          return refs as Record<string, unknown>;
+        }
+      }
+      return {};
+    });
+}
 
 export async function listWarehousesForTenant(tenantId: number) {
   return prisma.warehouse.findMany({
@@ -224,14 +246,84 @@ export async function listProductCategoriesForTenant(tenantId: number): Promise<
   });
 }
 
-export async function listDistinctPriceTypesForTenant(tenantId: number): Promise<string[]> {
+export async function listDistinctPriceTypesForTenant(
+  tenantId: number,
+  kind?: "sale" | "purchase"
+): Promise<string[]> {
   const rows = await prisma.productPrice.findMany({
     where: { tenant_id: tenantId },
     distinct: ["price_type"],
     select: { price_type: true },
     orderBy: { price_type: "asc" }
   });
-  return rows.map((r) => r.price_type);
+  const fromDb = rows.map((r) => r.price_type);
+  const ref = await settingsRefRecord(tenantId);
+  const entries = priceTypeEntriesFromUnknown(ref.price_type_entries).filter((e) => e.active !== false);
+  const filtered = kind ? entries.filter((e) => e.kind === kind) : entries;
+  const fromCatalog = filtered.map((e) => priceTypeKey(e));
+  return uniqueSortedPriceTypeKeys([...fromDb, ...fromCatalog]);
+}
+
+export type FinancePriceOverviewRow = {
+  price_type: string;
+  price_type_name: string;
+  payment_method: string | null;
+  last_price_at: string | null;
+};
+
+export async function listFinancePriceOverview(
+  tenantId: number,
+  kind: "sale" | "purchase"
+): Promise<FinancePriceOverviewRow[]> {
+  const ref = await settingsRefRecord(tenantId);
+  const currencies = resolveCurrencyEntries(ref);
+  const paymentMethods = resolvePaymentMethodEntries(ref, currencies);
+  const pmById = new Map(paymentMethods.map((p) => [p.id, p]));
+  const allEntries = priceTypeEntriesFromUnknown(ref.price_type_entries);
+  const filtered = allEntries.filter((e) => e.active !== false && e.kind === kind);
+
+  const aggregates = await prisma.productPrice.groupBy({
+    by: ["price_type"],
+    where: { tenant_id: tenantId },
+    _max: { updated_at: true }
+  });
+  const lastByType = new Map(aggregates.map((a) => [a.price_type, a._max.updated_at]));
+
+  if (filtered.length > 0) {
+    return [...filtered]
+      .sort((a, b) => {
+        const ao = a.sort_order ?? 1_000_000;
+        const bo = b.sort_order ?? 1_000_000;
+        if (ao !== bo) return ao - bo;
+        return a.name.localeCompare(b.name, "uz");
+      })
+      .map((e) => {
+        const key = priceTypeKey(e);
+        const last = lastByType.get(key);
+        return {
+          price_type: key,
+          price_type_name: e.name,
+          payment_method: pmById.get(e.payment_method_id)?.name ?? null,
+          last_price_at: last ? last.toISOString() : null
+        };
+      });
+  }
+
+  const dbTypes = await prisma.productPrice.findMany({
+    where: { tenant_id: tenantId },
+    distinct: ["price_type"],
+    select: { price_type: true },
+    orderBy: { price_type: "asc" }
+  });
+  return dbTypes.map((r) => {
+    const last = lastByType.get(r.price_type);
+    return {
+      price_type: r.price_type,
+      price_type_name: r.price_type,
+      payment_method: null as string | null,
+      last_price_at: last ? last.toISOString() : null
+    };
+  });
 }
 
 export async function createProductCategoryRow(

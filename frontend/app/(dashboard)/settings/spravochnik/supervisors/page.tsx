@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { StaffManageView } from "@/components/staff/staff-manage-view";
+import { SupervisorsWorkspace } from "@/components/staff/supervisors-workspace";
 
 export default function SupervisorsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -15,15 +15,16 @@ export default function SupervisorsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Supervizorlar</h1>
+        <h1 className="text-lg font-semibold">Супервайзеры</h1>
         <Link href="/settings/spravochnik" className="text-sm text-primary underline">
           ← Spravochnik
         </Link>
       </div>
       <p className="text-sm text-muted-foreground">
-        Agentlar ostidagi rahbarlar. Klientlar filtrida va agent kartasida faqat shu ro‘yxatdan tanlanadi.
+        Agentlar ostidagi rahbarlar. «Агент» ustunida biriktirilgan agentlar; tahrirlash modalida ro‘yxatni to‘liq
+        yangilash mumkin.
       </p>
-      <StaffManageView kind="supervisor" tenantSlug={tenantSlug} />
+      <SupervisorsWorkspace tenantSlug={tenantSlug} />
     </div>
   );
 }

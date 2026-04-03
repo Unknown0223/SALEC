@@ -202,3 +202,113 @@ export async function importProductPricesFromXlsx(
 
   return { upserted, errors };
 }
+
+export type PriceMatrixRow = {
+  product_id: number;
+  name: string;
+  sku: string;
+  price: string | null;
+  currency: string;
+};
+
+export async function listCategoryPricesMatrix(
+  tenantId: number,
+  categoryId: number,
+  priceType: string,
+  defaultCurrency: string
+): Promise<PriceMatrixRow[]> {
+  const cat = await prisma.productCategory.findFirst({
+    where: { id: categoryId, tenant_id: tenantId }
+  });
+  if (!cat) {
+    throw new Error("NOT_FOUND");
+  }
+  const t = priceType.trim();
+  if (!t) {
+    throw new Error("VALIDATION");
+  }
+  const products = await prisma.product.findMany({
+    where: { tenant_id: tenantId, category_id: categoryId },
+    orderBy: [{ sort_order: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+      prices: {
+        where: { price_type: t },
+        take: 1,
+        select: { price: true, currency: true }
+      }
+    }
+  });
+  return products.map((p) => ({
+    product_id: p.id,
+    name: p.name,
+    sku: p.sku,
+    price: p.prices[0] ? p.prices[0].price.toString() : null,
+    currency: p.prices[0]?.currency ?? defaultCurrency
+  }));
+}
+
+export async function bulkUpsertPricesForType(
+  tenantId: number,
+  priceType: string,
+  items: { product_id: number; price: number }[],
+  currency: string,
+  actorUserId: number | null = null
+): Promise<void> {
+  const t = priceType.trim();
+  if (!t) {
+    throw new Error("VALIDATION");
+  }
+  if (items.length === 0) {
+    throw new Error("VALIDATION");
+  }
+  for (const it of items) {
+    if (!Number.isFinite(it.price) || it.price < 0) {
+      throw new Error("VALIDATION");
+    }
+  }
+  const ids = [...new Set(items.map((i) => i.product_id))];
+  const products = await prisma.product.findMany({
+    where: { tenant_id: tenantId, id: { in: ids } },
+    select: { id: true }
+  });
+  if (products.length !== ids.length) {
+    throw new Error("NOT_FOUND");
+  }
+
+  await prisma.$transaction(
+    items.map((it) =>
+      prisma.productPrice.upsert({
+        where: {
+          tenant_id_product_id_price_type: {
+            tenant_id: tenantId,
+            product_id: it.product_id,
+            price_type: t
+          }
+        },
+        create: {
+          tenant_id: tenantId,
+          product_id: it.product_id,
+          price_type: t,
+          price: new Prisma.Decimal(it.price),
+          currency
+        },
+        update: {
+          price: new Prisma.Decimal(it.price),
+          currency
+        }
+      })
+    )
+  );
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.product_price,
+    entityId: `matrix:${t}`,
+    action: "bulk.matrix",
+    payload: { price_type: t, count: items.length }
+  });
+}

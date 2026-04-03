@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { StaffManageView } from "@/components/staff/staff-manage-view";
+import { AgentsWorkspace } from "@/components/staff/agents-workspace";
 
 export default function AgentsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -20,7 +20,7 @@ export default function AgentsPage() {
           ← Spravochnik
         </Link>
       </div>
-      <StaffManageView kind="agent" tenantSlug={tenantSlug} />
+      <AgentsWorkspace tenantSlug={tenantSlug} />
     </div>
   );
 }

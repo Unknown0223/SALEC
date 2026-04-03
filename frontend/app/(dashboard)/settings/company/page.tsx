@@ -160,6 +160,13 @@ export default function CompanySettingsPage() {
             Zakazlar SSE (real-time yangilanish)
           </label>
           <p className="text-xs font-medium text-muted-foreground">Qoʻshimcha spravochniklar (har bir qator yoki vergul bilan)</p>
+          <p className="text-xs text-muted-foreground">
+            To‘lov usullarini jadval orqali boshqarish:{" "}
+            <Link href="/settings/payment-methods" className="text-primary underline">
+              /settings/payment-methods
+            </Link>
+            . Bu yerda saqlash — eski matn ro‘yxati (orqaga moslik).
+          </p>
           <div className="grid gap-1.5">
             <Label htmlFor="co-pay">Toʻlov turlari</Label>
             <textarea

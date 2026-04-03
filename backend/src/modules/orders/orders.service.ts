@@ -17,6 +17,7 @@ import {
   isOperatorLateStageCancelForbidden,
   isValidOrderStatus
 } from "./order-status";
+import { resolveAutoExpeditorUserId } from "./expeditor-auto-assign";
 
 export type OrderLineInput = { product_id: number; qty: number };
 
@@ -58,6 +59,8 @@ export type OrderListRow = {
   agent_name: string | null;
   agent_code: string | null;
   expeditors: string | null;
+  expeditor_id: number | null;
+  expeditor_display: string | null;
   region: string | null;
   city: string | null;
   zone: string | null;
@@ -115,6 +118,7 @@ const orderDetailInclude: Prisma.OrderInclude = {
   client: { select: { name: true } },
   warehouse: { select: { id: true, name: true } },
   agent: { select: { id: true, login: true, name: true, code: true, consignment: true } },
+  expeditor_user: { select: { id: true, login: true, name: true, code: true } },
   items: {
     orderBy: { id: "asc" },
     include: { product: { select: { sku: true, name: true } } }
@@ -139,6 +143,7 @@ export type OrderDetailLoaded = {
   client_id: number;
   warehouse_id: number | null;
   agent_id: number | null;
+  expeditor_user_id: number | null;
   status: string;
   total_sum: Prisma.Decimal;
   bonus_sum: Prisma.Decimal;
@@ -147,6 +152,7 @@ export type OrderDetailLoaded = {
   client: { name: string };
   warehouse: { id: number; name: string } | null;
   agent: { id: number; login: string; name: string; code: string | null; consignment: boolean } | null;
+  expeditor_user: { id: number; login: string; name: string; code: string | null } | null;
   items: Array<{
     id: number;
     product_id: number;
@@ -186,6 +192,8 @@ function allowedNextForRole(status: string, viewerRole: string | undefined): str
 
 function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow {
   const agentDisplay = o.agent ? `${o.agent.login} (${o.agent.name})` : null;
+  const exp = o.expeditor_user;
+  const expeditorDisplay = exp ? `${exp.login} (${exp.name})` : null;
   return {
     id: o.id,
     number: o.number,
@@ -197,7 +205,9 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
     warehouse_name: o.warehouse?.name ?? null,
     agent_name: o.agent?.name ?? null,
     agent_code: o.agent?.code ?? null,
-    expeditors: null,
+    expeditors: expeditorDisplay,
+    expeditor_id: o.expeditor_user_id,
+    expeditor_display: expeditorDisplay,
     region: null,
     city: null,
     zone: null,
@@ -280,6 +290,18 @@ export async function createOrder(
       tenant_id: tenantId,
       merged_into_client_id: null,
       is_active: true
+    },
+    select: {
+      id: true,
+      category: true,
+      sales_channel: true,
+      product_category_ref: true,
+      region: true,
+      district: true,
+      zone: true,
+      neighborhood: true,
+      address: true,
+      credit_limit: true
     }
   });
   if (!client) {
@@ -427,6 +449,22 @@ export async function createOrder(
       }
     }
 
+    const expeditorUserId = await resolveAutoExpeditorUserId(tx, tenantId, {
+      client: {
+        category: client.category,
+        sales_channel: client.sales_channel,
+        product_category_ref: client.product_category_ref,
+        region: client.region,
+        district: client.district,
+        zone: client.zone,
+        neighborhood: client.neighborhood,
+        address: client.address
+      },
+      orderAgentId: input.agent_id ?? null,
+      warehouseId: input.warehouse_id ?? null,
+      at: new Date()
+    });
+
     return tx.order.create({
       data: {
         tenant_id: tenantId,
@@ -434,6 +472,7 @@ export async function createOrder(
         client_id: input.client_id,
         warehouse_id: input.warehouse_id ?? null,
         agent_id: input.agent_id ?? null,
+        expeditor_user_id: expeditorUserId,
         status: "new",
         total_sum: paidTotal,
         bonus_sum: bonusSum,
@@ -908,13 +947,17 @@ export async function listOrdersPaged(
         },
         warehouse: { select: { name: true } },
         agent: { select: { name: true, code: true, consignment: true } },
+        expeditor_user: { select: { id: true, login: true, name: true } },
         items: { select: { qty: true, is_bonus: true } }
       }
     })
   ]);
 
   return {
-    data: rows.map((o) => ({
+    data: rows.map((o) => {
+      const ex = o.expeditor_user;
+      const expeditorDisplay = ex ? `${ex.login} (${ex.name})` : null;
+      return {
       id: o.id,
       number: o.number,
       order_type: null,
@@ -925,7 +968,9 @@ export async function listOrdersPaged(
       warehouse_name: o.warehouse?.name ?? null,
       agent_name: o.agent?.name ?? null,
       agent_code: o.agent?.code ?? null,
-      expeditors: null,
+      expeditors: expeditorDisplay,
+      expeditor_id: ex?.id ?? null,
+      expeditor_display: expeditorDisplay,
       region: o.client.region ?? null,
       city: o.client.district ?? null,
       zone: o.client.neighborhood ?? null,
@@ -948,7 +993,8 @@ export async function listOrdersPaged(
       price_type: null,
       comment: null,
       created_at: o.created_at.toISOString()
-    })),
+    };
+    }),
     total,
     page: q.page,
     limit: q.limit

@@ -16,6 +16,7 @@ import { registerProductPriceRoutes } from "./modules/products/product-prices.ro
 import { registerProductRoutes } from "./modules/products/products.route";
 import { registerAuditEventRoutes } from "./modules/audit-events/audit-events.route";
 import { registerStaffRoutes } from "./modules/staff/staff.route";
+import { registerSalesDirectionRoutes } from "./modules/sales-directions/sales-directions.route";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
 import { loggerOptions } from "./config/logger";
@@ -41,6 +42,7 @@ export function buildApp() {
   app.register(registerProductCatalogRoutes);
   app.register(registerProductRoutes);
   app.register(registerStaffRoutes);
+  app.register(registerSalesDirectionRoutes);
   app.register(registerBonusRuleRoutes);
   app.register(registerOrderRoutes);
   app.register(registerOrderStreamRoutes);

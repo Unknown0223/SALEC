@@ -4,9 +4,12 @@ import { prisma } from "../../config/database";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { getTenantDefaultCurrencyCode } from "../tenant-settings/tenant-settings.service";
 import {
+  bulkUpsertPricesForType,
   getProductPrice,
   importProductPricesFromXlsx,
+  listCategoryPricesMatrix,
   listProductPrices,
   syncProductPrices
 } from "./product-prices.service";
@@ -18,6 +21,20 @@ const putPricesSchema = z.object({
       price: z.number().nonnegative()
     })
   )
+});
+
+const matrixPatchSchema = z.object({
+  price_type: z.string().min(1).max(128),
+  currency: z.string().min(2).max(20).optional(),
+  items: z
+    .array(
+      z.object({
+        product_id: z.number().int().positive(),
+        price: z.number().nonnegative()
+      })
+    )
+    .min(1)
+    .max(5000)
 });
 
 const catalogRoles = ["admin", "operator"] as const;
@@ -41,12 +58,67 @@ export async function registerProductPriceRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: "NotFound" });
       }
       const price = await getProductPrice(request.tenant!.id, productId, priceType);
+      const currency = await getTenantDefaultCurrencyCode(request.tenant!.id);
       return reply.send({
         product_id: productId,
         price_type: priceType,
         price,
-        currency: "UZS"
+        currency
       });
+    }
+  );
+
+  app.get(
+    "/api/:slug/products/prices/matrix",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const categoryId = Number.parseInt(q.category_id ?? "", 10);
+      const priceType = (q.price_type ?? "").trim();
+      if (Number.isNaN(categoryId) || !priceType) {
+        return reply.status(400).send({ error: "BadQuery", message: "category_id va price_type majburiy" });
+      }
+      try {
+        const currency = await getTenantDefaultCurrencyCode(request.tenant!.id);
+        const data = await listCategoryPricesMatrix(request.tenant!.id, categoryId, priceType, currency);
+        return reply.send({ data, currency });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        throw e;
+      }
+    }
+  );
+
+  app.patch(
+    "/api/:slug/products/prices/matrix",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = matrixPatchSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      const cur =
+        parsed.data.currency?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20) ||
+        (await getTenantDefaultCurrencyCode(request.tenant!.id));
+      try {
+        await bulkUpsertPricesForType(
+          request.tenant!.id,
+          parsed.data.price_type,
+          parsed.data.items,
+          cur,
+          actorUserIdOrNull(request)
+        );
+        return reply.send({ ok: true });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        throw e;
+      }
     }
   );
 

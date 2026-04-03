@@ -7,7 +7,9 @@ import { login, logout, refresh } from "./auth.service";
 const loginSchema = z.object({
   slug: z.string().min(1),
   login: z.string().min(1),
-  password: z.string().min(1)
+  password: z.string().min(1),
+  device_name: z.string().max(255).nullable().optional(),
+  user_agent: z.string().max(512).nullable().optional()
 });
 
 const refreshSchema = z.object({
@@ -33,7 +35,14 @@ function registerAuthAtBase(app: FastifyInstance, base: string) {
     }
 
     try {
-      const result = await login(app, parsed.data);
+      const ip =
+        (request.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+        request.ip ||
+        null;
+      const result = await login(app, {
+        ...parsed.data,
+        ip_address: ip
+      });
       return reply.send(result);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "UNKNOWN";
@@ -42,6 +51,9 @@ function registerAuthAtBase(app: FastifyInstance, base: string) {
       }
       if (msg === "INVALID_CREDENTIALS") {
         return reply.status(401).send({ error: msg });
+      }
+      if (msg === "SESSION_LIMIT") {
+        return reply.status(403).send({ error: msg });
       }
       throw error;
     }

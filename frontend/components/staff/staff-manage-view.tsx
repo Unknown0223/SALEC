@@ -37,6 +37,7 @@ type StaffRow = {
   supervisor_user_id: number | null;
   supervisor_name: string | null;
   supervisee_count: number;
+  supervisees?: Array<{ id: number; fio: string; code: string | null }>;
 };
 
 type Props = {

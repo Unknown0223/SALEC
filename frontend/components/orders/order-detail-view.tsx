@@ -24,6 +24,8 @@ export type OrderListRow = {
   agent_name: string | null;
   agent_code: string | null;
   expeditors: string | null;
+  expeditor_id: number | null;
+  expeditor_display: string | null;
   region: string | null;
   city: string | null;
   zone: string | null;
@@ -467,6 +469,12 @@ export function OrderDetailView({ tenantSlug, orderId }: Props) {
                     Agent
                   </th>
                   <td className="px-4 py-3">{data.agent_display ?? "—"}</td>
+                </tr>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                    Dastavchik
+                  </th>
+                  <td className="px-4 py-3">{data.expeditor_display ?? data.expeditors ?? "—"}</td>
                 </tr>
                 <tr className="border-b border-border">
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">

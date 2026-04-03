@@ -39,6 +39,9 @@ model Tenant {
   product_manufacturers          ProductManufacturer[]
   product_segments               ProductSegment[]
   interchangeable_product_groups InterchangeableProductGroup[]
+  trade_directions             TradeDirection[]
+  sales_channel_refs           SalesChannelRef[]
+  kpi_groups                   KpiGroup[]
 
   @@map("tenants")
 }
@@ -63,8 +66,17 @@ model User {
   device_name   String?
   last_sync_at  DateTime?
   phone         String?
+  email         String?
   can_authorize Boolean  @default(true)
   price_type    String?
+  /// Bir nechta narx turi (mobil / cheklovlar); bo‘sh bo‘lsa `price_type` ishlatiladi
+  agent_price_types Json     @default("[]")
+  /// { price_types?: string[], product_rules?: { category_id: number, all: boolean, product_ids?: number[] }[] }
+  agent_entitlements Json    @default("{}")
+  /// Dastavchik: zakaz yaratilganda avtobog‘lash shartlari (bo‘sh = cheklov yo‘q)
+  expeditor_assignment_rules Json @default("{}")
+  max_sessions  Int      @default(2)
+  kpi_color     String?  @db.VarChar(16)
   warehouse_id  Int?
   warehouse     Warehouse? @relation("UserWarehouse", fields: [warehouse_id], references: [id])
   trade_direction String?
@@ -86,12 +98,14 @@ model User {
   clients_as_agent Client[] @relation("UserAgents")
   client_agent_slots ClientAgentAssignment[] @relation("ClientAgentSlotAgents")
   orders_as_agent      Order[]           @relation("OrderAgents")
+  orders_as_expeditor  Order[]           @relation("OrderExpeditor")
   order_status_changes OrderStatusLog[]
   order_change_logs    OrderChangeLog[]
   balance_movements    ClientBalanceMovement[]
   client_audit_logs    ClientAuditLog[]
   expeditor_assignments ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
   tenant_audit_events   TenantAuditEvent[]       @relation("TenantAuditEventActor")
+  kpi_group_links       KpiGroupAgent[]
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -108,6 +122,9 @@ model RefreshToken {
   expires_at  DateTime
   revoked_at  DateTime?
   created_at  DateTime  @default(now())
+  device_name String?
+  ip_address  String?   @db.VarChar(64)
+  user_agent  String?   @db.VarChar(512)
 
   @@index([tenant_id, user_id])
   @@map("refresh_tokens")
@@ -178,6 +195,7 @@ model Product {
   order_items OrderItem[]
   prices      ProductPrice[]
   interchangeable_links InterchangeableGroupProduct[]
+  kpi_group_products    KpiGroupProduct[]
 
   @@unique([tenant_id, sku])
   @@index([tenant_id, name])
@@ -527,6 +545,8 @@ model Order {
   client       Client     @relation(fields: [client_id], references: [id])
   agent_id     Int?
   agent        User?      @relation("OrderAgents", fields: [agent_id], references: [id])
+  expeditor_user_id Int?
+  expeditor_user    User? @relation("OrderExpeditor", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
   warehouse_id Int?
   warehouse    Warehouse? @relation(fields: [warehouse_id], references: [id])
   status       String     @default("new")
@@ -543,6 +563,7 @@ model Order {
 
   @@unique([tenant_id, number])
   @@index([tenant_id, status])
+  @@index([tenant_id, expeditor_user_id])
   @@map("orders")
 }
 
@@ -588,6 +609,84 @@ model OrderItem {
 
   @@index([order_id])
   @@map("order_items")
+}
+
+/// Направление торговли (spravochnik; `User.trade_direction` saqlangan qiymat bilan mos: code yoki name)
+model TradeDirection {
+  id                    Int      @id @default(autoincrement())
+  tenant_id             Int
+  tenant                Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name                  String
+  sort_order            Int      @default(0)
+  code                  String?  @db.VarChar(20)
+  comment               String?  @db.Text
+  is_active             Boolean  @default(true)
+  use_in_order_proposal Boolean  @default(false)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([tenant_id, code])
+  @@index([tenant_id, is_active])
+  @@map("trade_directions")
+}
+
+/// Канал продаж (spravochnik; `Client.sales_channel` bilan mos: code yoki name)
+model SalesChannelRef {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(20)
+  comment    String?  @db.Text
+  sort_order Int      @default(0)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([tenant_id, code])
+  @@index([tenant_id, is_active])
+  @@map("sales_channel_refs")
+}
+
+model KpiGroup {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  name       String
+  code       String?  @db.VarChar(20)
+  sort_order Int      @default(0)
+  comment    String?  @db.Text
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  products KpiGroupProduct[]
+  agents   KpiGroupAgent[]
+
+  @@index([tenant_id, is_active])
+  @@map("kpi_groups")
+}
+
+model KpiGroupProduct {
+  kpi_group_id Int
+  product_id   Int
+  kpi_group    KpiGroup @relation(fields: [kpi_group_id], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@id([kpi_group_id, product_id])
+  @@index([product_id])
+  @@map("kpi_group_products")
+}
+
+model KpiGroupAgent {
+  kpi_group_id Int
+  user_id      Int
+  kpi_group    KpiGroup @relation(fields: [kpi_group_id], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([kpi_group_id, user_id])
+  @@index([user_id])
+  @@map("kpi_group_agents")
 }
 
 model BonusRule {

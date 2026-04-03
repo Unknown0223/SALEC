@@ -135,7 +135,10 @@ export default function SpravochnikPage() {
           </section>
 
           <section className="space-y-2 rounded-lg border p-4">
-            <h2 className="text-sm font-semibold">Narx turlari (DB)</h2>
+            <h2 className="text-sm font-semibold">Narx turlari (DB + katalog)</h2>
+            <Link className={cn(buttonVariants({ variant: "default", size: "sm" }))} href="/settings/price-types">
+              Sozlamalar: Тип цены
+            </Link>
             {priceTypes.isLoading ? (
               <p className="text-xs text-muted-foreground">Yuklanmoqda</p>
             ) : (

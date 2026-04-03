@@ -8,6 +8,23 @@ import {
   type BonusStackJson,
   type BonusStackPolicy
 } from "../orders/bonus-stack-policy";
+import type {
+  CurrencyEntryDto,
+  PaymentMethodEntryDto,
+  PriceTypeEntryDto
+} from "./finance-refs";
+import {
+  defaultCurrencyCodeFromEntries,
+  normalizeCurrencyDefaults,
+  paymentTypesFromMethodEntries,
+  priceTypeEntriesFromUnknown,
+  resolveCurrencyEntries,
+  resolvePaymentMethodEntries
+} from "./finance-refs";
+import {
+  listActiveSalesChannelLabels,
+  listActiveTradeDirectionLabels
+} from "../sales-directions/sales-directions.service";
 
 function asRecord(v: unknown): Record<string, unknown> {
   if (v != null && typeof v === "object" && !Array.isArray(v)) {
@@ -126,6 +143,8 @@ export type TenantProfileDto = {
     client_type_entries: ClientRefEntryDto[];
     client_category_entries: ClientRefEntryDto[];
     sales_channels: string[];
+    /** Spravochnik + JSON; agent «Направление торговли» uchun */
+    trade_directions: string[];
     client_product_category_refs: string[];
     /** Manzil / logistika — mijoz kartasida tanlanadi, shu yerda yaratiladi */
     client_districts: string[];
@@ -139,6 +158,9 @@ export type TenantProfileDto = {
     branches: BranchDto[];
     /** Eski format — faqat migratsiya / orqaga moslik */
     territory_tree: { zone: string; region: string; cities: string[] }[];
+    currency_entries: CurrencyEntryDto[];
+    payment_method_entries: PaymentMethodEntryDto[];
+    price_type_entries: PriceTypeEntryDto[];
   };
 };
 
@@ -268,6 +290,39 @@ type ClientRefEntryPatch = {
   color?: string | null;
 };
 
+type CurrencyEntryPatch = {
+  id: string;
+  name: string;
+  code: string;
+  sort_order?: number | null;
+  active?: boolean;
+  is_default?: boolean;
+};
+
+type PaymentMethodEntryPatch = {
+  id: string;
+  name: string;
+  code?: string | null;
+  currency_code: string;
+  sort_order?: number | null;
+  comment?: string | null;
+  color?: string | null;
+  active?: boolean;
+};
+
+type PriceTypeEntryPatch = {
+  id: string;
+  name: string;
+  code?: string | null;
+  payment_method_id: string;
+  kind?: "sale" | "purchase";
+  sort_order?: number | null;
+  comment?: string | null;
+  active?: boolean;
+  manual?: boolean;
+  attached_clients_only?: boolean;
+};
+
 function toClientRefEntryDto(e: ClientRefEntryPatch): ClientRefEntryDto {
   return {
     id: e.id.trim(),
@@ -380,6 +435,16 @@ function legacyRowsToNodes(rows: { zone: string; region: string; cities: string[
   }));
 }
 
+export async function getTenantDefaultCurrencyCode(tenantId: number): Promise<string> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const st = asRecord(row?.settings);
+  const refInner = asRecord(st.references);
+  return defaultCurrencyCodeFromEntries(resolveCurrencyEntries(refInner));
+}
+
 export async function getTenantProfile(tenantId: number): Promise<TenantProfileDto> {
   const row = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -399,6 +464,29 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
   const client_formats = stringArrayFromUnknown(ref.client_formats);
   const client_type_codes = stringArrayFromUnknown(ref.client_type_codes);
   const client_categories = stringArrayFromUnknown(ref.client_categories);
+  const currency_entries = resolveCurrencyEntries(ref);
+  const payment_method_entries = resolvePaymentMethodEntries(ref, currency_entries);
+  const price_type_entries = priceTypeEntriesFromUnknown(ref.price_type_entries);
+
+  const [dbSalesLabels, dbTradeLabels] = await Promise.all([
+    listActiveSalesChannelLabels(tenantId),
+    listActiveTradeDirectionLabels(tenantId)
+  ]);
+  const salesFromSettings = stringArrayFromUnknown(ref.sales_channels);
+  const tradeFromSettings = stringArrayFromUnknown(ref.trade_directions);
+  const mergeStrLists = (a: string[], b: string[]): string[] => {
+    const s = new Set<string>();
+    for (const x of a) {
+      const t = x.trim();
+      if (t) s.add(t);
+    }
+    for (const x of b) {
+      const t = x.trim();
+      if (t) s.add(t);
+    }
+    return [...s].sort((x, y) => x.localeCompare(y, "ru"));
+  };
+
   return {
     name: row.name,
     phone: row.phone,
@@ -415,7 +503,8 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
       client_format_entries: resolveClientRefEntries(ref, "client_format_entries", client_formats, "fmt"),
       client_type_entries: resolveClientRefEntries(ref, "client_type_entries", client_type_codes, "typ"),
       client_category_entries: resolveClientRefEntries(ref, "client_category_entries", client_categories, "cat"),
-      sales_channels: stringArrayFromUnknown(ref.sales_channels),
+      sales_channels: mergeStrLists(salesFromSettings, dbSalesLabels),
+      trade_directions: mergeStrLists(tradeFromSettings, dbTradeLabels),
       client_product_category_refs: stringArrayFromUnknown(ref.client_product_category_refs),
       client_districts: stringArrayFromUnknown(ref.client_districts),
       client_neighborhoods: stringArrayFromUnknown(ref.client_neighborhoods),
@@ -425,7 +514,10 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
       territory_nodes,
       unit_measures: unitMeasuresFromUnknown(ref.unit_measures),
       branches: branchesFromUnknown(ref.branches),
-      territory_tree
+      territory_tree,
+      currency_entries,
+      payment_method_entries,
+      price_type_entries
     }
   };
 }
@@ -459,6 +551,9 @@ export async function patchTenantProfile(
       client_type_entries?: ClientRefEntryPatch[];
       client_category_entries?: ClientRefEntryPatch[];
       territory_tree?: { zone: string; region: string; cities: string[] }[];
+      currency_entries?: CurrencyEntryPatch[];
+      payment_method_entries?: PaymentMethodEntryPatch[];
+      price_type_entries?: PriceTypeEntryPatch[];
     };
   }>,
   actorUserId: number | null = null
@@ -563,6 +658,55 @@ export async function patchTenantProfile(
       }
       if (patch.references.territory_tree != null) {
         merged.territory_tree = patch.references.territory_tree;
+      }
+      if (patch.references.currency_entries != null) {
+        const asDto: CurrencyEntryDto[] = patch.references.currency_entries.map((e) => ({
+          id: e.id.trim(),
+          name: e.name.trim(),
+          code: e.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20),
+          sort_order: e.sort_order ?? null,
+          active: e.active ?? true,
+          is_default: e.is_default ?? false
+        }));
+        merged.currency_entries = normalizeCurrencyDefaults(asDto);
+      }
+      if (patch.references.payment_method_entries != null) {
+        const cur = resolveCurrencyEntries(merged);
+        const asDto: PaymentMethodEntryDto[] = patch.references.payment_method_entries.map((e) => {
+          const codeRaw = e.code?.trim().toLowerCase() ?? "";
+          const code = codeRaw && /^[a-z0-9_]+$/.test(codeRaw) ? codeRaw.slice(0, 30) : null;
+          const cc =
+            e.currency_code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20) ||
+            defaultCurrencyCodeFromEntries(cur);
+          return {
+            id: e.id.trim(),
+            name: e.name.trim(),
+            code,
+            currency_code: cc,
+            sort_order: e.sort_order ?? null,
+            comment: e.comment?.trim() || null,
+            color: e.color?.trim().slice(0, 32) || null,
+            active: e.active ?? true
+          };
+        });
+        merged.payment_method_entries = asDto;
+        merged.payment_types = paymentTypesFromMethodEntries(asDto);
+      }
+      if (patch.references.price_type_entries != null) {
+        merged.price_type_entries = patch.references.price_type_entries.map((e) => ({
+          id: e.id.trim(),
+          name: e.name.trim(),
+          code: e.code?.trim()
+            ? e.code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 20) || null
+            : null,
+          payment_method_id: e.payment_method_id.trim(),
+          kind: e.kind === "purchase" ? "purchase" : "sale",
+          sort_order: e.sort_order ?? null,
+          comment: e.comment?.trim() || null,
+          active: e.active ?? true,
+          manual: e.manual ?? false,
+          attached_clients_only: e.attached_clients_only ?? false
+        }));
       }
       nextSettings.references = merged;
     }

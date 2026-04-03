@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -126,6 +126,24 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   const qc = useQueryClient();
   const isEdit = Boolean(initialRule);
   const seedKey = initialRule?.id ?? "new";
+
+  const paymentMethodsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "bonus-payment-methods"],
+    queryFn: async () => {
+      const { data } = await api.get<{
+        references: { payment_method_entries?: { name: string; active?: boolean }[] };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return (data.references.payment_method_entries ?? []).filter((p) => p.active !== false).map((p) => p.name);
+    }
+  });
+
+  const priceTypesQ = useQuery({
+    queryKey: ["price-types", tenantSlug, "bonus-form"],
+    queryFn: async () => {
+      const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
+      return data.data;
+    }
+  });
 
   const [name, setName] = useState("");
   const [type, setType] = useState<BonusType>("qty");
@@ -546,7 +564,18 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs">To‘lov turi</Label>
-              <Input className={inputCls} value={paymentType} onChange={(e) => setPaymentType(e.target.value)} disabled={mutation.isPending} />
+              <Input
+                className={inputCls}
+                list="bonus-rule-payment-types"
+                value={paymentType}
+                onChange={(e) => setPaymentType(e.target.value)}
+                disabled={mutation.isPending}
+              />
+              <datalist id="bonus-rule-payment-types">
+                {(paymentMethodsQ.data ?? []).map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs">Mijoz turi</Label>
@@ -558,7 +587,18 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
             </div>
             <div className="grid gap-1.5 sm:col-span-2">
               <Label className="text-xs">Narx turi</Label>
-              <Input className={inputCls} value={priceType} onChange={(e) => setPriceType(e.target.value)} disabled={mutation.isPending} />
+              <Input
+                className={inputCls}
+                list="bonus-rule-price-types"
+                value={priceType}
+                onChange={(e) => setPriceType(e.target.value)}
+                disabled={mutation.isPending}
+              />
+              <datalist id="bonus-rule-price-types">
+                {(priceTypesQ.data ?? []).map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </div>
             <div className="grid gap-1.5 sm:col-span-2">
               <Label className="text-xs">Mahsulot ID</Label>

@@ -8,6 +8,7 @@ import {
   activeValuesFromClientRefEntries,
   clientRefEntriesFromUnknown
 } from "../tenant-settings/tenant-settings.service";
+import { listActiveSalesChannelLabels } from "../sales-directions/sales-directions.service";
 
 /** Telefonni solishtirish uchun faqat raqamlar (masalan +998 90 → 99890). */
 export function normalizePhoneDigits(phone: string | null | undefined): string | null {
@@ -414,7 +415,7 @@ async function syncAssignmentSlotOneWithClientRow(
 }
 
 export async function getClientReferences(tenantId: number): Promise<ClientReferences> {
-  const [clientRows, tenant] = await Promise.all([
+  const [clientRows, tenant, dbSalesLabels] = await Promise.all([
     prisma.client.findMany({
       where: { tenant_id: tenantId, merged_into_client_id: null },
       select: {
@@ -433,7 +434,8 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     prisma.tenant.findUnique({
       where: { id: tenantId },
       select: { settings: true }
-    })
+    }),
+    listActiveSalesChannelLabels(tenantId)
   ]);
 
   const settingsRef = (tenant?.settings as { references?: Record<string, unknown> } | null)?.references;
@@ -467,7 +469,11 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     neighborhoods: normalizeDistinct([...setNeighborhoods, ...clientRows.map((r) => r.neighborhood)]),
     zones: normalizeDistinct([...setZonesRef, ...clientRows.map((r) => r.zone)]),
     client_formats: normalizeDistinct([...setFormats, ...clientRows.map((r) => r.client_format)]),
-    sales_channels: normalizeDistinct([...setSales, ...clientRows.map((r) => r.sales_channel)]),
+    sales_channels: normalizeDistinct([
+      ...setSales,
+      ...dbSalesLabels,
+      ...clientRows.map((r) => r.sales_channel)
+    ]),
     product_category_refs: normalizeDistinct([...setProdCat, ...clientRows.map((r) => r.product_category_ref)]),
     logistics_services: normalizeDistinct([...setLogistics, ...clientRows.map((r) => r.logistics_service)])
   };
