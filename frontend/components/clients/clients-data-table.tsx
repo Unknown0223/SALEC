@@ -13,6 +13,7 @@ import {
   displayLegalName,
   displayPinfl,
   displayTradeChannel,
+  getClientSlotsWithDataInRows,
   getVisitWeekdaysForSlot,
   parseGpsText
 } from "@/lib/client-column-display";
@@ -21,12 +22,9 @@ import {
   getDefaultColumnVisibility,
   type ClientColumnId
 } from "@/lib/client-table-columns";
-import {
-  dataTableStickyActionsTd2,
-  dataTableStickyActionsTh2,
-  TableRowActionGroup
-} from "@/components/data-table/table-row-actions";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { Pencil, UserRound } from "lucide-react";
 import Link from "next/link";
@@ -63,6 +61,16 @@ function TxtMono(v: string | null | undefined): ReactNode {
   const t = v?.trim();
   if (!t) return <Dash />;
   return <span className="font-mono text-xs">{t}</span>;
+}
+
+function agentSlotFromColumnId(colId: string): number | null {
+  const a = /^agent_(\d+)$/.exec(colId);
+  if (a) return Number(a[1]);
+  const d = /^agent_(\d+)_day$/.exec(colId);
+  if (d) return Number(d[1]);
+  const e = /^expeditor_(\d+)$/.exec(colId);
+  if (e) return Number(e[1]);
+  return null;
 }
 
 const WD_SHORT = ["", "Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"];
@@ -168,23 +176,36 @@ export function ClientsDataTable({
 }: Props) {
   const headerCbRef = useRef<HTMLInputElement>(null);
 
+  const slotsWithAgentData = useMemo(() => getClientSlotsWithDataInRows(rows), [rows]);
+
   const cols = useMemo(() => {
+    const filterAgentTriplet = (
+      list: (typeof CLIENT_TABLE_COLUMNS)[number][]
+    ): (typeof CLIENT_TABLE_COLUMNS)[number][] =>
+      list.filter((col) => {
+        if (col.id === "_actions") return true;
+        const slot = agentSlotFromColumnId(col.id);
+        if (slot == null) return true;
+        return slotsWithAgentData.has(slot);
+      });
+
     if (orderedVisibleColumnIds?.length) {
       const dataCols = orderedVisibleColumnIds
         .map((id) => CLIENT_TABLE_COLUMNS.find((c) => c.id === id))
         .filter(
           (c): c is (typeof CLIENT_TABLE_COLUMNS)[number] => c != null && c.id !== "_actions"
         );
+      const filtered = filterAgentTriplet(dataCols);
       const actions = CLIENT_TABLE_COLUMNS.find((c) => c.id === "_actions");
-      return actions ? [...dataCols, actions] : dataCols;
+      return actions ? [...filtered, actions] : filtered;
     }
     let c = CLIENT_TABLE_COLUMNS.filter((x) => visibility[x.id] === true);
     if (c.length === 0) {
       const d = getDefaultColumnVisibility();
       c = CLIENT_TABLE_COLUMNS.filter((x) => d[x.id] === true);
     }
-    return c;
-  }, [orderedVisibleColumnIds, visibility]);
+    return filterAgentTriplet(c);
+  }, [orderedVisibleColumnIds, visibility, slotsWithAgentData]);
 
   const sel = selectedIds ?? new Set<number>();
   const allOnPage = rows.length > 0 && rows.every((r) => sel.has(r.id));
@@ -199,7 +220,7 @@ export function ClientsDataTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1200px] text-left text-sm">
+      <table className="w-full min-w-[1200px] border-separate border-spacing-0 text-left text-sm">
         <thead className="border-b bg-muted/60">
           <tr>
             {bulkSelect ? (
@@ -215,13 +236,7 @@ export function ClientsDataTable({
               </th>
             ) : null}
             {cols.map((c) => (
-              <th
-                key={c.id}
-                className={cn(
-                  "whitespace-nowrap px-2 py-2 font-medium",
-                  c.id === "_actions" && dataTableStickyActionsTh2
-                )}
-              >
+              <th key={c.id} className="whitespace-nowrap px-2 py-2 font-medium">
                 {c.label}
               </th>
             ))}
@@ -253,8 +268,8 @@ export function ClientsDataTable({
                     key={c.id}
                     className={cn(
                       "px-2 py-2 align-top",
-                      c.id !== "_actions" && "max-w-[14rem]",
-                      c.id === "_actions" && dataTableStickyActionsTd2
+                      c.id !== "_actions" &&
+                        "min-w-0 max-w-[13rem] break-words [word-break:break-word]"
                     )}
                   >
                     {c.id === "_actions" ? (

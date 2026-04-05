@@ -154,6 +154,19 @@ export function ClientsTableToolbar({
             Filtr
           </Button>
 
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">Holat</span>
+            <select
+              className="h-9 min-w-[6.5rem] rounded-md border border-input bg-background px-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={activeFilter}
+              onChange={(e) => onActiveFilterChange(e.target.value as "all" | "true" | "false")}
+            >
+              <option value="all">Hammasi</option>
+              <option value="true">Faol</option>
+              <option value="false">Nofaol</option>
+            </select>
+          </label>
+
           <Button
             type="button"
             variant="outline"

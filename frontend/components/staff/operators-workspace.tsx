@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { FilterSelect, filterSelectClassName } from "@/components/ui/filter-select";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -15,10 +16,11 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { KeyRound, ListOrdered, Pencil, RefreshCw, UserRoundCheck, UserRoundX } from "lucide-react";
+import { KeyRound, ListOrdered, MonitorSmartphone, Pencil, RefreshCw, UserRoundCheck, UserRoundX } from "lucide-react";
 import Link from "next/link";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
+import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 
 const POSITION_PRESETS_SETTINGS_HREF = "/settings/web-staff-position-presets";
@@ -146,8 +148,6 @@ function renderOperatorDataCell(colId: string, r: WebStaffRow) {
       return <span className="text-xs">{r.phone ?? "—"}</span>;
     case "branch":
       return <span className="text-xs">{r.branch ?? "—"}</span>;
-    case "active_sessions":
-      return <span className="text-xs tabular-nums">{r.active_session_count}</span>;
     case "max_sessions":
       return <span className="text-xs tabular-nums">{r.max_sessions}</span>;
     case "app_access":
@@ -171,7 +171,6 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
   const [appliedPosition, setAppliedPosition] = useState("");
 
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [createOpen, setCreateOpen] = useState(false);
   const [editRow, setEditRow] = useState<WebStaffRow | null>(null);
   const [passwordRow, setPasswordRow] = useState<WebStaffRow | null>(null);
   const [bulkRevokeOpen, setBulkRevokeOpen] = useState(false);
@@ -181,6 +180,7 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
   const [bulkLimitsRows, setBulkLimitsRows] = useState<WebStaffRow[] | null>(null);
   const [limitsDraft, setLimitsDraft] = useState<Record<number, number>>({});
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [sessionRow, setSessionRow] = useState<WebStaffRow | null>(null);
 
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
@@ -375,7 +375,7 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex gap-1 border-b border-border pb-1">
             <button
@@ -429,10 +429,13 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
               ))}
             </FilterSelect>
           </label>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             type="button"
             size="sm"
             variant="secondary"
+            className="shrink-0"
             onClick={() => {
               setAppliedBranch(filterBranch);
               setAppliedPosition(filterPosition);
@@ -440,8 +443,6 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
           >
             Qo‘llash
           </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
@@ -519,9 +520,12 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
               </option>
             </select>
           </label>
-          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+          <Link
+            href="/settings/spravochnik/operators/new"
+            className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
+          >
             + Qoʻshish
-          </Button>
+          </Link>
         </div>
       </div>
 
@@ -595,11 +599,32 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
                   </td>
                   {tablePrefs.visibleColumnOrder.map((colId) => (
                     <td key={colId} className="px-2 py-1.5">
-                      {renderOperatorDataCell(colId, r)}
+                      {colId === "active_sessions" ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-primary tabular-nums underline-offset-2 hover:underline"
+                          onClick={() => setSessionRow(r)}
+                        >
+                          {r.active_session_count}
+                        </button>
+                      ) : (
+                        renderOperatorDataCell(colId, r)
+                      )}
                     </td>
                   ))}
                   <td className="px-2 py-1.5 text-right">
                     <TableRowActionGroup className="justify-end" ariaLabel="Operator">
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="outline"
+                        className="text-muted-foreground hover:text-foreground"
+                        title="Faol sessiyalar"
+                        aria-label="Faol sessiyalar"
+                        onClick={() => setSessionRow(r)}
+                      >
+                        <MonitorSmartphone className="size-3.5" aria-hidden />
+                      </Button>
                       <Button
                         type="button"
                         size="icon-sm"
@@ -684,17 +709,6 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
         <code className="text-foreground">~45 s</code> da avtomatik yangilanadi yoki yangilash tugmasi bilan.
       </p>
 
-      <WebStaffCreateDialog
-        open={createOpen}
-        tenantSlug={tenantSlug}
-        filterOptions={filterOptsQ.data}
-        onClose={() => setCreateOpen(false)}
-        onDone={async () => {
-          await qc.invalidateQueries({ queryKey: ["operators", tenantSlug] });
-          setCreateOpen(false);
-        }}
-      />
-
       <WebStaffEditDialog
         row={editRow}
         tenantSlug={tenantSlug}
@@ -713,6 +727,20 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
         onDone={async () => {
           await qc.invalidateQueries({ queryKey: ["operators", tenantSlug] });
           setPasswordRow(null);
+        }}
+      />
+
+      <StaffActiveSessionsDialog
+        open={sessionRow != null}
+        onOpenChange={(open) => {
+          if (!open) setSessionRow(null);
+        }}
+        tenantSlug={tenantSlug}
+        staffKind="operator"
+        userId={sessionRow?.id ?? null}
+        maxSessions={sessionRow?.max_sessions ?? 4}
+        onPatched={() => {
+          void qc.invalidateQueries({ queryKey: ["operators", tenantSlug] });
         }}
       />
 
@@ -925,276 +953,6 @@ function WebStaffPasswordDialog({
             onClick={() => mut.mutate()}
           >
             {mut.isPending ? "…" : "Saqlash"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function WebStaffCreateDialog({
-  open,
-  onClose,
-  tenantSlug,
-  filterOptions,
-  onDone
-}: {
-  open: boolean;
-  onClose: () => void;
-  tenantSlug: string;
-  filterOptions: FilterOptions | undefined;
-  onDone: () => void;
-}) {
-  const [form, setForm] = useState({
-    first_name: "",
-    last_name: "",
-    middle_name: "",
-    login: "",
-    password: "",
-    phone: "",
-    email: "",
-    code: "",
-    pinfl: "",
-    branch: "",
-    position: "",
-    max_sessions: "4",
-    app_access: false,
-    can_authorize: true,
-    cash_desk_id: null as number | null,
-    cash_desk_link_role: "" as "" | "cashier" | "manager" | "operator"
-  });
-
-  const desksQ = useQuery({
-    queryKey: ["cash-desks", tenantSlug, "active-for-operator-create"],
-    enabled: open && Boolean(tenantSlug),
-    queryFn: async () => {
-      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
-        `/api/${tenantSlug}/cash-desks?is_active=true&limit=200&page=1`
-      );
-      return data.data;
-    }
-  });
-
-  const deskLinkIncomplete = form.cash_desk_id != null && form.cash_desk_link_role === "";
-
-  const createMut = useMutation({
-    mutationFn: async () => {
-      const max_sessions = Number.parseInt(form.max_sessions, 10);
-      const body: Record<string, unknown> = {
-        first_name: form.first_name.trim(),
-        last_name: form.last_name.trim() || null,
-        middle_name: form.middle_name.trim() || null,
-        login: form.login.trim(),
-        password: form.password,
-        phone: form.phone.trim() || null,
-        email: form.email.trim() || null,
-        code: form.code.trim() || null,
-        pinfl: form.pinfl.trim() || null,
-        branch: form.branch.trim() || null,
-        position: form.position.trim() || null,
-        max_sessions: Number.isFinite(max_sessions) ? max_sessions : 4,
-        app_access: form.app_access,
-        can_authorize: form.can_authorize,
-        is_active: true
-      };
-      if (form.cash_desk_id != null && form.cash_desk_link_role) {
-        body.cash_desk_id = form.cash_desk_id;
-        body.cash_desk_link_role = form.cash_desk_link_role;
-      }
-      await api.post(`/api/${tenantSlug}/operators`, body);
-    },
-    onSuccess: () => {
-      setForm({
-        first_name: "",
-        last_name: "",
-        middle_name: "",
-        login: "",
-        password: "",
-        phone: "",
-        email: "",
-        code: "",
-        pinfl: "",
-        branch: "",
-        position: "",
-        max_sessions: "4",
-        app_access: false,
-        can_authorize: true,
-        cash_desk_id: null,
-        cash_desk_link_role: ""
-      });
-      void onDone();
-    }
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto" showCloseButton>
-        <DialogHeader>
-          <DialogTitle>Yangi veb xodim</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-2 text-sm">
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Ism *</span>
-            <Input value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Familiya</span>
-            <Input value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Otasining ismi</span>
-            <Input
-              value={form.middle_name}
-              onChange={(e) => setForm((f) => ({ ...f, middle_name: e.target.value }))}
-            />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Login *</span>
-            <Input value={form.login} onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Parol * (min 6)</span>
-            <Input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-            />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Telefon</span>
-            <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Email</span>
-            <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Kod</span>
-            <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">PINFL</span>
-            <Input value={form.pinfl} onChange={(e) => setForm((f) => ({ ...f, pinfl: e.target.value }))} />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Filial</span>
-            <Input
-              list="webstaff-branches-create"
-              value={form.branch}
-              onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
-            />
-            <datalist id="webstaff-branches-create">
-              {(filterOptions?.branches ?? []).map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Lavozim (masalan: operator, kassir)</span>
-            <Input
-              list="webstaff-positions-create"
-              value={form.position}
-              onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))}
-            />
-            <datalist id="webstaff-positions-create">
-              {(filterOptions?.positions ?? []).map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-            <span className="text-[11px] leading-snug text-muted-foreground">
-              Takliflar: mavjud xodimlar lavozimlari va{" "}
-              <Link
-                href={POSITION_PRESETS_SETTINGS_HREF}
-                className="text-primary underline underline-offset-2 hover:text-primary/90"
-              >
-                sozlamalardagi faol shablonlar
-              </Link>
-              .
-            </span>
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Parallel veb-sessiyalar (maks.)</span>
-            <Input
-              inputMode="numeric"
-              value={form.max_sessions}
-              onChange={(e) => setForm((f) => ({ ...f, max_sessions: e.target.value.replace(/\D/g, "") }))}
-            />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Kassa (ixtiyoriy)</span>
-            <select
-              className={cn(filterSelectClassName, "h-9 w-full text-sm")}
-              value={form.cash_desk_id == null ? "" : String(form.cash_desk_id)}
-              disabled={desksQ.isLoading}
-              onChange={(e) => {
-                const v = e.target.value;
-                setForm((f) => ({
-                  ...f,
-                  cash_desk_id: v === "" ? null : Number.parseInt(v, 10),
-                  cash_desk_link_role: v === "" ? "" : f.cash_desk_link_role
-                }));
-              }}
-            >
-              <option value="">— Tanlanmagan —</option>
-              {(desksQ.data ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            {desksQ.isError ? (
-              <span className="text-[11px] text-destructive">Kassalar ro‘yxati yuklanmadi</span>
-            ) : null}
-          </label>
-          <label className="grid gap-1">
-            <span className="text-xs text-muted-foreground">Kassadagi rol</span>
-            <select
-              className={cn(filterSelectClassName, "h-9 w-full text-sm")}
-              value={form.cash_desk_link_role}
-              disabled={form.cash_desk_id == null}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  cash_desk_link_role: (e.target.value || "") as typeof f.cash_desk_link_role
-                }))
-              }
-            >
-              <option value="">—</option>
-              <option value="cashier">Kassir</option>
-              <option value="manager">Menejer</option>
-              <option value="operator">Kassa operatori</option>
-            </select>
-            <span className="text-[11px] leading-snug text-muted-foreground">
-              Kassani tanlasangiz, rolni ham tanlang (ikkisi birga yuboriladi).
-            </span>
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={form.app_access}
-              onChange={(e) => setForm((f) => ({ ...f, app_access: e.target.checked }))}
-            />
-            Mobil ilovaga ruxsat
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={form.can_authorize}
-              onChange={(e) => setForm((f) => ({ ...f, can_authorize: e.target.checked }))}
-            />
-            Tizimga kirish mumkin
-          </label>
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            Bekor
-          </Button>
-          <Button
-            type="button"
-            disabled={createMut.isPending || deskLinkIncomplete}
-            onClick={() => createMut.mutate()}
-          >
-            {createMut.isPending ? "…" : "Yaratish"}
           </Button>
         </DialogFooter>
       </DialogContent>

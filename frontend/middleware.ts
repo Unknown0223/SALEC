@@ -5,13 +5,44 @@ export function middleware(request: NextRequest) {
   const hasFlag = request.cookies.get("sd_auth")?.value === "1";
   const { pathname } = request.nextUrl;
 
+  if (pathname === "/bonus-rules" || pathname.startsWith("/bonus-rules/")) {
+    const url = request.nextUrl.clone();
+    url.pathname =
+      pathname === "/bonus-rules"
+        ? "/settings/bonus-rules"
+        : `/settings/bonus-rules${pathname.slice("/bonus-rules".length)}`;
+    return NextResponse.redirect(url);
+  }
+
+  /** Mahsulotlar katalogi — «Настройки → Продукт» (referens UI) */
+  if (pathname === "/products" || pathname === "/products/") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/settings/products";
+    return NextResponse.redirect(url);
+  }
+  if (pathname === "/products/bulk" || pathname.startsWith("/products/bulk/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname.replace(/^\/products/, "/settings/products");
+    return NextResponse.redirect(url);
+  }
+  if (pathname === "/products/excel" || pathname.startsWith("/products/excel/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname.replace(/^\/products/, "/settings/products");
+    return NextResponse.redirect(url);
+  }
+
   const protectedPath =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/products") ||
-    pathname.startsWith("/bonus-rules") ||
     pathname.startsWith("/clients") ||
     pathname.startsWith("/orders") ||
+    pathname.startsWith("/payments") ||
+    pathname.startsWith("/returns") ||
+    pathname.startsWith("/reports") ||
     pathname.startsWith("/stock") ||
+    pathname.startsWith("/visits") ||
+    pathname.startsWith("/tasks") ||
+    pathname.startsWith("/routes") ||
     pathname.startsWith("/settings");
 
   if (protectedPath && !hasFlag) {
@@ -39,8 +70,20 @@ export const config = {
     "/clients/:path*",
     "/orders",
     "/orders/:path*",
+    "/payments",
+    "/payments/:path*",
+    "/returns",
+    "/returns/:path*",
+    "/reports",
+    "/reports/:path*",
     "/stock",
     "/stock/:path*",
+    "/visits",
+    "/visits/:path*",
+    "/tasks",
+    "/tasks/:path*",
+    "/routes",
+    "/routes/:path*",
     "/settings",
     "/settings/:path*",
     "/login",

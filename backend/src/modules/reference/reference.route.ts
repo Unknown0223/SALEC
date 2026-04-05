@@ -12,7 +12,10 @@ import {
   listFinancePriceOverview,
   listProductCategoriesForTenant,
   listUsersForOrderAgent,
+  getWarehouseDetail,
+  listWarehousePickers,
   listWarehousesForTenant,
+  listWarehousesTable,
   updateProductCategoryRow,
   updateWarehouseRow
 } from "./reference.service";
@@ -42,17 +45,44 @@ const patchCategoryBody = z
   })
   .refine((o) => Object.keys(o).length > 0, { message: "empty" });
 
+const warehouseLinkSchema = z.object({
+  user_id: z.number().int().positive(),
+  link_role: z.enum([
+    "agent",
+    "cashier",
+    "manager",
+    "operator",
+    "storekeeper",
+    "supervisor",
+    "expeditor"
+  ])
+});
+
+const warehouseStockPurposeSchema = z.enum(["sales", "return", "reserve"]);
+
 const createWarehouseBody = z.object({
   name: z.string().min(1).max(300),
   type: z.string().max(200).nullable().optional(),
-  address: z.string().max(500).nullable().optional()
+  stock_purpose: warehouseStockPurposeSchema.optional(),
+  address: z.string().max(500).nullable().optional(),
+  code: z.string().max(40).nullable().optional(),
+  payment_method: z.string().max(200).nullable().optional(),
+  van_selling: z.boolean().optional(),
+  is_active: z.boolean().optional(),
+  links: z.array(warehouseLinkSchema).optional()
 });
 
 const patchWarehouseBody = z
   .object({
     name: z.string().min(1).max(300).optional(),
     type: z.string().max(200).nullable().optional(),
-    address: z.string().max(500).nullable().optional()
+    stock_purpose: warehouseStockPurposeSchema.optional(),
+    address: z.string().max(500).nullable().optional(),
+    code: z.string().max(40).nullable().optional(),
+    payment_method: z.string().max(200).nullable().optional(),
+    van_selling: z.boolean().optional(),
+    is_active: z.boolean().optional(),
+    links: z.array(warehouseLinkSchema).optional()
   })
   .refine((o) => Object.keys(o).length > 0, { message: "empty" });
 
@@ -64,6 +94,52 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
       if (!ensureTenantContext(request, reply)) return;
       const data = await listWarehousesForTenant(request.tenant!.id);
       return reply.send({ data });
+    }
+  );
+
+  app.get(
+    "/api/:slug/warehouses/table",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const is_active =
+        q.is_active === "true" ? true : q.is_active === "false" ? false : undefined;
+      const page = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "10", 10) || 10));
+      const search = (q.q ?? "").trim();
+      const result = await listWarehousesTable(request.tenant!.id, {
+        is_active,
+        q: search || undefined,
+        page,
+        limit
+      });
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/api/:slug/warehouses/pickers",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const data = await listWarehousePickers(request.tenant!.id);
+      return reply.send({ data });
+    }
+  );
+
+  app.get(
+    "/api/:slug/warehouses/:warehouseId",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { warehouseId: string }).warehouseId, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const row = await getWarehouseDetail(request.tenant!.id, id);
+      if (!row) return reply.status(404).send({ error: "NotFound" });
+      return reply.send({ data: row });
     }
   );
 
@@ -83,6 +159,13 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "EMPTY_NAME") return reply.status(400).send({ error: "EmptyName" });
         if (msg === "NAME_EXISTS") return reply.status(409).send({ error: "WarehouseNameExists" });
+        if (msg === "UserNotFound") return reply.status(400).send({ error: "UserNotFound" });
+        if (msg === "UserRoleMismatch" || msg === "InvalidLinkRole") {
+          return reply.status(400).send({ error: msg });
+        }
+        if (msg === "InvalidStockPurpose") {
+          return reply.status(400).send({ error: "InvalidStockPurpose" });
+        }
         throw e;
       }
     }
@@ -115,6 +198,13 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
         if (msg === "EMPTY_NAME") return reply.status(400).send({ error: "EmptyName" });
         if (msg === "NAME_EXISTS") return reply.status(409).send({ error: "WarehouseNameExists" });
         if (msg === "EMPTY_PATCH") return reply.status(400).send({ error: "EmptyBody" });
+        if (msg === "UserNotFound") return reply.status(400).send({ error: "UserNotFound" });
+        if (msg === "UserRoleMismatch" || msg === "InvalidLinkRole") {
+          return reply.status(400).send({ error: msg });
+        }
+        if (msg === "InvalidStockPurpose") {
+          return reply.status(400).send({ error: "InvalidStockPurpose" });
+        }
         throw e;
       }
     }

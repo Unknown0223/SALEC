@@ -30,7 +30,7 @@ const catalogRoles = ["admin", "operator"] as const;
 
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+  limit: z.coerce.number().int().min(1).max(500).optional().default(50),
   search: z.string().optional(),
   is_active: z.enum(["true", "false"]).optional()
 });

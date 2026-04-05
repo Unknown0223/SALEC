@@ -3,7 +3,8 @@
 import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -167,7 +168,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Link className={cn(buttonVariants({ size: "sm" }))} href="/bonus-rules/new">
+        <Link className={cn(buttonVariants({ size: "sm" }))} href="/settings/bonus-rules/new">
           Yangi qoida
         </Link>
         <Button
@@ -342,7 +343,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
                         <td className="px-3 py-2 text-right">
                           <TableRowActionGroup className="justify-end" ariaLabel="Qoida">
                             <Link
-                              href={`/bonus-rules/${row.id}/edit`}
+                              href={`/settings/bonus-rules/${row.id}/edit`}
                               className={cn(
                                 buttonVariants({ variant: "outline", size: "icon-sm" }),
                                 "text-muted-foreground hover:text-foreground"

@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Dialog,
   DialogContent,

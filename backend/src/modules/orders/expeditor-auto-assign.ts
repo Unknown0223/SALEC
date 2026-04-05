@@ -15,12 +15,13 @@ function norm(s: string | null | undefined): string {
 
 function clientTerritoryBlob(c: {
   region: string | null;
+  city: string | null;
   district: string | null;
   zone: string | null;
   neighborhood: string | null;
   address: string | null;
 }): string {
-  return [c.region, c.district, c.zone, c.neighborhood, c.address].filter(Boolean).join(" ");
+  return [c.region, c.city, c.district, c.zone, c.neighborhood, c.address].filter(Boolean).join(" ");
 }
 
 /**
@@ -30,7 +31,8 @@ function clientTerritoryBlob(c: {
 export function expeditorRulesMatch(
   rules: ExpeditorAssignmentRules,
   ctx: {
-    clientTags: string[];
+    /** Zakaz narxi qaysi turda hisoblangan (masalan retail) — qoidalardagi «тип цены» bilan mos */
+    orderPriceTypes: string[];
     orderAgentId: number | null;
     warehouseId: number | null;
     agentTradeDirection: string | null;
@@ -40,8 +42,9 @@ export function expeditorRulesMatch(
 ): boolean {
   const pts = rules.price_types;
   if (pts?.length) {
-    const tags = ctx.clientTags.map(norm).filter(Boolean);
-    const ok = pts.some((p) => tags.includes(norm(p)));
+    const orderPts = ctx.orderPriceTypes.map(norm).filter(Boolean);
+    if (orderPts.length === 0) return false;
+    const ok = pts.some((p) => orderPts.includes(norm(p)));
     if (!ok) return false;
   }
 
@@ -86,6 +89,7 @@ export async function resolveAutoExpeditorUserId(
       sales_channel: string | null;
       product_category_ref: string | null;
       region: string | null;
+      city: string | null;
       district: string | null;
       zone: string | null;
       neighborhood: string | null;
@@ -93,11 +97,13 @@ export async function resolveAutoExpeditorUserId(
     };
     orderAgentId: number | null;
     warehouseId: number | null;
+    /** Masalan `["retail"]` — `createOrder` chakana narx bilan mos */
+    orderPriceTypes: string[];
     at: Date;
   }
 ): Promise<number | null> {
   const editors = await tx.user.findMany({
-    where: { tenant_id: tenantId, role: "expeditor", is_active: true, app_access: true },
+    where: { tenant_id: tenantId, role: "expeditor", is_active: true },
     select: { id: true, expeditor_assignment_rules: true },
     orderBy: { id: "asc" }
   });
@@ -116,11 +122,9 @@ export async function resolveAutoExpeditorUserId(
     agentTradeDirection = ag?.trade_direction ?? null;
   }
 
-  const clientTags = [
-    params.client.category,
-    params.client.sales_channel,
-    params.client.product_category_ref
-  ].filter((x): x is string => typeof x === "string" && x.trim() !== "");
+  const orderPriceTypes = params.orderPriceTypes.filter(
+    (x): x is string => typeof x === "string" && x.trim() !== ""
+  );
 
   const territoryBlob = clientTerritoryBlob(params.client);
   const weekday = weekday1To7(params.at);
@@ -140,7 +144,7 @@ export async function resolveAutoExpeditorUserId(
     }
     if (
       expeditorRulesMatch(rules, {
-        clientTags,
+        orderPriceTypes,
         orderAgentId: params.orderAgentId,
         warehouseId: params.warehouseId,
         agentTradeDirection,

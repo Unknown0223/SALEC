@@ -1,3 +1,4 @@
+/* Next.js dev ishlayotganda .next ni qo‘lda o‘chirmang — 404/ENOENT. Avval dev ni to‘xtating yoki `npm run repair:next`. */
 const fs = require("node:fs");
 const path = require("node:path");
 

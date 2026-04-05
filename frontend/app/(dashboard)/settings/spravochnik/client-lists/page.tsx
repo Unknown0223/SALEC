@@ -18,6 +18,7 @@ type TenantProfile = {
     sales_channels: string[];
     client_product_category_refs: string[];
     client_districts: string[];
+    client_cities: string[];
     client_neighborhoods: string[];
     client_zones: string[];
     client_logistics_services: string[];
@@ -40,6 +41,7 @@ export default function ClientListsSpravochnikPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [sales, setSales] = useState("");
   const [prodCat, setProdCat] = useState("");
+  const [cities, setCities] = useState("");
   const [districts, setDistricts] = useState("");
   const [neighborhoods, setNeighborhoods] = useState("");
   const [zones, setZones] = useState("");
@@ -59,6 +61,7 @@ export default function ClientListsSpravochnikPage() {
     const r = data.references;
     setSales((r.sales_channels ?? []).join("\n"));
     setProdCat((r.client_product_category_refs ?? []).join("\n"));
+    setCities((r.client_cities ?? []).join("\n"));
     setDistricts((r.client_districts ?? []).join("\n"));
     setNeighborhoods((r.client_neighborhoods ?? []).join("\n"));
     setZones((r.client_zones ?? []).join("\n"));
@@ -72,6 +75,7 @@ export default function ClientListsSpravochnikPage() {
         references: {
           sales_channels: splitLines(sales),
           client_product_category_refs: splitLines(prodCat),
+          client_cities: splitLines(cities),
           client_districts: splitLines(districts),
           client_neighborhoods: splitLines(neighborhoods),
           client_zones: splitLines(zones),
@@ -136,7 +140,7 @@ export default function ClientListsSpravochnikPage() {
               <li>Har qatorga bitta qiymat yoki vergul/nuqtali vergul bilan bir nechta.</li>
               <li>Mavjud mijozlarda allaqachon bor qiymatlar ham tanlovda ko‘rinadi (avtomatik).</li>
               <li>«Teritoriya» (viloyat): Kompaniya sozlamalaridagi hududlar + mijozlardagi qiymatlar.</li>
-              <li>Tuman, mahalla, zona, logistika: shu sahifada yaratiladi — mijoz kartasida tanlanadi.</li>
+              <li>Shahar (gorod), tuman, mahalla, zona, logistika: shu sahifada — mijoz kartasida tanlanadi.</li>
               <li>
                 Mijoz <strong>formati</strong>, <strong>turi</strong> va <strong>kategoriyasi</strong> endi sozlamalar
                 katalogidagi alohida bo‘limlarda (jadval + modal).
@@ -148,6 +152,7 @@ export default function ClientListsSpravochnikPage() {
             [
               ["ref-sales", "Savdo kanali", sales, setSales, "Masalan: TRAD TRADE"],
               ["ref-prod-cat", "Mahsulot toifasi (mijozga)", prodCat, setProdCat, "Qo‘shimcha varaqdagi dropdown"],
+              ["ref-city", "Shahar (gorod)", cities, setCities, "Mijoz manzili — shahar"],
               ["ref-district", "Tuman", districts, setDistricts, "Mijoz manzili — tuman"],
               ["ref-neighborhood", "Mahalla", neighborhoods, setNeighborhoods, "Mijoz manzili — mahalla"],
               ["ref-zone", "Zona", zones, setZones, "Mijoz manzili — zona (masalan savdo zonasi)"],

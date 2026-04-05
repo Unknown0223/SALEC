@@ -5,7 +5,8 @@ import { ClientsTableToolbar } from "@/components/clients/clients-table-toolbar"
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ClientRow } from "@/lib/client-types";

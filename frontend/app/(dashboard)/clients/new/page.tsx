@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ type ClientReferencesResponse = {
   client_type_codes: string[];
   regions: string[];
   districts: string[];
+  cities: string[];
   neighborhoods: string[];
   zones: string[];
   client_formats: string[];
@@ -54,6 +56,7 @@ export default function NewClientPage() {
   const [category, setCategory] = useState("");
   const [clientTypeCode, setClientTypeCode] = useState("");
   const [region, setRegion] = useState("");
+  const [city, setCity] = useState("");
   const [district, setDistrict] = useState("");
   const [neighborhood, setNeighborhood] = useState("");
   const [zone, setZone] = useState("");
@@ -78,6 +81,7 @@ export default function NewClientPage() {
     [clientTypeCode, refsQ.data?.client_type_codes]
   );
   const terrOpts = useMemo(() => mergeRefOptions(region, refsQ.data?.regions), [region, refsQ.data?.regions]);
+  const cityOpts = useMemo(() => mergeRefOptions(city, refsQ.data?.cities), [city, refsQ.data?.cities]);
   const distOpts = useMemo(() => mergeRefOptions(district, refsQ.data?.districts), [district, refsQ.data?.districts]);
   const neiOpts = useMemo(
     () => mergeRefOptions(neighborhood, refsQ.data?.neighborhoods),
@@ -110,6 +114,7 @@ export default function NewClientPage() {
         category: category.trim() || null,
         client_type_code: clientTypeCode.trim() || null,
         region: region.trim() || null,
+        city: city.trim() || null,
         district: district.trim() || null,
         neighborhood: neighborhood.trim() || null,
         zone: zone.trim() || null,
@@ -314,6 +319,26 @@ export default function NewClientPage() {
                   disabled={mut.isPending}
                 >
                   {prodCatOpts.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </FilterSelect>
+              </div>
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="mb-0 text-xs">Shahar (gorod)</Label>
+                  <RefAdminLink href="/settings/spravochnik/client-lists#ref-city">+</RefAdminLink>
+                </div>
+                <FilterSelect
+                  className={cn(selectCls, "min-w-0 max-w-none")}
+                  emptyLabel="Shahar"
+                  aria-label="Shahar"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  disabled={mut.isPending}
+                >
+                  {cityOpts.map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>

@@ -1,0 +1,4 @@
+role;fio;login;password;code;phone;branch;territory;warehouse;trade_direction;supervisor_code
+3;NAMUNA SUPERVISOR;demo_sup_sample;;SUP-DEMO-001;;;;;;;;;;
+4;NAMUNA OPERATOR;demo_op_sample;;OP-DEMO-001;;;;;;;;;;
+1;NAMUNA AGENT;demo_agent_sample;;AG-DEMO-001;998901112233;Sergeli;;Sergeli sklad;GIGA;SUP-DEMO-001

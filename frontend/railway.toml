@@ -1,0 +1,9 @@
+# Railway: servis «Root Directory» = frontend
+# Docker build: NEXT_PUBLIC_API_URL ni Railway da «Build» vaqtida bering (masalan backend *.up.railway.app)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"

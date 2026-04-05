@@ -11,7 +11,10 @@ export const AuditEntityType = {
   product_price: "product_price",
   stock: "stock",
   bonus_rule: "bonus_rule",
-  order: "order"
+  order: "order",
+  goods_receipt: "goods_receipt",
+  supplier: "supplier",
+  finance: "finance"
 } as const;
 
 export type AuditEntityTypeValue = (typeof AuditEntityType)[keyof typeof AuditEntityType];

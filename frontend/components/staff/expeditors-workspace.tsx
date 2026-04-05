@@ -18,7 +18,9 @@ import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
-import { Eye, Link2, ListOrdered, LogOut, Pencil, RefreshCw, UserMinus } from "lucide-react";
+import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
+import { messageFromStaffCreateError } from "@/lib/staff-api-errors";
+import { Eye, Link2, ListOrdered, MonitorSmartphone, Pencil, RefreshCw, UserMinus } from "lucide-react";
 
 export type ExpeditorAssignmentRules = {
   price_types?: string[];
@@ -46,6 +48,7 @@ export type ExpeditorRow = {
   price_type: string | null;
   price_types: string[];
   warehouse: string | null;
+  trade_direction_id: number | null;
   trade_direction: string | null;
   branch: string | null;
   position: string | null;
@@ -62,14 +65,6 @@ export type ExpeditorRow = {
     product_rules?: Array<{ category_id: number; all: boolean; product_ids?: number[] }>;
   };
   expeditor_assignment_rules: ExpeditorAssignmentRules;
-};
-
-type SessionRow = {
-  id: number;
-  device_name: string | null;
-  ip_address: string | null;
-  user_agent: string | null;
-  created_at: string;
 };
 
 type TenantProfile = {
@@ -153,6 +148,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const pageSize = tablePrefs.pageSize;
 
   const [addOpen, setAddOpen] = useState(false);
+  const [createExpeditorError, setCreateExpeditorError] = useState<string | null>(null);
   const [infoRow, setInfoRow] = useState<ExpeditorRow | null>(null);
   const [editRow, setEditRow] = useState<ExpeditorRow | null>(null);
   const [sessionExpeditor, setSessionExpeditor] = useState<ExpeditorRow | null>(null);
@@ -251,6 +247,19 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
     }
   });
 
+  const tradeDirectionsQ = useQuery({
+    queryKey: ["trade-directions", tenantSlug, "expeditors-ws"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; name: string; code: string | null; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/trade-directions?is_active=true`);
+      return data.data;
+    }
+  });
+
+  const tradeDirectionRows = useMemo(() => tradeDirectionsQ.data ?? [], [tradeDirectionsQ.data]);
+
   const agentsPickerQ = useQuery({
     queryKey: ["agents", tenantSlug, "expeditors-assign"],
     enabled: Boolean(tenantSlug) && Boolean(assignRow),
@@ -281,9 +290,14 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
       return data;
     },
     onSuccess: () => {
+      setCreateExpeditorError(null);
       void qc.invalidateQueries({ queryKey: ["expeditors", tenantSlug] });
       void qc.invalidateQueries({ queryKey: ["expeditors-filter-options", tenantSlug] });
       setAddOpen(false);
+    },
+    onError: (e: Error) => {
+      const m = messageFromStaffCreateError(e);
+      setCreateExpeditorError(m ?? e.message ?? "Xatolik");
     }
   });
 
@@ -451,7 +465,8 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs">
           <span className="sr-only">Филиал</span>
           <FilterSelect
@@ -527,9 +542,12 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
             ))}
           </FilterSelect>
         </label>
-        <Button type="button" size="sm" onClick={applyFilters}>
+        </div>
+        <div className="flex shrink-0 items-end">
+        <Button type="button" size="sm" className="min-w-[7.5rem]" onClick={applyFilters}>
           Применить
         </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -669,6 +687,17 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
                   <TableRowActionGroup className="justify-end" ariaLabel="Ekspeditor">
                     <Button
                       type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Активные сессии"
+                      aria-label="Активные сессии"
+                      onClick={() => setSessionExpeditor(r)}
+                    >
+                      <MonitorSmartphone className="size-3.5" aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
                       variant="ghost"
                       size="icon-sm"
                       className="text-primary hover:bg-primary/10"
@@ -728,12 +757,20 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
 
       <AgentAddDialog
         open={addOpen}
-        onOpenChange={setAddOpen}
+        onOpenChange={(o) => {
+          setAddOpen(o);
+          if (!o) setCreateExpeditorError(null);
+        }}
         warehouses={warehousesQ.data ?? []}
         branchOptions={branchOptions}
-        tradeDirectionOptions={tradeDirectionOptions}
+        tradeDirections={tradeDirectionRows}
+        territorySelectOptions={territoryFilterOptions}
         loading={createMut.isPending}
-        onSubmit={(body) => createMut.mutate(body)}
+        submitError={createExpeditorError}
+        onSubmit={(body) => {
+          setCreateExpeditorError(null);
+          createMut.mutate(body);
+        }}
       />
 
       <AgentInfoDialog row={infoRow} onClose={() => setInfoRow(null)} />
@@ -744,14 +781,20 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
         tenantSlug={tenantSlug}
         warehouses={warehousesQ.data ?? []}
         branchOptions={branchOptions}
-        tradeDirectionOptions={tradeDirectionOptions}
+        tradeDirections={tradeDirectionRows}
+        territorySelectOptions={territoryFilterOptions}
         onPatch={(id, body) => patchMut.mutateAsync({ id, body })}
       />
 
-      <SessionsDialog
-        expeditor={sessionExpeditor}
-        onClose={() => setSessionExpeditor(null)}
+      <StaffActiveSessionsDialog
+        open={sessionExpeditor != null}
+        onOpenChange={(open) => {
+          if (!open) setSessionExpeditor(null);
+        }}
         tenantSlug={tenantSlug}
+        staffKind="expeditor"
+        userId={sessionExpeditor?.id ?? null}
+        maxSessions={sessionExpeditor?.max_sessions ?? 2}
         onPatched={() => {
           void qc.invalidateQueries({ queryKey: ["expeditors", tenantSlug] });
         }}
@@ -839,21 +882,32 @@ function AgentInfoDialog({ row, onClose }: { row: ExpeditorRow | null; onClose: 
   );
 }
 
+function mergeTerritorySelectOptions(current: string, base: string[]): string[] {
+  const s = new Set(base);
+  const t = current.trim();
+  if (t) s.add(t);
+  return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
+}
+
 function AgentAddDialog({
   open,
   onOpenChange,
   warehouses,
   branchOptions,
-  tradeDirectionOptions,
+  tradeDirections,
+  territorySelectOptions,
   loading,
+  submitError,
   onSubmit
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   warehouses: { id: number; name: string }[];
   branchOptions: string[];
-  tradeDirectionOptions: string[];
+  tradeDirections: Array<{ id: number; name: string; code: string | null }>;
+  territorySelectOptions: string[];
   loading: boolean;
+  submitError: string | null;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
   const [first_name, setFirst] = useState("");
@@ -862,7 +916,7 @@ function AgentAddDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [warehouse_id, setWh] = useState("");
-  const [trade_direction, setTd] = useState("");
+  const [trade_direction_id, setTdId] = useState("");
   const [agent_type, setAgentType] = useState("Экспедитор");
   const [branch, setBranch] = useState("");
   const [position, setPos] = useState("");
@@ -875,6 +929,11 @@ function AgentAddDialog({
   const [territoryField, setTerritoryField] = useState("");
   const [showPw, setShowPw] = useState(false);
 
+  const territoryOpts = useMemo(
+    () => mergeTerritorySelectOptions(territoryField, territorySelectOptions),
+    [territoryField, territorySelectOptions]
+  );
+
   useEffect(() => {
     if (!open) return;
     setFirst("");
@@ -883,7 +942,7 @@ function AgentAddDialog({
     setPhone("");
     setEmail("");
     setWh("");
-    setTd("");
+    setTdId("");
     setAgentType("Экспедитор");
     setBranch("");
     setPos("");
@@ -902,6 +961,11 @@ function AgentAddDialog({
         <DialogHeader>
           <DialogTitle>Добавить экспедитора</DialogTitle>
         </DialogHeader>
+        {submitError ? (
+          <p className="text-sm text-destructive" role="alert">
+            {submitError}
+          </p>
+        ) : null}
         <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1">
           <Input placeholder="Имя *" value={first_name} onChange={(e) => setFirst(e.target.value)} />
           <Input placeholder="Фамилия" value={last_name} onChange={(e) => setLast(e.target.value)} />
@@ -928,14 +992,15 @@ function AgentAddDialog({
             Зона (направление торговли)
             <FilterSelect
               className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
-              emptyLabel="Зона (направление торговли)"
+              emptyLabel="Tanlanmagan"
               aria-label="Зона (направление торговли)"
-              value={trade_direction}
-              onChange={(e) => setTd(e.target.value)}
+              value={trade_direction_id}
+              onChange={(e) => setTdId(e.target.value)}
             >
-              {tradeDirectionOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {tradeDirections.map((t) => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.name}
+                  {t.code ? ` (${t.code})` : ""}
                 </option>
               ))}
             </FilterSelect>
@@ -968,11 +1033,22 @@ function AgentAddDialog({
             </FilterSelect>
           </label>
           <Input placeholder="Должность" value={position} onChange={(e) => setPos(e.target.value)} />
-          <Input
-            placeholder="Территория (как в карточке)"
-            value={territoryField}
-            onChange={(e) => setTerritoryField(e.target.value)}
-          />
+          <label className="text-xs text-muted-foreground">
+            Территория (как у клиента: область / туман / зона)
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Не выбрано"
+              aria-label="Территория"
+              value={territoryField}
+              onChange={(e) => setTerritoryField(e.target.value)}
+            >
+              {territoryOpts.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </FilterSelect>
+          </label>
           <Input placeholder="Код" value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} />
           <Input placeholder="ПИНФЛ" value={pinfl} onChange={(e) => setPinfl(e.target.value)} />
           <Input placeholder="Логин *" value={login} onChange={(e) => setLogin(e.target.value)} />
@@ -1012,7 +1088,9 @@ function AgentAddDialog({
                 phone: phone.trim() || null,
                 email: email.trim() || null,
                 warehouse_id: warehouse_id ? Number.parseInt(warehouse_id, 10) : null,
-                trade_direction: trade_direction.trim() || null,
+                trade_direction_id: trade_direction_id.trim()
+                  ? Number.parseInt(trade_direction_id.trim(), 10)
+                  : null,
                 agent_type: agent_type.trim() || null,
                 branch: branch.trim() || null,
                 position: position.trim() || null,
@@ -1043,7 +1121,8 @@ function AgentEditDialog({
   tenantSlug,
   warehouses,
   branchOptions,
-  tradeDirectionOptions,
+  tradeDirections,
+  territorySelectOptions,
   onPatch
 }: {
   row: ExpeditorRow | null;
@@ -1051,7 +1130,8 @@ function AgentEditDialog({
   tenantSlug: string;
   warehouses: { id: number; name: string }[];
   branchOptions: string[];
-  tradeDirectionOptions: string[];
+  tradeDirections: Array<{ id: number; name: string; code: string | null }>;
+  territorySelectOptions: string[];
   onPatch: (id: number, body: Record<string, unknown>) => Promise<unknown>;
 }) {
   const detailQ = useQuery({
@@ -1070,7 +1150,7 @@ function AgentEditDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [warehouse_id, setWh] = useState("");
-  const [trade_direction, setTd] = useState("");
+  const [trade_direction_id, setTdId] = useState("");
   const [agent_type, setAgentType] = useState("");
   const [branch, setBranch] = useState("");
   const [position, setPos] = useState("");
@@ -1084,6 +1164,11 @@ function AgentEditDialog({
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const territoryOpts = useMemo(
+    () => mergeTerritorySelectOptions(territory, territorySelectOptions),
+    [territory, territorySelectOptions]
+  );
+
   useEffect(() => {
     if (!r) return;
     const parts = r.fio.split(/\s+/);
@@ -1094,7 +1179,18 @@ function AgentEditDialog({
     setEmail(r.email ?? "");
     const wh = warehouses.find((w) => w.name === r.warehouse);
     setWh(wh ? String(wh.id) : "");
-    setTd(r.trade_direction ?? "");
+    if (r.trade_direction_id != null && r.trade_direction_id > 0) {
+      setTdId(String(r.trade_direction_id));
+    } else {
+      const legacy = (r.trade_direction ?? "").trim();
+      const match = tradeDirections.find(
+        (d) =>
+          (d.code && d.code.trim() === legacy) ||
+          d.name.trim() === legacy ||
+          legacy === `${d.name} (${d.code})`.trim()
+      );
+      setTdId(match ? String(match.id) : "");
+    }
     setAgentType(r.agent_type ?? "");
     setBranch(r.branch ?? "");
     setPos(r.position ?? "");
@@ -1106,14 +1202,7 @@ function AgentEditDialog({
     setKpi(r.kpi_color || "#ef4444");
     setPwMode(false);
     setPassword("");
-  }, [r, warehouses]);
-
-  const tdOpts = useMemo(() => {
-    const s = new Set(tradeDirectionOptions);
-    const cur = trade_direction.trim();
-    if (cur) s.add(cur);
-    return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [tradeDirectionOptions, trade_direction]);
+  }, [r, warehouses, tradeDirections]);
 
   if (!row || !r) return null;
 
@@ -1127,7 +1216,9 @@ function AgentEditDialog({
         phone: phone.trim() || null,
         email: email.trim() || null,
         warehouse_id: warehouse_id ? Number.parseInt(warehouse_id, 10) : null,
-        trade_direction: trade_direction.trim() || null,
+        trade_direction_id: trade_direction_id.trim()
+          ? Number.parseInt(trade_direction_id.trim(), 10)
+          : null,
         agent_type: agent_type.trim() || null,
         branch: branch.trim() || null,
         position: position.trim() || null,
@@ -1177,14 +1268,15 @@ function AgentEditDialog({
             Зона (направление торговли)
             <FilterSelect
               className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
-              emptyLabel="Зона (направление торговли)"
+              emptyLabel="Tanlanmagan"
               aria-label="Зона (направление торговли)"
-              value={trade_direction}
-              onChange={(e) => setTd(e.target.value)}
+              value={trade_direction_id}
+              onChange={(e) => setTdId(e.target.value)}
             >
-              {tdOpts.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {tradeDirections.map((t) => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.name}
+                  {t.code ? ` (${t.code})` : ""}
                 </option>
               ))}
             </FilterSelect>
@@ -1209,11 +1301,22 @@ function AgentEditDialog({
             </FilterSelect>
           </label>
           <Input placeholder="Должность" value={position} onChange={(e) => setPos(e.target.value)} />
-          <Input
-            placeholder="Территория (текст)"
-            value={territory}
-            onChange={(e) => setTerritory(e.target.value)}
-          />
+          <label className="text-xs text-muted-foreground">
+            Территория (как у клиента)
+            <FilterSelect
+              className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
+              emptyLabel="Не выбрано"
+              aria-label="Территория"
+              value={territory}
+              onChange={(e) => setTerritory(e.target.value)}
+            >
+              {territoryOpts.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </FilterSelect>
+          </label>
           <Input placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} disabled />
           {!pwMode ? (
             <Button type="button" variant="outline" className="w-full" onClick={() => setPwMode(true)}>
@@ -1247,149 +1350,6 @@ function AgentEditDialog({
             onClick={() => void save()}
           >
             Сохранить
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function SessionsDialog({
-  expeditor,
-  onClose,
-  tenantSlug,
-  onPatched
-}: {
-  expeditor: ExpeditorRow | null;
-  onClose: () => void;
-  tenantSlug: string;
-  onPatched: () => void;
-}) {
-  const [maxDraft, setMaxDraft] = useState(1);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  const sessionsQ = useQuery({
-    queryKey: ["expeditor-sessions", tenantSlug, expeditor?.id],
-    enabled: Boolean(expeditor),
-    queryFn: async () => {
-      const { data } = await api.get<{ data: SessionRow[] }>(
-        `/api/${tenantSlug}/expeditors/${expeditor!.id}/sessions`
-      );
-      return data.data;
-    }
-  });
-
-  useEffect(() => {
-    if (expeditor) {
-      setMaxDraft(expeditor.max_sessions);
-      setSelected(new Set());
-    }
-  }, [expeditor]);
-
-  const revokeMut = useMutation({
-    mutationFn: async (body: { all?: true; token_ids?: number[] }) => {
-      await api.post(`/api/${tenantSlug}/expeditors/${expeditor!.id}/sessions/revoke`, body);
-    },
-    onSuccess: () => {
-      void sessionsQ.refetch();
-      onPatched();
-      setSelected(new Set());
-    }
-  });
-
-  const saveMax = useMutation({
-    mutationFn: async () => {
-      await api.patch(`/api/${tenantSlug}/expeditors/${expeditor!.id}`, { max_sessions: maxDraft });
-    },
-    onSuccess: () => {
-      onPatched();
-    }
-  });
-
-  if (!expeditor) return null;
-
-  const rows = sessionsQ.data ?? [];
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Активные сессии</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-wrap items-center gap-2 border-b pb-3">
-          <span className="text-sm">Максимальное количество сессий</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.max(1, m - 1))}>
-            −
-          </Button>
-          <Input
-            className="h-8 w-14 text-center"
-            value={maxDraft}
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value, 10);
-              if (!Number.isNaN(n)) setMaxDraft(Math.min(99, Math.max(1, n)));
-            }}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.min(99, m + 1))}>
-            +
-          </Button>
-          <Button type="button" size="sm" disabled={saveMax.isPending} onClick={() => saveMax.mutate()}>
-            Сохранить
-          </Button>
-        </div>
-        <div className="max-h-[45vh] overflow-auto rounded-md border">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="w-8 px-2 py-2" />
-                <th className="px-2 py-2 text-left">Устройство</th>
-                <th className="px-2 py-2 text-left">IP</th>
-                <th className="px-2 py-2 text-left">Приложение</th>
-                <th className="px-2 py-2 text-left">Дата</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.id} className="border-t">
-                  <td className="px-2 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(s.id)}
-                      onChange={(e) => {
-                        const n = new Set(selected);
-                        if (e.target.checked) n.add(s.id);
-                        else n.delete(s.id);
-                        setSelected(n);
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">{s.device_name ?? "—"}</td>
-                  <td className="px-2 py-2 font-mono">{s.ip_address ?? "—"}</td>
-                  <td className="max-w-[12rem] truncate px-2 py-2" title={s.user_agent ?? ""}>
-                    {s.user_agent ?? "—"}
-                  </td>
-                  <td className="px-2 py-2">{new Date(s.created_at).toLocaleString("ru-RU")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <DialogFooter className="flex flex-wrap gap-2 border-0 bg-transparent p-0">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={selected.size === 0 || revokeMut.isPending}
-            onClick={() => revokeMut.mutate({ token_ids: Array.from(selected) })}
-          >
-            Завершить выбранные сессии
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={revokeMut.isPending || rows.length === 0}
-            onClick={() => revokeMut.mutate({ all: true })}
-          >
-            <LogOut className="mr-1 size-3" />
-            Завершить все сессии
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -18,7 +18,7 @@ import {
   ChevronRight,
   Eye,
   ListOrdered,
-  LogOut,
+  MonitorSmartphone,
   Pencil,
   RefreshCw,
   Settings2,
@@ -27,6 +27,7 @@ import {
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
+import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { FilterSelect } from "@/components/ui/filter-select";
 
@@ -47,6 +48,7 @@ export type AgentRow = {
   price_type: string | null;
   price_types: string[];
   warehouse: string | null;
+  trade_direction_id: number | null;
   trade_direction: string | null;
   branch: string | null;
   position: string | null;
@@ -62,14 +64,6 @@ export type AgentRow = {
     price_types?: string[];
     product_rules?: Array<{ category_id: number; all: boolean; product_ids?: number[] }>;
   };
-};
-
-type SessionRow = {
-  id: number;
-  device_name: string | null;
-  ip_address: string | null;
-  user_agent: string | null;
-  created_at: string;
 };
 
 type ProductCategoryRow = {
@@ -300,6 +294,19 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
       return data.data;
     }
   });
+
+  const tradeDirectionsQ = useQuery({
+    queryKey: ["trade-directions", tenantSlug, "agents-ws"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; name: string; code: string | null; is_active: boolean }>;
+      }>(`/api/${tenantSlug}/trade-directions?is_active=true`);
+      return data.data;
+    }
+  });
+
+  const tradeDirectionRows = useMemo(() => tradeDirectionsQ.data ?? [], [tradeDirectionsQ.data]);
 
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "agents-ws"],
@@ -636,6 +643,17 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
                   <TableRowActionGroup className="justify-end" ariaLabel="Agent">
                     <Button
                       type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Активные сессии"
+                      aria-label="Активные сессии"
+                      onClick={() => setSessionAgent(r)}
+                    >
+                      <MonitorSmartphone className="size-3.5" aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground hover:text-foreground"
@@ -698,7 +716,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
         onOpenChange={setAddOpen}
         warehouses={warehousesQ.data ?? []}
         branchOptions={branchOptions}
-        tradeDirectionOptions={tradeDirectionOptions}
+        tradeDirections={tradeDirectionRows}
         loading={createMut.isPending}
         onSubmit={(body) => createMut.mutate(body)}
       />
@@ -711,7 +729,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
         tenantSlug={tenantSlug}
         warehouses={warehousesQ.data ?? []}
         branchOptions={branchOptions}
-        tradeDirectionOptions={tradeDirectionOptions}
+        tradeDirections={tradeDirectionRows}
         onPatch={(id, body) => patchMut.mutateAsync({ id, body })}
         onOpenRestrictions={(r) => {
           setEditRow(null);
@@ -719,10 +737,15 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
         }}
       />
 
-      <SessionsDialog
-        agent={sessionAgent}
-        onClose={() => setSessionAgent(null)}
+      <StaffActiveSessionsDialog
+        open={sessionAgent != null}
+        onOpenChange={(open) => {
+          if (!open) setSessionAgent(null);
+        }}
         tenantSlug={tenantSlug}
+        staffKind="agent"
+        userId={sessionAgent?.id ?? null}
+        maxSessions={sessionAgent?.max_sessions ?? 2}
         onPatched={() => {
           void qc.invalidateQueries({ queryKey: ["agent", tenantSlug] });
         }}
@@ -810,7 +833,7 @@ function AgentAddDialog({
   onOpenChange,
   warehouses,
   branchOptions,
-  tradeDirectionOptions,
+  tradeDirections,
   loading,
   onSubmit
 }: {
@@ -818,7 +841,7 @@ function AgentAddDialog({
   onOpenChange: (v: boolean) => void;
   warehouses: { id: number; name: string }[];
   branchOptions: string[];
-  tradeDirectionOptions: string[];
+  tradeDirections: Array<{ id: number; name: string; code: string | null }>;
   loading: boolean;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
@@ -828,7 +851,7 @@ function AgentAddDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [warehouse_id, setWh] = useState("");
-  const [trade_direction, setTd] = useState("");
+  const [trade_direction_id, setTdId] = useState("");
   const [agent_type, setAgentType] = useState("Торговый представитель");
   const [branch, setBranch] = useState("");
   const [position, setPos] = useState("");
@@ -848,7 +871,7 @@ function AgentAddDialog({
     setPhone("");
     setEmail("");
     setWh("");
-    setTd("");
+    setTdId("");
     setAgentType("Торговый представитель");
     setBranch("");
     setPos("");
@@ -889,17 +912,18 @@ function AgentAddDialog({
             </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
-            Направление торговли
+            Направление торговли (spravochnik)
             <FilterSelect
               className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
-              emptyLabel="Направление торговли"
+              emptyLabel="Tanlanmagan"
               aria-label="Направление торговли"
-              value={trade_direction}
-              onChange={(e) => setTd(e.target.value)}
+              value={trade_direction_id}
+              onChange={(e) => setTdId(e.target.value)}
             >
-              {tradeDirectionOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {tradeDirections.map((t) => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.name}
+                  {t.code ? ` (${t.code})` : ""}
                 </option>
               ))}
             </FilterSelect>
@@ -982,7 +1006,9 @@ function AgentAddDialog({
                 phone: phone.trim() || null,
                 email: email.trim() || null,
                 warehouse_id: warehouse_id ? Number.parseInt(warehouse_id, 10) : null,
-                trade_direction: trade_direction.trim() || null,
+                trade_direction_id: trade_direction_id.trim()
+                  ? Number.parseInt(trade_direction_id.trim(), 10)
+                  : null,
                 agent_type: agent_type.trim() || null,
                 branch: branch.trim() || null,
                 position: position.trim() || null,
@@ -1012,7 +1038,7 @@ function AgentEditDialog({
   tenantSlug,
   warehouses,
   branchOptions,
-  tradeDirectionOptions,
+  tradeDirections,
   onPatch,
   onOpenRestrictions
 }: {
@@ -1021,7 +1047,7 @@ function AgentEditDialog({
   tenantSlug: string;
   warehouses: { id: number; name: string }[];
   branchOptions: string[];
-  tradeDirectionOptions: string[];
+  tradeDirections: Array<{ id: number; name: string; code: string | null }>;
   onPatch: (id: number, body: Record<string, unknown>) => Promise<unknown>;
   onOpenRestrictions: (r: AgentRow) => void;
 }) {
@@ -1041,7 +1067,7 @@ function AgentEditDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [warehouse_id, setWh] = useState("");
-  const [trade_direction, setTd] = useState("");
+  const [trade_direction_id, setTdId] = useState("");
   const [agent_type, setAgentType] = useState("");
   const [branch, setBranch] = useState("");
   const [position, setPos] = useState("");
@@ -1064,7 +1090,18 @@ function AgentEditDialog({
     setEmail(r.email ?? "");
     const wh = warehouses.find((w) => w.name === r.warehouse);
     setWh(wh ? String(wh.id) : "");
-    setTd(r.trade_direction ?? "");
+    if (r.trade_direction_id != null && r.trade_direction_id > 0) {
+      setTdId(String(r.trade_direction_id));
+    } else {
+      const legacy = (r.trade_direction ?? "").trim();
+      const match = tradeDirections.find(
+        (d) =>
+          (d.code && d.code.trim() === legacy) ||
+          d.name.trim() === legacy ||
+          legacy === `${d.name} (${d.code})`.trim()
+      );
+      setTdId(match ? String(match.id) : "");
+    }
     setAgentType(r.agent_type ?? "");
     setBranch(r.branch ?? "");
     setPos(r.position ?? "");
@@ -1075,14 +1112,7 @@ function AgentEditDialog({
     setKpi(r.kpi_color || "#ef4444");
     setPwMode(false);
     setPassword("");
-  }, [r, warehouses]);
-
-  const tdOpts = useMemo(() => {
-    const s = new Set(tradeDirectionOptions);
-    const cur = trade_direction.trim();
-    if (cur) s.add(cur);
-    return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [tradeDirectionOptions, trade_direction]);
+  }, [r, warehouses, tradeDirections]);
 
   if (!row || !r) return null;
 
@@ -1096,7 +1126,9 @@ function AgentEditDialog({
         phone: phone.trim() || null,
         email: email.trim() || null,
         warehouse_id: warehouse_id ? Number.parseInt(warehouse_id, 10) : null,
-        trade_direction: trade_direction.trim() || null,
+        trade_direction_id: trade_direction_id.trim()
+          ? Number.parseInt(trade_direction_id.trim(), 10)
+          : null,
         agent_type: agent_type.trim() || null,
         branch: branch.trim() || null,
         position: position.trim() || null,
@@ -1142,17 +1174,18 @@ function AgentEditDialog({
             </FilterSelect>
           </label>
           <label className="text-xs text-muted-foreground">
-            Направление торговли
+            Направление торговли (spravochnik)
             <FilterSelect
               className="mt-1 h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background p-2 text-sm"
-              emptyLabel="Направление торговли"
+              emptyLabel="Tanlanmagan"
               aria-label="Направление торговли"
-              value={trade_direction}
-              onChange={(e) => setTd(e.target.value)}
+              value={trade_direction_id}
+              onChange={(e) => setTdId(e.target.value)}
             >
-              {tdOpts.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {tradeDirections.map((t) => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.name}
+                  {t.code ? ` (${t.code})` : ""}
                 </option>
               ))}
             </FilterSelect>
@@ -1213,149 +1246,6 @@ function AgentEditDialog({
             onClick={() => void save()}
           >
             Сохранить
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function SessionsDialog({
-  agent,
-  onClose,
-  tenantSlug,
-  onPatched
-}: {
-  agent: AgentRow | null;
-  onClose: () => void;
-  tenantSlug: string;
-  onPatched: () => void;
-}) {
-  const [maxDraft, setMaxDraft] = useState(1);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  const sessionsQ = useQuery({
-    queryKey: ["agent-sessions", tenantSlug, agent?.id],
-    enabled: Boolean(agent),
-    queryFn: async () => {
-      const { data } = await api.get<{ data: SessionRow[] }>(
-        `/api/${tenantSlug}/agents/${agent!.id}/sessions`
-      );
-      return data.data;
-    }
-  });
-
-  useEffect(() => {
-    if (agent) {
-      setMaxDraft(agent.max_sessions);
-      setSelected(new Set());
-    }
-  }, [agent]);
-
-  const revokeMut = useMutation({
-    mutationFn: async (body: { all?: true; token_ids?: number[] }) => {
-      await api.post(`/api/${tenantSlug}/agents/${agent!.id}/sessions/revoke`, body);
-    },
-    onSuccess: () => {
-      void sessionsQ.refetch();
-      onPatched();
-      setSelected(new Set());
-    }
-  });
-
-  const saveMax = useMutation({
-    mutationFn: async () => {
-      await api.patch(`/api/${tenantSlug}/agents/${agent!.id}`, { max_sessions: maxDraft });
-    },
-    onSuccess: () => {
-      onPatched();
-    }
-  });
-
-  if (!agent) return null;
-
-  const rows = sessionsQ.data ?? [];
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Активные сессии</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-wrap items-center gap-2 border-b pb-3">
-          <span className="text-sm">Максимальное количество сессий</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.max(1, m - 1))}>
-            −
-          </Button>
-          <Input
-            className="h-8 w-14 text-center"
-            value={maxDraft}
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value, 10);
-              if (!Number.isNaN(n)) setMaxDraft(Math.min(99, Math.max(1, n)));
-            }}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.min(99, m + 1))}>
-            +
-          </Button>
-          <Button type="button" size="sm" disabled={saveMax.isPending} onClick={() => saveMax.mutate()}>
-            Сохранить
-          </Button>
-        </div>
-        <div className="max-h-[45vh] overflow-auto rounded-md border">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="w-8 px-2 py-2" />
-                <th className="px-2 py-2 text-left">Устройство</th>
-                <th className="px-2 py-2 text-left">IP</th>
-                <th className="px-2 py-2 text-left">Приложение</th>
-                <th className="px-2 py-2 text-left">Дата</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.id} className="border-t">
-                  <td className="px-2 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(s.id)}
-                      onChange={(e) => {
-                        const n = new Set(selected);
-                        if (e.target.checked) n.add(s.id);
-                        else n.delete(s.id);
-                        setSelected(n);
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">{s.device_name ?? "—"}</td>
-                  <td className="px-2 py-2 font-mono">{s.ip_address ?? "—"}</td>
-                  <td className="max-w-[12rem] truncate px-2 py-2" title={s.user_agent ?? ""}>
-                    {s.user_agent ?? "—"}
-                  </td>
-                  <td className="px-2 py-2">{new Date(s.created_at).toLocaleString("ru-RU")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <DialogFooter className="flex flex-wrap gap-2 border-0 bg-transparent p-0">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={selected.size === 0 || revokeMut.isPending}
-            onClick={() => revokeMut.mutate({ token_ids: Array.from(selected) })}
-          >
-            Завершить выбранные сессии
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={revokeMut.isPending || rows.length === 0}
-            onClick={() => revokeMut.mutate({ all: true })}
-          >
-            <LogOut className="mr-1 size-3" />
-            Завершить все сессии
           </Button>
         </DialogFooter>
       </DialogContent>

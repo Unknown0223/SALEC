@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,11 @@ import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import {
+  branchTerritoryCityDepths,
+  collectActiveNamesAtDepth,
+  maxForestDepth
+} from "@/lib/territory-tree";
 import { ChevronDown, ChevronRight, Pencil, Users } from "lucide-react";
 
 type TerritoryNode = {
@@ -39,11 +45,16 @@ type Branch = {
   territory?: string | null;
   city?: string | null;
   cashbox?: string | null;
+  cash_desk_id?: number | null;
   user_links?: { role: string; user_ids: number[] }[];
 };
 
+type CashDeskOpt = { id: number; name: string; code: string | null; is_active: boolean };
+
 type TenantProfile = {
   references: {
+    regions?: string[];
+    territory_levels?: string[];
     territory_nodes?: TerritoryNode[];
     branches?: Branch[];
   };
@@ -70,13 +81,6 @@ function sortRows(rows: Branch[]): Branch[] {
   });
 }
 
-function collectDepth(nodes: TerritoryNode[], depth: number, targetDepth: number, out: Set<string>) {
-  for (const n of nodes) {
-    if (depth === targetDepth && n.name.trim()) out.add(n.name.trim());
-    if (n.children.length) collectDepth(n.children, depth + 1, targetDepth, out);
-  }
-}
-
 export default function BranchesSettingsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
@@ -95,6 +99,7 @@ export default function BranchesSettingsPage() {
   const [territory, setTerritory] = useState("");
   const [city, setCity] = useState("");
   const [cashbox, setCashbox] = useState("");
+  const [cashDeskId, setCashDeskId] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [usersOpen, setUsersOpen] = useState(false);
   const [usersBranchId, setUsersBranchId] = useState<string | null>(null);
@@ -119,22 +124,58 @@ export default function BranchesSettingsPage() {
     }
   });
 
+  const cashDesksQ = useQuery({
+    queryKey: ["cash-desks", tenantSlug, "branches-picker"],
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("limit", "200");
+      const { data } = await api.get<{ data: CashDeskOpt[] }>(`/api/${tenantSlug}/cash-desks?${params.toString()}`);
+      return data.data;
+    }
+  });
+
+  const deskById = useMemo(() => {
+    const m = new Map<number, CashDeskOpt>();
+    for (const d of cashDesksQ.data ?? []) m.set(d.id, d);
+    return m;
+  }, [cashDesksQ.data]);
+
   const rows = useMemo(() => sortRows(profileQ.data?.references?.branches ?? []), [profileQ.data]);
   const filtered = useMemo(() => rows.filter((x) => (tab === "active" ? x.active !== false : x.active === false)), [rows, tab]);
 
   const territoryOptions = useMemo(() => {
-    const roots = new Set<string>();
-    collectDepth(profileQ.data?.references?.territory_nodes ?? [], 0, 0, roots);
-    return Array.from(roots).sort((a, b) => a.localeCompare(b));
-  }, [profileQ.data]);
+    const nodes = profileQ.data?.references?.territory_nodes ?? [];
+    const s = new Set<string>();
+    if (nodes.length > 0) {
+      const lv = profileQ.data?.references?.territory_levels ?? [];
+      const L = lv.filter((x) => typeof x === "string" && x.trim()).length;
+      const td = maxForestDepth(nodes);
+      const { territoryDepth } = branchTerritoryCityDepths(L, td);
+      for (const n of collectActiveNamesAtDepth(nodes, territoryDepth)) s.add(n);
+    } else {
+      for (const n of profileQ.data?.references?.regions ?? []) {
+        if (n.trim()) s.add(n.trim());
+      }
+    }
+    if (territory.trim()) s.add(territory.trim());
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [profileQ.data, territory]);
 
   const cityOptions = useMemo(() => {
-    const cities = new Set<string>();
-    const src = profileQ.data?.references?.territory_nodes ?? [];
-    collectDepth(src, 0, 1, cities);
-    collectDepth(src, 0, 2, cities);
-    return Array.from(cities).sort((a, b) => a.localeCompare(b));
-  }, [profileQ.data]);
+    const nodes = profileQ.data?.references?.territory_nodes ?? [];
+    const s = new Set<string>();
+    if (nodes.length > 0) {
+      const lv = profileQ.data?.references?.territory_levels ?? [];
+      const L = lv.filter((x) => typeof x === "string" && x.trim()).length;
+      const td = maxForestDepth(nodes);
+      const { cityDepth } = branchTerritoryCityDepths(L, td);
+      for (const n of collectActiveNamesAtDepth(nodes, cityDepth)) s.add(n);
+    }
+    if (city.trim()) s.add(city.trim());
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [profileQ.data, city]);
 
   const usersByRole = useMemo(() => {
     const grouped = new Map<string, SystemUser[]>();
@@ -171,6 +212,7 @@ export default function BranchesSettingsPage() {
     setTerritory("");
     setCity("");
     setCashbox("");
+    setCashDeskId("");
   }
 
   function openAdd() {
@@ -188,6 +230,7 @@ export default function BranchesSettingsPage() {
     setTerritory(row.territory ?? "");
     setCity(row.city ?? "");
     setCashbox(row.cashbox ?? "");
+    setCashDeskId(row.cash_desk_id != null && row.cash_desk_id > 0 ? String(row.cash_desk_id) : "");
     setOpen(true);
   }
 
@@ -195,6 +238,7 @@ export default function BranchesSettingsPage() {
     const n = name.trim();
     if (!n) return;
     const normalizedCode = code.trim().toUpperCase();
+    const deskNum = cashDeskId.trim() ? Number.parseInt(cashDeskId.trim(), 10) : NaN;
     const next: Branch = {
       id: editId ?? newId(),
       name: n,
@@ -204,7 +248,8 @@ export default function BranchesSettingsPage() {
       active,
       territory: territory.trim() || null,
       city: city.trim() || null,
-      cashbox: cashbox.trim() || null
+      cashbox: cashbox.trim() || null,
+      cash_desk_id: Number.isInteger(deskNum) && deskNum > 0 ? deskNum : null
     };
     const merged = editId ? rows.map((x) => (x.id === editId ? next : x)) : [...rows, next];
     saveMut.mutate(sortRows(merged));
@@ -265,6 +310,9 @@ export default function BranchesSettingsPage() {
         actions={
           <div className="flex gap-2">
             <Button size="sm" disabled={!isAdmin} onClick={openAdd}>Добавить</Button>
+            <Link href="/settings/cash-desks" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              Kassalar
+            </Link>
             <Link href="/settings" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>Katalog</Link>
           </div>
         }
@@ -297,7 +345,11 @@ export default function BranchesSettingsPage() {
                     <td className="px-3 py-2">{r.name}</td>
                     <td className="px-3 py-2">{r.territory ?? "-"}</td>
                     <td className="px-3 py-2">{r.city ?? "-"}</td>
-                    <td className="px-3 py-2">{r.cashbox ?? "-"}</td>
+                    <td className="px-3 py-2">
+                      {r.cash_desk_id != null && r.cash_desk_id > 0
+                        ? deskById.get(r.cash_desk_id)?.name ?? `#${r.cash_desk_id}`
+                        : r.cashbox ?? "—"}
+                    </td>
                     <td className="px-3 py-2">{r.sort_order ?? "-"}</td>
                     <td className="px-3 py-2">{r.code ?? "-"}</td>
                     <td className="px-3 py-2">{r.comment ?? "-"}</td>
@@ -388,8 +440,34 @@ export default function BranchesSettingsPage() {
               </FilterSelect>
             </div>
             <div className="grid gap-1.5">
-              <Label>Касса</Label>
-              <Input value={cashbox} onChange={(e) => setCashbox(e.target.value)} placeholder="Masalan: Kassa-1" />
+              <Label>Kassa (tizim)</Label>
+              <FilterSelect
+                className="h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                emptyLabel="Kassa tanlanmagan"
+                aria-label="Kassa"
+                value={cashDeskId}
+                onChange={(e) => setCashDeskId(e.target.value)}
+              >
+                {(cashDesksQ.data ?? [])
+                  .filter((d) => d.is_active !== false)
+                  .map((d) => (
+                    <option key={d.id} value={String(d.id)}>
+                      {d.name}
+                      {d.code ? ` (${d.code})` : ""}
+                    </option>
+                  ))}
+              </FilterSelect>
+              <p className="text-xs text-muted-foreground">
+                Ro‘yxat bo‘sh bo‘lsa, avval{" "}
+                <Link href="/settings/cash-desks" className="underline">
+                  kassa
+                </Link>{" "}
+                yarating.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Kassa izohi (ixtiyoriy)</Label>
+              <Input value={cashbox} onChange={(e) => setCashbox(e.target.value)} placeholder="Eski matn maydoni" />
             </div>
             <div className="grid gap-1.5">
               <div className="flex items-center justify-between">

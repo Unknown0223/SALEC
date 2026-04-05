@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
@@ -24,11 +25,18 @@ import {
   PRODUCT_ITEMS_TABLE_ID,
   productItemsExportCell
 } from "@/lib/products-catalog-columns";
-import { ListOrdered, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Ban, ListOrdered, Pencil, RefreshCw, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { CatalogInterchangeableTab } from "./catalog-interchangeable-tab";
 import { CatalogSimpleTab } from "./catalog-simple-tab";
 import { ProductQuickAddDialog } from "./product-quick-add-dialog";
+import { ProductForm } from "./product-form";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 
 const TABS = [
   { id: "items", label: "Товар" },
@@ -71,6 +79,8 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [fullProductOpen, setFullProductOpen] = useState(false);
+  const [fullProductId, setFullProductId] = useState<number | null>(null);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
 
   const tablePrefs = useUserTablePrefs({
@@ -145,9 +155,19 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
     setPage(1);
   }, [search, statusTab, pageSize, categoryId, productGroupId]);
 
-  const deleteMut = useMutation({
+  /** API `DELETE` mahsulotni bazadan olib tashlamaydi — faqat neaktiv qiladi. */
+  const deactivateMut = useMutation({
     mutationFn: async (id: number) => {
       await api.delete(`/api/${tenantSlug}/products/${id}`);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["products", tenantSlug] });
+    }
+  });
+
+  const activateMut = useMutation({
+    mutationFn: async (id: number) => {
+      await api.put(`/api/${tenantSlug}/products/${id}`, { is_active: true });
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["products", tenantSlug] });
@@ -186,6 +206,12 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
         return <span className="text-xs text-muted-foreground">{r.product_group?.name ?? "—"}</span>;
       case "unit":
         return <span className="text-xs">{r.unit}</span>;
+      case "qty_per_block":
+        return r.qty_per_block != null ? (
+          <span className="tabular-nums text-xs">{r.qty_per_block}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
       case "sort_order":
         return <span className="text-xs">{r.sort_order ?? "—"}</span>;
       case "brand":
@@ -263,7 +289,8 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
                     size="sm"
                     className="rounded-r-none"
                     onClick={() => {
-                      setQuickAddOpen(true);
+                      setFullProductId(null);
+                      setFullProductOpen(true);
                       setAddMenuOpen(false);
                     }}
                   >
@@ -290,11 +317,23 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
                       role="menuitem"
                       className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
                       onClick={() => {
+                        setFullProductId(null);
+                        setFullProductOpen(true);
+                        setAddMenuOpen(false);
+                      }}
+                    >
+                      Полная форма
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={() => {
                         setQuickAddOpen(true);
                         setAddMenuOpen(false);
                       }}
                     >
-                      Добавить
+                      Быстрое добавление
                     </button>
                     <button
                       type="button"
@@ -462,24 +501,56 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
                             className="text-muted-foreground hover:text-foreground"
                             title="Tahrirlash"
                             aria-label="Tahrirlash"
-                            onClick={() => router.push(`/products/${r.id}/edit`)}
+                            onClick={() => {
+                              setFullProductId(r.id);
+                              setFullProductOpen(true);
+                            }}
                           >
                             <Pencil className="size-3.5" aria-hidden />
                           </Button>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            disabled={deleteMut.isPending}
-                            title="O‘chirish"
-                            aria-label="O‘chirish"
-                            onClick={() => {
-                              if (window.confirm(`«${r.name}» o‘chirilsinmi?`)) deleteMut.mutate(r.id);
-                            }}
-                          >
-                            <Trash2 className="size-3.5" aria-hidden />
-                          </Button>
+                          {statusTab === "active" ? (
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              className="text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                              disabled={deactivateMut.isPending}
+                              title="Neaktiv qilish"
+                              aria-label="Neaktiv qilish"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `«${r.name}» neaktiv qilinsinmi? Ma’lumot o‘chirilmaydi — mahsulot «Не активный» ro‘yxatiga o‘tadi.`
+                                  )
+                                ) {
+                                  deactivateMut.mutate(r.id);
+                                }
+                              }}
+                            >
+                              <Ban className="size-3.5" aria-hidden />
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              className="text-emerald-800 hover:bg-emerald-500/15 hover:text-emerald-900 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
+                              disabled={activateMut.isPending}
+                              title="Faollashtirish"
+                              aria-label="Faollashtirish"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `«${r.name}» qayta faol qilinsinmi? U «Активный» ro‘yxatida ko‘rinadi.`
+                                  )
+                                ) {
+                                  activateMut.mutate(r.id);
+                                }
+                              }}
+                            >
+                              <RotateCcw className="size-3.5" aria-hidden />
+                            </Button>
+                          )}
                         </TableRowActionGroup>
                       ) : null}
                     </td>
@@ -526,6 +597,42 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
         tenantSlug={tenantSlug}
         onDone={() => void qc.invalidateQueries({ queryKey: ["products", tenantSlug] })}
       />
+
+      <Dialog
+        open={fullProductOpen}
+        onOpenChange={(o) => {
+          setFullProductOpen(o);
+          if (!o) setFullProductId(null);
+        }}
+      >
+        <DialogContent
+          className="max-h-[min(90vh,900px)] w-full max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
+          showCloseButton
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {fullProductId != null ? "Редактировать товар" : "Новый товар"}
+            </DialogTitle>
+          </DialogHeader>
+          {tenantSlug ? (
+            <ProductForm
+              tenantSlug={tenantSlug}
+              mode={fullProductId != null ? "edit" : "create"}
+              productId={fullProductId}
+              layout="modal"
+              onSuccess={() => {
+                setFullProductOpen(false);
+                setFullProductId(null);
+                void qc.invalidateQueries({ queryKey: ["products", tenantSlug] });
+              }}
+              onCancel={() => {
+                setFullProductOpen(false);
+                setFullProductId(null);
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

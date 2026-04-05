@@ -41,7 +41,14 @@ export const settingsSections: SettingsSection[] = [
     items: [
       makeItem("osnovnye-nastroiki", "Территория", "available", 0),
       makeItem("osnovnye-nastroiki", "Единицы измерения", "available", 1),
-      makeItem("osnovnye-nastroiki", "Филиалы", "available", 2)
+      makeItem("osnovnye-nastroiki", "Поставщики", "available", 2),
+      makeItem("osnovnye-nastroiki", "Филиалы", "available", 3),
+      {
+        title: "Должности",
+        slug: "dolzhnosti-osnovnye",
+        href: "/settings/catalog/osnovnye-nastroiki/dolzhnosti-osnovnye",
+        status: "available"
+      }
     ]
   },
   {
@@ -58,7 +65,42 @@ export const settingsSections: SettingsSection[] = [
     slug: "produkty",
     items: [
       makeItem("produkty", "Категория продукта", "available", 0),
-      makeItem("produkty", "Продукт", "available", 1)
+      {
+        title: "Продукт",
+        slug: "produkt-tab",
+        href: "/settings/products",
+        status: "available"
+      },
+      {
+        title: "Группа товаров",
+        slug: "gruppa-tovarov-tab",
+        href: "/settings/products?tab=product-groups",
+        status: "available"
+      },
+      {
+        title: "Группа взаимозаменяемых",
+        slug: "gruppa-vzaimozamenyaemykh-tab",
+        href: "/settings/products?tab=interchangeable",
+        status: "available"
+      },
+      {
+        title: "Бренд",
+        slug: "brend-tab",
+        href: "/settings/products?tab=brands",
+        status: "available"
+      },
+      {
+        title: "Производитель",
+        slug: "proizvoditel-tab",
+        href: "/settings/products?tab=manufacturers",
+        status: "available"
+      },
+      {
+        title: "Сегменты",
+        slug: "segmenty-tab",
+        href: "/settings/products?tab=segments",
+        status: "available"
+      }
     ]
   },
   {
@@ -68,8 +110,7 @@ export const settingsSections: SettingsSection[] = [
       makeItem("finansy", "Валюты", "available", 0),
       makeItem("finansy", "Способ оплаты", "available", 1),
       makeItem("finansy", "Тип цены", "available", 2),
-      makeItem("finansy", "Цена", "available", 3),
-      makeItem("finansy", "Кассы", "available", 4)
+      makeItem("finansy", "Цена", "available", 3)
     ]
   },
   {
@@ -85,47 +126,52 @@ export const settingsSections: SettingsSection[] = [
     title: "Бонусы и скидки",
     slug: "bonusy-i-skidki",
     items: [
-      makeItem("bonusy-i-skidki", "Бонусы", "available", 0),
+      {
+        title: "Бонусы",
+        slug: "bonus-pravila",
+        href: "/settings/bonus-rules",
+        status: "available"
+      },
       makeItem("bonusy-i-skidki", "Скидки", "available", 1),
       makeItem("bonusy-i-skidki", "RLP бонусы", "available", 2),
-      makeItem("bonusy-i-skidki", "Надбавки и вычеты к зарплате", "planned", 3)
+      makeItem("bonusy-i-skidki", "Надбавки и вычеты к зарплате", "available", 3)
     ]
   },
   {
     title: "Причины и категории",
     slug: "prichiny-i-kategorii",
     items: [
-      makeItem("prichiny-i-kategorii", "Причины заявок", "planned", 0),
+      makeItem("prichiny-i-kategorii", "Причины заявок", "available", 0),
       makeItem("prichiny-i-kategorii", "Причины отказа", "available", 1),
-      makeItem("prichiny-i-kategorii", "Причины отмены оплаты", "planned", 2),
-      makeItem("prichiny-i-kategorii", "Примечание к заказу", "planned", 3),
-      makeItem("prichiny-i-kategorii", "Типы задач", "planned", 4),
-      makeItem("prichiny-i-kategorii", "Категория фотоотчёта", "planned", 5),
-      makeItem("prichiny-i-kategorii", "Категория доходов/расходов", "planned", 6)
+      makeItem("prichiny-i-kategorii", "Причины отмены оплаты", "available", 2),
+      makeItem("prichiny-i-kategorii", "Примечание к заказу", "available", 3),
+      makeItem("prichiny-i-kategorii", "Типы задач", "available", 4),
+      makeItem("prichiny-i-kategorii", "Категория фотоотчёта", "available", 5),
+      makeItem("prichiny-i-kategorii", "Категория доходов/расходов", "available", 6)
     ]
   },
   {
     title: "Инвентарь и упаковка",
     slug: "inventar-i-upakovka",
     items: [
-      makeItem("inventar-i-upakovka", "Тип инвентаря", "planned", 0),
-      makeItem("inventar-i-upakovka", "Тип коробки", "planned", 1)
+      makeItem("inventar-i-upakovka", "Тип инвентаря", "available", 0),
+      makeItem("inventar-i-upakovka", "Тип коробки", "available", 1)
     ]
   },
   {
     title: "Оборудование",
     slug: "oborudovanie",
     items: [
-      makeItem("oborudovanie", "Принтеры", "planned", 0),
-      makeItem("oborudovanie", "Тара", "planned", 1)
+      makeItem("oborudovanie", "Принтеры", "available", 0),
+      makeItem("oborudovanie", "Тара", "available", 1)
     ]
   },
   {
     title: "База знаний",
     slug: "baza-znanii",
     items: [
-      makeItem("baza-znanii", "Тип базы знания", "planned", 0),
-      makeItem("baza-znanii", "База знаний", "planned", 1)
+      makeItem("baza-znanii", "Тип базы знания", "available", 0),
+      makeItem("baza-znanii", "База знаний", "available", 1)
     ]
   },
   {
@@ -147,12 +193,19 @@ export const settingsSections: SettingsSection[] = [
 const existingHrefByItemTitle: Record<string, string> = {
   "территория": "/settings/territories",
   "единицы измерения": "/settings/units",
+  "настройка счёта": "/settings/catalog/osnovnye-nastroiki/item-3",
   "филиалы": "/settings/branches",
+  "должности": "/settings/web-staff-position-presets",
   "формат клиента": "/settings/client-formats",
   "тип клиента": "/settings/client-types",
   "категория клиента": "/settings/client-categories",
   "категория продукта": "/settings/product-categories",
   "продукт": "/settings/products",
+  "группа товаров": "/settings/products?tab=product-groups",
+  "группа взаимозаменяемых": "/settings/products?tab=interchangeable",
+  "бренд": "/settings/products?tab=brands",
+  "производитель": "/settings/products?tab=manufacturers",
+  "сегменты": "/settings/products?tab=segments",
   "способ оплаты": "/settings/payment-methods",
   "тип цены": "/settings/price-types",
   "валюты": "/settings/currencies",
@@ -161,7 +214,7 @@ const existingHrefByItemTitle: Record<string, string> = {
   "направление торговли": "/settings/sales-directions/trade",
   "канал продаж": "/settings/sales-directions/sales-channels",
   "группа kpi": "/settings/sales-directions/kpi-groups",
-  "бонусы": "/settings/bonus-stack",
+  "бонусы": "/settings/bonus-rules",
   "скидки": "/settings/bonus-stack",
   "rlp бонусы": "/settings/bonus-stack",
   "причины отказа": "/settings/company#ref-return-reasons",
@@ -181,7 +234,21 @@ const existingHrefByItemTitle: Record<string, string> = {
   "должности веб-сотрудников": "/settings/web-staff-position-presets",
   "должности веб сотрудников": "/settings/web-staff-position-presets",
   "lavozimlar": "/settings/web-staff-position-presets",
-  "веб ходим лавозимлари": "/settings/web-staff-position-presets"
+  "веб ходим лавозимлари": "/settings/web-staff-position-presets",
+  "причины заявок": "/settings/reasons/request-types",
+  "причины отмены оплаты": "/settings/reasons/cancel-payment-reasons",
+  "примечание к заказу": "/settings/reasons/order-notes",
+  "типы задач": "/settings/reasons/task-types",
+  "категория фотоотчёта": "/settings/reasons/photo-categories",
+  "категория доходов/расходов": "/settings/reasons/finance-categories",
+  "тип инвентаря": "/settings/inventory/type",
+  "тип коробки": "/settings/inventory/box-type",
+  "принтеры": "/settings/equipment/printers",
+  "тара": "/settings/equipment/tare",
+  "тип базы знания": "/settings/knowledge-base/type",
+  "база знаний": "/settings/knowledge-base/base",
+  "надбавки и вычеты к зарплате": "/settings/payroll/adjustments",
+  "поставщики": "/settings/suppliers"
 };
 
 export function resolveSettingsItemHref(item: SettingsItem): string {

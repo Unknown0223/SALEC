@@ -42,14 +42,15 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
-    --sidebar: oklch(0.2 0.035 255);
-    --sidebar-foreground: oklch(0.93 0.01 250);
-    --sidebar-primary: oklch(0.58 0.13 175);
-    --sidebar-primary-foreground: oklch(0.99 0.01 175);
-    --sidebar-accent: oklch(0.28 0.04 255);
-    --sidebar-accent-foreground: oklch(0.95 0.01 250);
-    --sidebar-border: oklch(0.32 0.03 255);
-    --sidebar-ring: oklch(0.58 0.13 175);
+    /* To‘q yashil sidebar (referens SALESDOC) */
+    --sidebar: oklch(0.32 0.08 155);
+    --sidebar-foreground: oklch(0.98 0.01 155);
+    --sidebar-primary: oklch(0.92 0.12 85);
+    --sidebar-primary-foreground: oklch(0.22 0.04 155);
+    --sidebar-accent: oklch(0.38 0.07 155);
+    --sidebar-accent-foreground: oklch(0.98 0.01 155);
+    --sidebar-border: oklch(0.4 0.06 155);
+    --sidebar-ring: oklch(0.55 0.08 155);
   }
   .dark {
     --background: oklch(0.16 0.02 255);
@@ -75,14 +76,14 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar: oklch(0.28 0.07 155);
+    --sidebar-foreground: oklch(0.96 0.01 155);
+    --sidebar-primary: oklch(0.88 0.1 85);
+    --sidebar-primary-foreground: oklch(0.2 0.04 155);
+    --sidebar-accent: oklch(0.35 0.06 155);
+    --sidebar-accent-foreground: oklch(0.98 0.01 155);
+    --sidebar-border: oklch(0.38 0.05 155);
+    --sidebar-ring: oklch(0.52 0.08 155);
   }
   * {
     @apply border-border;

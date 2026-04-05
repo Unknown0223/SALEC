@@ -185,6 +185,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const [licenseUntil, setLicenseUntil] = useState("");
   const [workingHours, setWorkingHours] = useState("");
   const [region, setRegion] = useState("");
+  const [city, setCity] = useState("");
   const [district, setDistrict] = useState("");
   const [neighborhood, setNeighborhood] = useState("");
   const [street, setStreet] = useState("");
@@ -253,6 +254,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         client_type_codes: string[];
         regions: string[];
         districts: string[];
+        cities: string[];
         neighborhoods: string[];
         zones: string[];
         client_formats: string[];
@@ -285,6 +287,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     () => mergeRefOptions(productCategoryRef, refsQ.data?.product_category_refs),
     [productCategoryRef, refsQ.data?.product_category_refs]
   );
+  const cityOpts = useMemo(() => mergeRefOptions(city, refsQ.data?.cities), [city, refsQ.data?.cities]);
   const distOpts = useMemo(() => mergeRefOptions(district, refsQ.data?.districts), [district, refsQ.data?.districts]);
   const neiOpts = useMemo(
     () => mergeRefOptions(neighborhood, refsQ.data?.neighborhoods),
@@ -316,6 +319,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     setLicenseUntil(isoToDateInput(client.license_until));
     setWorkingHours(client.working_hours ?? "");
     setRegion(client.region ?? "");
+    setCity(client.city ?? "");
     setDistrict(client.district ?? "");
     setNeighborhood(client.neighborhood ?? "");
     setStreet(client.street ?? "");
@@ -397,6 +401,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         license_until: licenseUntil.trim() ? dateInputToIso(licenseUntil) : null,
         working_hours: workingHours.trim() || null,
         region: region.trim() || null,
+        city: city.trim() || null,
         district: district.trim() || null,
         neighborhood: neighborhood.trim() || null,
         street: street.trim() || null,
@@ -713,10 +718,30 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
               <Caption>Manzil (batafsil, ixtiyoriy)</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
                 Oldindan ro‘yxat:{" "}
-                <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">mijoz spravochniklari</SpravochnikAdminLink>
+                <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">mijoz spravochniklari</SpravochnikAdminLink>
                 . Mavjud mijozlardagi qiymatlar ham tanlovga qo‘shiladi.
               </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="mb-0">Shahar (gorod)</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">Qiymatlar</SpravochnikAdminLink>
+                  </div>
+                  <FilterSelect
+                    className={cn(selectCls, "min-w-0 max-w-none")}
+                    emptyLabel="Shahar"
+                    aria-label="Shahar"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    {cityOpts.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="mb-0">Tuman</Label>

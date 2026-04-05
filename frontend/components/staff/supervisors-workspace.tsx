@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -19,7 +20,8 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
-import { ListOrdered, LogOut, Pencil, RefreshCw, Settings2, UserMinus } from "lucide-react";
+import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
+import { ListOrdered, Pencil, RefreshCw, Settings2, UserMinus } from "lucide-react";
 
 export type SuperviseeRow = { id: number; fio: string; code: string | null };
 
@@ -41,14 +43,6 @@ export type SupervisorRow = {
   email: string | null;
   kpi_color: string | null;
   consignment: boolean;
-};
-
-type SessionRow = {
-  id: number;
-  device_name: string | null;
-  ip_address: string | null;
-  user_agent: string | null;
-  created_at: string;
 };
 
 type TenantProfile = {
@@ -608,10 +602,13 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
         onPatch={(id, body) => patchMut.mutateAsync({ id, body })}
       />
 
-      <SupervisorSessionsDialog
-        supervisor={sessionSup}
-        onClose={() => setSessionSup(null)}
+      <StaffActiveSessionsDialog
+        open={sessionSup != null}
+        onOpenChange={(o) => !o && setSessionSup(null)}
         tenantSlug={tenantSlug}
+        staffKind="supervisor"
+        userId={sessionSup?.id ?? null}
+        maxSessions={sessionSup?.max_sessions ?? 2}
         onPatched={() => {
           void qc.invalidateQueries({ queryKey: ["supervisors", tenantSlug] });
         }}
@@ -842,145 +839,3 @@ function SupervisorEditDialog({
   );
 }
 
-function SupervisorSessionsDialog({
-  supervisor,
-  onClose,
-  tenantSlug,
-  onPatched
-}: {
-  supervisor: SupervisorRow | null;
-  onClose: () => void;
-  tenantSlug: string;
-  onPatched: () => void;
-}) {
-  const [maxDraft, setMaxDraft] = useState(1);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  const sessionsQ = useQuery({
-    queryKey: ["supervisor-sessions", tenantSlug, supervisor?.id],
-    enabled: Boolean(supervisor),
-    queryFn: async () => {
-      const { data } = await api.get<{ data: SessionRow[] }>(
-        `/api/${tenantSlug}/supervisors/${supervisor!.id}/sessions`
-      );
-      return data.data;
-    }
-  });
-
-  useEffect(() => {
-    if (supervisor) {
-      setMaxDraft(supervisor.max_sessions);
-      setSelected(new Set());
-    }
-  }, [supervisor]);
-
-  const revokeMut = useMutation({
-    mutationFn: async (body: { all?: true; token_ids?: number[] }) => {
-      await api.post(`/api/${tenantSlug}/supervisors/${supervisor!.id}/sessions/revoke`, body);
-    },
-    onSuccess: () => {
-      void sessionsQ.refetch();
-      onPatched();
-      setSelected(new Set());
-    }
-  });
-
-  const saveMax = useMutation({
-    mutationFn: async () => {
-      await api.patch(`/api/${tenantSlug}/supervisors/${supervisor!.id}`, { max_sessions: maxDraft });
-    },
-    onSuccess: () => {
-      onPatched();
-    }
-  });
-
-  if (!supervisor) return null;
-
-  const rows = sessionsQ.data ?? [];
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Активные сессии</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-wrap items-center gap-2 border-b pb-3">
-          <span className="text-sm">Максимальное количество сессий</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.max(1, m - 1))}>
-            −
-          </Button>
-          <Input
-            className="h-8 w-14 text-center"
-            value={maxDraft}
-            onChange={(e) => {
-              const n = Number.parseInt(e.target.value, 10);
-              if (!Number.isNaN(n)) setMaxDraft(Math.min(99, Math.max(1, n)));
-            }}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={() => setMaxDraft((m) => Math.min(99, m + 1))}>
-            +
-          </Button>
-          <Button type="button" size="sm" disabled={saveMax.isPending} onClick={() => saveMax.mutate()}>
-            Сохранить
-          </Button>
-        </div>
-        <div className="max-h-[45vh] overflow-auto rounded-md border">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="w-8 px-2 py-2" />
-                <th className="px-2 py-2 text-left">Устройство</th>
-                <th className="px-2 py-2 text-left">IP</th>
-                <th className="px-2 py-2 text-left">Приложение</th>
-                <th className="px-2 py-2 text-left">Дата</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.id} className="border-t">
-                  <td className="px-2 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(s.id)}
-                      onChange={(e) => {
-                        const n = new Set(selected);
-                        if (e.target.checked) n.add(s.id);
-                        else n.delete(s.id);
-                        setSelected(n);
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">{s.device_name ?? "—"}</td>
-                  <td className="px-2 py-2 font-mono">{s.ip_address ?? "—"}</td>
-                  <td className="max-w-[12rem] truncate px-2 py-2" title={s.user_agent ?? ""}>
-                    {s.user_agent ?? "—"}
-                  </td>
-                  <td className="px-2 py-2">{new Date(s.created_at).toLocaleString("ru-RU")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <DialogFooter className="flex flex-wrap gap-2 border-0 bg-transparent p-0">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={selected.size === 0 || revokeMut.isPending}
-            onClick={() => revokeMut.mutate({ token_ids: Array.from(selected) })}
-          >
-            Завершить выбранные сессии
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={revokeMut.isPending || rows.length === 0}
-            onClick={() => revokeMut.mutate({ all: true })}
-          >
-            <LogOut className="mr-1 size-3" />
-            Завершить все сессии
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

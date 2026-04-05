@@ -8,6 +8,7 @@ export const PRODUCT_ITEMS_COLUMN_IDS = [
   "category",
   "product_group",
   "unit",
+  "qty_per_block",
   "sort_order",
   "brand",
   "segment",
@@ -22,6 +23,7 @@ const LABELS: Record<(typeof PRODUCT_ITEMS_COLUMN_IDS)[number], string> = {
   category: "Категория",
   product_group: "Группа",
   unit: "Ед.",
+  qty_per_block: "В блоке",
   sort_order: "Сорт.",
   brand: "Бренд",
   segment: "Сегмент",
@@ -51,6 +53,8 @@ export function productItemsExportCell(row: ProductRow, colId: string): string {
       return row.product_group?.name ?? "";
     case "unit":
       return row.unit;
+    case "qty_per_block":
+      return row.qty_per_block != null ? String(row.qty_per_block) : "";
     case "sort_order":
       return row.sort_order != null ? String(row.sort_order) : "";
     case "brand":

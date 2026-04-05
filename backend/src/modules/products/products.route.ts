@@ -313,6 +313,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
     }
   );
 
+  /** Mahsulotni fizik o‘chirmaydi — `is_active: false` (neaktiv ro‘yxatga o‘tadi). */
   app.delete(
     "/api/:slug/products/:id",
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },

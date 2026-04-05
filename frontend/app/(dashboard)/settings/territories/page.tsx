@@ -2,7 +2,8 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import {
   Dialog,
@@ -28,11 +29,12 @@ import {
   type TerritoryNode,
   updateNode
 } from "@/lib/territory-tree";
+import { mergeTerritoryBundle } from "@shared/territory-lalaku-seed";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, ChevronDown, ChevronRight, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type TenantProfile = {
   references: {
@@ -41,55 +43,18 @@ type TenantProfile = {
   };
 };
 
+/** `npm run import:once` dagi zona/viloyatlar bilan bir xil (shared/territory-lalaku-seed). */
 function sampleForest(): TerritoryNode[] {
-  const id = () => newTerritoryId();
-  return [
-    {
-      id: id(),
-      name: "FV",
-      children: [
-        {
-          id: id(),
-          name: "ANDIJON VILOYATI",
-          children: [
-            { id: id(), name: "ANDIJON SHAXAR", children: [] },
-            { id: id(), name: "ASAKA", children: [] },
-            { id: id(), name: "BULOQBOSHI", children: [] }
-          ]
-        }
-      ]
-    },
-    {
-      id: id(),
-      name: "QOZOG'ISTON",
-      children: [
-        {
-          id: id(),
-          name: "Almaty",
-          children: [{ id: id(), name: "Auezov District", children: [] }]
-        }
-      ]
-    },
-    {
-      id: id(),
-      name: "TOSHKENT",
-      children: [
-        {
-          id: id(),
-          name: "Chilonzor",
-          children: [{ id: id(), name: "1-kvartal", children: [] }]
-        }
-      ]
-    },
-    { id: id(), name: "SAUDIYA ARABISTON", children: [] },
-    { id: id(), name: "SOUTH-WEST", children: [] },
-    { id: id(), name: "W", children: [] }
-  ];
+  return mergeTerritoryBundle([]) as TerritoryNode[];
 }
 
 type TreeRowProps = {
   node: TerritoryNode;
   depth: number;
+  /** Har bir ustunda vertikal chiziq: ota-onaning pastida aka-uka bormi (`depth - 1` ta) */
+  verticalMask: boolean[];
+  /** O‘z darajasida oxirgi farzandmi (├ vs └) */
+  isLastChild: boolean;
   expanded: Set<string>;
   toggle: (id: string) => void;
   isAdmin: boolean;
@@ -101,9 +66,60 @@ type TreeRowProps = {
   onDelete: (id: string) => void;
 };
 
+const TREE_GUIDE_W = "w-[22px]";
+const TREE_LINE = "bg-zinc-300 dark:bg-zinc-600";
+
+/** Vertikal «yo‘l» ustunlari + oxirgi L-burchak */
+function TerritoryTreeGuides({
+  depth,
+  verticalMask,
+  isLastChild
+}: {
+  depth: number;
+  verticalMask: boolean[];
+  isLastChild: boolean;
+}) {
+  if (depth === 0) return null;
+
+  const contCount = depth - 1;
+  const cols: ReactNode[] = [];
+  for (let j = 0; j < contCount; j++) {
+    const show = verticalMask[j] === true;
+    cols.push(
+      <div
+        key={`v-${j}`}
+        className={cn("relative min-h-8 shrink-0 self-stretch", TREE_GUIDE_W)}
+        aria-hidden
+      >
+        {show ? (
+          <div
+            className={cn("absolute inset-y-0 left-1/2 w-px -translate-x-1/2", TREE_LINE)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+  cols.push(
+    <div
+      key="elbow"
+      className={cn("relative min-h-8 shrink-0 self-stretch", TREE_GUIDE_W)}
+      aria-hidden
+    >
+      <div className={cn("absolute left-1/2 top-0 h-1/2 w-px -translate-x-1/2", TREE_LINE)} />
+      <div className={cn("absolute left-1/2 right-0 top-1/2 h-px", TREE_LINE)} />
+      {!isLastChild ? (
+        <div className={cn("absolute bottom-0 left-1/2 top-1/2 w-px -translate-x-1/2", TREE_LINE)} />
+      ) : null}
+    </div>
+  );
+  return <div className="flex shrink-0 items-stretch">{cols}</div>;
+}
+
 function TerritoryTreeRow({
   node,
   depth,
+  verticalMask,
+  isLastChild,
   expanded,
   toggle,
   isAdmin,
@@ -116,41 +132,47 @@ function TerritoryTreeRow({
 }: TreeRowProps) {
   const isOpen = expanded.has(node.id);
   const hasChildren = node.children.length > 0;
+  const sortedChildren = sortForest(node.children);
 
   return (
     <div className="select-none">
       <div
         className={cn(
-          "group flex min-h-8 items-center gap-1 rounded-md py-0.5 pr-1",
-          depth > 0 && "ml-2 border-l-2 border-teal-500/45 pl-2"
+          "group flex min-h-8 items-stretch rounded-md py-0.5 pr-1",
+          "hover:bg-teal-500/[0.08] dark:hover:bg-teal-500/10"
         )}
       >
-        <button
-          type="button"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          onClick={() => (hasChildren ? toggle(node.id) : undefined)}
-          disabled={!hasChildren}
-          aria-label={isOpen ? "Yig‘ish" : "Yoyish"}
-        >
-          {hasChildren ? (
-            isOpen ? (
-              <ChevronDown className="size-4" />
-            ) : (
-              <ChevronRight className="size-4" />
-            )
-          ) : (
-            <span className="size-4" />
-          )}
-        </button>
+        <TerritoryTreeGuides depth={depth} verticalMask={verticalMask} isLastChild={isLastChild} />
 
-        <span className="flex-1 truncate text-sm font-medium">{node.name || "—"}</span>
-
-        {isAdmin ? (
-          <div
-            className={cn(
-              "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-            )}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <button
+            type="button"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={() => (hasChildren ? toggle(node.id) : undefined)}
+            disabled={!hasChildren}
+            aria-label={isOpen ? "Yig‘ish" : "Yoyish"}
           >
+            {hasChildren ? (
+              isOpen ? (
+                <ChevronDown className="size-4" />
+              ) : (
+                <ChevronRight className="size-4" />
+              )
+            ) : (
+              <span className="size-4" />
+            )}
+          </button>
+
+          <div className="flex min-w-0 flex-1 items-center justify-start gap-1">
+            <span className="min-w-0 shrink truncate text-[13px] font-medium uppercase tracking-wide text-foreground">
+              {node.name || "—"}
+            </span>
+            {isAdmin ? (
+              <div
+                className={cn(
+                  "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                )}
+              >
             <Button
               type="button"
               size="icon-sm"
@@ -207,17 +229,21 @@ function TerritoryTreeRow({
             >
               <Trash2 className="size-4" />
             </Button>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </div>
       </div>
 
       {isOpen && hasChildren ? (
         <div className="space-y-0">
-          {node.children.map((ch) => (
+          {sortedChildren.map((ch, idx) => (
             <TerritoryTreeRow
               key={ch.id}
               node={ch}
               depth={depth + 1}
+              verticalMask={[...verticalMask, !isLastChild]}
+              isLastChild={idx === sortedChildren.length - 1}
               expanded={expanded}
               toggle={toggle}
               isAdmin={isAdmin}
@@ -441,12 +467,14 @@ export default function TerritoriesSettingsPage() {
                   Hozircha bo‘sh. Yuqoridagi + yoki «Управление территории» dan test ma’lumot yuklang.
                 </p>
               ) : (
-                <div className="space-y-0.5">
-                  {sortForest(nodes).map((n) => (
+                <div className="space-y-0">
+                  {sortForest(nodes).map((n, rootIdx, roots) => (
                     <TerritoryTreeRow
                       key={n.id}
                       node={n}
                       depth={0}
+                      verticalMask={[]}
+                      isLastChild={rootIdx === roots.length - 1}
                       expanded={expanded}
                       toggle={toggle}
                       isAdmin={isAdmin}
@@ -489,13 +517,14 @@ export default function TerritoriesSettingsPage() {
                 <p className="mb-3 text-xs text-muted-foreground">
                   Bu yerda faqat darajalar ro‘yxati. Daraxt tuzilmasini «Территория» tabida to‘g‘ridan-to‘g‘ri tahrirlaysiz.
                 </p>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid max-w-xl gap-2">
                   {levels.map((lvl, idx) => (
-                    <div key={`lvl-${idx + 1}`} className="flex items-center gap-2">
+                    <div key={`lvl-${idx}-${lvl.slice(0, 8)}`} className="flex items-center gap-2">
                       <span className="flex size-7 shrink-0 items-center justify-center rounded bg-teal-600/90 text-xs font-bold text-white">
                         {idx + 1}
                       </span>
                       <Input
+                        className="min-w-0 flex-1"
                         value={lvl}
                         onChange={(e) => {
                           const next = [...levels];
@@ -504,6 +533,17 @@ export default function TerritoriesSettingsPage() {
                         }}
                         disabled={!isAdmin || saveMut.isPending}
                       />
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        title="Darajani olib tashlash"
+                        disabled={!isAdmin || saveMut.isPending || levels.length <= 1}
+                        onClick={() => setLevels((p) => p.filter((_, i) => i !== idx))}
+                      >
+                        <Trash2 className="size-4" aria-hidden />
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -518,7 +558,7 @@ export default function TerritoriesSettingsPage() {
                     const s = sampleForest();
                     setNodes(sortForest(s));
                     setExpanded(new Set(s.map((x) => x.id)));
-                    setMsg("Namuna (FV, QOZOG'ISTON, TOSHKENT + …) yuklandi. Saqlashni bosing.");
+                    setMsg("Namuna (Lalaku zona/viloyatlar, import:once bilan bir xil) yuklandi. Saqlashni bosing.");
                   }}
                 >
                   Test ma’lumot (namuna daraxt)

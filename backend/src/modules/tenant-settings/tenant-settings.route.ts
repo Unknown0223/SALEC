@@ -43,6 +43,7 @@ type BranchPatch = {
   territory?: string | null;
   city?: string | null;
   cashbox?: string | null;
+  cash_desk_id?: number | null;
   user_links?: {
     role: string;
     user_ids: number[];
@@ -148,6 +149,7 @@ const branchSchema: z.ZodType<BranchPatch> = z.object({
   territory: z.string().max(500).nullable().optional(),
   city: z.string().max(500).nullable().optional(),
   cashbox: z.string().max(500).nullable().optional(),
+  cash_desk_id: z.number().int().positive().nullable().optional(),
   user_links: z
     .array(
       z.object({
@@ -177,6 +179,7 @@ const profilePatchSchema = z
         sales_channels: z.array(z.string()).optional(),
         client_product_category_refs: z.array(z.string()).optional(),
         client_districts: z.array(z.string()).optional(),
+        client_cities: z.array(z.string()).optional(),
         client_neighborhoods: z.array(z.string()).optional(),
         client_zones: z.array(z.string()).optional(),
         client_logistics_services: z.array(z.string()).optional(),
@@ -249,6 +252,12 @@ export async function registerTenantSettingsRoutes(app: FastifyInstance) {
       } catch (e) {
         if (e instanceof Error && e.message === "NOT_FOUND") {
           return reply.status(404).send({ error: "NotFound" });
+        }
+        if (e instanceof Error && e.message === "INVALID_BRANCH_CASH_DESK") {
+          return reply.status(400).send({ error: "InvalidBranchCashDesk" });
+        }
+        if (e instanceof Error && e.message === "DUPLICATE_BRANCH_CASH_DESK") {
+          return reply.status(400).send({ error: "DuplicateBranchCashDesk" });
         }
         throw e;
       }

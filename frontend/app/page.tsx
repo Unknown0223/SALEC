@@ -28,7 +28,7 @@ export default function Home() {
             Mahsulotlar
           </Link>
           <Link
-            href="/bonus-rules/active"
+            href="/settings/bonus-rules/active"
             className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted"
           >
             Bonus qoidalari

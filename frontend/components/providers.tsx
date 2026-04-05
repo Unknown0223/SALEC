@@ -1,5 +1,6 @@
 "use client";
 
+import { isApiUnreachable } from "@/lib/error-utils";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -13,7 +14,11 @@ function makeQueryClient() {
         gcTime: 15 * 60 * 1000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
-        retry: 1
+        /** Backend o‘chiq bo‘lsa qayta urinmasin — konsoldagi ERR_CONNECTION_REFUSED takrorini kamaytiradi */
+        retry: (failureCount, error) => {
+          if (isApiUnreachable(error)) return false;
+          return failureCount < 1;
+        }
       }
     }
   });

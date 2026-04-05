@@ -154,6 +154,46 @@ function sortKey(node: TerritoryNode): [number, string] {
   return [order, node.name.toLocaleLowerCase()];
 }
 
+/** Daraxtning eng chuqur qatlami (1 = faqat ildiz). */
+export function maxForestDepth(nodes: TerritoryNode[]): number {
+  if (!nodes.length) return 0;
+  let m = 1;
+  for (const n of nodes) {
+    if (n.children?.length) m = Math.max(m, 1 + maxForestDepth(n.children));
+  }
+  return m;
+}
+
+/** Faol tugunlar nomini berilgan chuqurlikda (0 = ildiz). */
+export function collectActiveNamesAtDepth(nodes: TerritoryNode[], targetDepth: number): string[] {
+  const out = new Set<string>();
+  const walk = (list: TerritoryNode[], d: number) => {
+    for (const n of list) {
+      const active = n.active !== false;
+      if (active && d === targetDepth && n.name.trim()) out.add(n.name.trim());
+      if (n.children?.length) walk(n.children, d + 1);
+    }
+  };
+  walk(nodes, 0);
+  return Array.from(out).sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/**
+ * `territory_levels` va daraxt chuqurligi — filial «Территория» / «shahar» uchun indekslar.
+ * Backend `territoryRegionPickerNames` bilan bir xil mantiq.
+ */
+export function branchTerritoryCityDepths(
+  levelCount: number,
+  treeDepth: number
+): { territoryDepth: number; cityDepth: number } {
+  if (levelCount >= 3) return { territoryDepth: 1, cityDepth: 2 };
+  if (levelCount === 2) return { territoryDepth: 0, cityDepth: 1 };
+  if (levelCount === 1) return { territoryDepth: 0, cityDepth: 1 };
+  if (treeDepth >= 3) return { territoryDepth: 1, cityDepth: 2 };
+  if (treeDepth >= 2) return { territoryDepth: 0, cityDepth: 1 };
+  return { territoryDepth: 0, cityDepth: 1 };
+}
+
 export function sortForest(nodes: TerritoryNode[]): TerritoryNode[] {
   const sorted = cloneForest(nodes);
   const walk = (list: TerritoryNode[]) => {

@@ -10,7 +10,12 @@ import { registerOrderRoutes } from "./modules/orders/orders.route";
 import { registerOrderStreamRoutes } from "./modules/orders/order-stream.route";
 import { registerReferenceRoutes } from "./modules/reference/reference.route";
 import { registerTenantSettingsRoutes } from "./modules/tenant-settings/tenant-settings.route";
+import { registerGoodsReceiptRoutes } from "./modules/stock/goods-receipt.route";
 import { registerStockRoutes } from "./modules/stock/stock.route";
+import { registerSupplierRoutes } from "./modules/stock/suppliers.route";
+import { registerDashboardRoutes } from "./modules/dashboard/dashboard.route";
+import { registerPaymentRoutes } from "./modules/payments/payments.route";
+import { registerSalesReturnRoutes } from "./modules/returns/sales-returns.route";
 import { registerCashDeskRoutes } from "./modules/cash-desks/cash-desks.route";
 import { registerProductCatalogRoutes } from "./modules/products/product-catalog.route";
 import { registerProductPriceRoutes } from "./modules/products/product-prices.route";
@@ -19,6 +24,15 @@ import { registerAuditEventRoutes } from "./modules/audit-events/audit-events.ro
 import { registerUserUiRoutes } from "./modules/users/user-ui.route";
 import { registerStaffRoutes } from "./modules/staff/staff.route";
 import { registerSalesDirectionRoutes } from "./modules/sales-directions/sales-directions.route";
+import { registerReportRoutes } from "./modules/reports/reports.route";
+import { registerStockTakeRoutes } from "./modules/stock/stock-takes.route";
+import { registerWarehouseTransferRoutes } from "./modules/stock/warehouse-transfers.route";
+import { registerExpenseRoutes } from "./modules/expenses/expenses.route";
+import { registerFieldRoutes } from "./modules/field/field.route";
+import { registerTerritoryRoutes } from "./modules/territory/territory.route";
+import { registerPriceMatrixRoutes } from "./modules/products/price-matrix.route";
+import { registerNotificationRoutes } from "./modules/notifications/notifications.route";
+import { registerMobileRoutes } from "./modules/mobile/mobile.route";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
 import { loggerOptions } from "./config/logger";
@@ -49,11 +63,25 @@ export function buildApp() {
   app.register(registerBonusRuleRoutes);
   app.register(registerOrderRoutes);
   app.register(registerOrderStreamRoutes);
+  app.register(registerDashboardRoutes);
+  app.register(registerPaymentRoutes);
+  app.register(registerSalesReturnRoutes);
   app.register(registerReferenceRoutes);
   app.register(registerTenantSettingsRoutes);
   app.register(registerAuditEventRoutes);
   app.register(registerStockRoutes);
+  app.register(registerSupplierRoutes);
+  app.register(registerGoodsReceiptRoutes);
   app.register(registerCashDeskRoutes);
+  app.register(registerReportRoutes);
+  app.register(registerStockTakeRoutes);
+  app.register(registerWarehouseTransferRoutes);
+  app.register(registerExpenseRoutes);
+  app.register(registerTerritoryRoutes);
+  app.register(registerPriceMatrixRoutes);
+  app.register(registerFieldRoutes);
+  app.register(registerNotificationRoutes);
+  app.register(registerMobileRoutes);
 
   app.get("/health", async () => ({
     status: "ok",

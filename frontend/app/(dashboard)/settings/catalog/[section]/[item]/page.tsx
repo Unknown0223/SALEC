@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { findSettingsItem, resolveSettingsItemHref, settingsSections } from "@/lib/settings-structure";
 import { cn } from "@/lib/utils";
 import Link from "next/link";

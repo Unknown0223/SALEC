@@ -1,13 +1,24 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { mapCashDeskIdToBranchName } from "../tenant-settings/tenant-settings.service";
 
-export const CASH_DESK_LINK_ROLES = ["cashier", "manager", "operator", "supervisor", "expeditor"] as const;
+export const CASH_DESK_LINK_ROLES = [
+  "agent",
+  "cashier",
+  "manager",
+  "operator",
+  "storekeeper",
+  "supervisor",
+  "expeditor"
+] as const;
 export type CashDeskLinkRole = (typeof CASH_DESK_LINK_ROLES)[number];
 
 const ROLE_FOR_LINK: Record<CashDeskLinkRole, string> = {
+  agent: "agent",
   cashier: "operator",
   manager: "operator",
   operator: "operator",
+  storekeeper: "operator",
   supervisor: "supervisor",
   expeditor: "expeditor"
 };
@@ -18,7 +29,12 @@ function normalizeCode(code: string | null | undefined): string | null {
 }
 
 export async function listCashDeskPickers(tenantId: number) {
-  const [operators, supervisors, expeditors] = await Promise.all([
+  const [agents, operators, supervisors, expeditors] = await Promise.all([
+    prisma.user.findMany({
+      where: { tenant_id: tenantId, is_active: true, role: "agent" },
+      select: { id: true, name: true, login: true },
+      orderBy: [{ name: "asc" }, { login: "asc" }]
+    }),
     prisma.user.findMany({
       where: { tenant_id: tenantId, is_active: true, role: "operator" },
       select: { id: true, name: true, login: true },
@@ -35,14 +51,7 @@ export async function listCashDeskPickers(tenantId: number) {
       orderBy: [{ name: "asc" }, { login: "asc" }]
     })
   ]);
-  return {
-    operators,
-    supervisors,
-    expeditors,
-    cashier_pool: operators,
-    manager_pool: operators,
-    operator_pool: operators
-  };
+  return { agents, operators, supervisors, expeditors };
 }
 
 function mapLinkRoleCounts(links: { link_role: string }[]) {
@@ -68,7 +77,7 @@ export async function listCashDesks(
     ];
   }
   const skip = (opts.page - 1) * opts.limit;
-  const [total, rows] = await Promise.all([
+  const [total, rows, deskToBranch] = await Promise.all([
     prisma.cashDesk.count({ where }),
     prisma.cashDesk.findMany({
       where,
@@ -80,7 +89,8 @@ export async function listCashDesks(
           include: { user: { select: { id: true, name: true, login: true } } }
         }
       }
-    })
+    }),
+    mapCashDeskIdToBranchName(tenantId)
   ]);
   const data = rows.map((d) => {
     const role_counts = mapLinkRoleCounts(d.links);
@@ -91,6 +101,7 @@ export async function listCashDesks(
     return {
       id: d.id,
       name: d.name,
+      branch_name: deskToBranch.get(d.id) ?? null,
       timezone: d.timezone,
       sort_order: d.sort_order,
       code: d.code,

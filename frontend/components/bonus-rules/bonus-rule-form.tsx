@@ -309,7 +309,7 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       if (initialRule?.id != null) {
         await qc.invalidateQueries({ queryKey: ["bonus-rule", tenantSlug, initialRule.id] });
       }
-      router.push("/bonus-rules/active");
+      router.push("/settings/bonus-rules/active");
     },
     onError: (e: unknown) => {
       const ax = e as { response?: { data?: { error?: string }; status?: number } };
@@ -696,7 +696,7 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.push("/bonus-rules/active")}
+            onClick={() => router.push("/settings/bonus-rules/active")}
             disabled={mutation.isPending}
           >
             Bekor

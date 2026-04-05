@@ -8,120 +8,150 @@ datasource db {
 }
 
 model Tenant {
-  id         Int      @id @default(autoincrement())
-  slug       String   @unique
-  name       String
-  phone      String?
-  address    String?
-  logo_url   String?
-  plan       String   @default("basic")
-  is_active  Boolean  @default(true)
-  settings   Json     @default("{}")
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  users            User[]
-  refresh_tokens   RefreshToken[]
-  product_categories ProductCategory[]
-  products         Product[]
-  product_prices   ProductPrice[]
-  clients          Client[]
-  client_balances  ClientBalance[]
-  client_audit_logs ClientAuditLog[]
-  warehouses       Warehouse[]
-  stock            Stock[]
-  orders           Order[]
-  bonus_rules      BonusRule[]
-  client_agent_assignments ClientAgentAssignment[]
-  tenant_audit_events    TenantAuditEvent[]
-  product_catalog_groups         ProductCatalogGroup[]
-  product_brands                 ProductBrand[]
-  product_manufacturers          ProductManufacturer[]
-  product_segments               ProductSegment[]
+  id                             Int                           @id @default(autoincrement())
+  slug                           String                        @unique
+  name                           String
+  phone                          String?
+  address                        String?
+  logo_url                       String?
+  plan                           String                        @default("basic")
+  is_active                      Boolean                       @default(true)
+  settings                       Json                          @default("{}")
+  created_at                     DateTime                      @default(now())
+  updated_at                     DateTime                      @updatedAt
+  agent_route_days               AgentRouteDay[]
+  agent_visits                   AgentVisit[]
+  bonus_rules                    BonusRule[]
+  cash_desk_shifts               CashDeskShift[]
+  cash_desks                     CashDesk[]
+  client_agent_assignments       ClientAgentAssignment[]
+  client_audit_logs              ClientAuditLog[]
+  client_balances                ClientBalance[]
+  payments                       Payment[]
+  clients                        Client[]
+  goods_receipts                 GoodsReceipt[]
+  in_app_notifications           InAppNotification[]
   interchangeable_product_groups InterchangeableProductGroup[]
-  trade_directions             TradeDirection[]
-  sales_channel_refs           SalesChannelRef[]
-  kpi_groups                   KpiGroup[]
-  cash_desks                   CashDesk[]
+  kpi_groups                     KpiGroup[]
+  kpi_results                    KpiResult[]
+  orders                         Order[]
+  product_brands                 ProductBrand[]
+  product_catalog_groups         ProductCatalogGroup[]
+  product_categories             ProductCategory[]
+  product_manufacturers          ProductManufacturer[]
+  product_prices                 ProductPrice[]
+  price_matrices                 PriceMatrix[]
+  product_segments               ProductSegment[]
+  products                       Product[]
+  refresh_tokens                 RefreshToken[]
+  sales_channel_refs             SalesChannelRef[]
+  sales_returns                  SalesReturn[]
+  stock                          Stock[]
+  stock_takes                    StockTake[]
+  suppliers                      Supplier[]
+  tenant_audit_events            TenantAuditEvent[]
+  tenant_tasks                   TenantTask[]
+  trade_directions               TradeDirection[]
+  users                          User[]
+  warehouses                     Warehouse[]
+  expenses                       Expense[]
+  payment_allocations            PaymentAllocation[]
+  territories                    Territory[]
 
   @@map("tenants")
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  tenant_id     Int
-  tenant        Tenant   @relation(fields: [tenant_id], references: [id])
-  name          String
-  first_name    String?
-  last_name     String?
-  middle_name   String?
-  login         String
-  password_hash String
-  role          String
-  product       String?
-  agent_type    String?
-  code          String?
-  pinfl         String?
-  consignment   Boolean  @default(false)
-  apk_version   String?
-  device_name   String?
-  last_sync_at  DateTime?
-  phone         String?
-  email         String?
-  can_authorize Boolean  @default(true)
-  price_type    String?
-  /// Bir nechta narx turi (mobil / cheklovlar); bo‘sh bo‘lsa `price_type` ishlatiladi
-  agent_price_types Json     @default("[]")
-  /// { price_types?: string[], product_rules?: { category_id: number, all: boolean, product_ids?: number[] }[] }
-  agent_entitlements Json    @default("{}")
-  /// Dastavchik: zakaz yaratilganda avtobog‘lash shartlari (bo‘sh = cheklov yo‘q)
-  expeditor_assignment_rules Json @default("{}")
-  max_sessions  Int      @default(2)
-  kpi_color     String?  @db.VarChar(16)
-  warehouse_id  Int?
-  warehouse     Warehouse? @relation("UserWarehouse", fields: [warehouse_id], references: [id])
-  trade_direction String?
-  branch        String?
-  position      String?
-  app_access    Boolean  @default(true)
-  territory     String?
-  return_warehouse_id Int?
-  return_warehouse Warehouse? @relation("UserReturnWarehouse", fields: [return_warehouse_id], references: [id])
-  is_active     Boolean  @default(true)
+  id                         Int                     @id @default(autoincrement())
+  tenant_id                  Int
+  name                       String
+  login                      String
+  password_hash              String
+  role                       String
+  is_active                  Boolean                 @default(true)
+  created_at                 DateTime                @default(now())
+  updated_at                 DateTime                @updatedAt
+  first_name                 String?
+  last_name                  String?
+  middle_name                String?
+  product                    String?
+  agent_type                 String?
+  code                       String?
+  pinfl                      String?
+  consignment                Boolean                 @default(false)
+  apk_version                String?
+  device_name                String?
+  last_sync_at               DateTime?
+  phone                      String?
+  can_authorize              Boolean                 @default(true)
+  price_type                 String?
+  warehouse_id               Int?
+  trade_direction            String?
+  branch                     String?
+  position                   String?
+  app_access                 Boolean                 @default(true)
+  territory                  String?
+  return_warehouse_id        Int?
   /// Agent / foydalanuvchi ustavi (supervisor) — klientlar ro‘yxatida filtr
-  supervisor_user_id Int?
-  supervisor         User?   @relation("UserSupervisor", fields: [supervisor_user_id], references: [id], onDelete: SetNull)
-  supervisees        User[] @relation("UserSupervisor")
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  refresh_tokens RefreshToken[]
-  clients_as_agent Client[] @relation("UserAgents")
-  client_agent_slots ClientAgentAssignment[] @relation("ClientAgentSlotAgents")
-  orders_as_agent      Order[]           @relation("OrderAgents")
-  orders_as_expeditor  Order[]           @relation("OrderExpeditor")
-  order_status_changes OrderStatusLog[]
-  order_change_logs    OrderChangeLog[]
-  balance_movements    ClientBalanceMovement[]
-  client_audit_logs    ClientAuditLog[]
-  expeditor_assignments ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
-  tenant_audit_events   TenantAuditEvent[]       @relation("TenantAuditEventActor")
-  kpi_group_links       KpiGroupAgent[]
+  supervisor_user_id         Int?
+  email                      String?
+  /// Bir nechta narx turi (mobil / cheklovlar); bo‘sh bo‘lsa `price_type` ishlatiladi
+  agent_price_types          Json                    @default("[]")
+  /// { price_types?: string[], product_rules?: { category_id: number, all: boolean, product_ids?: number[] }[] }
+  agent_entitlements         Json                    @default("{}")
+  max_sessions               Int                     @default(2)
+  kpi_color                  String?                 @db.VarChar(16)
+  /// Dastavchik: zakaz yaratilganda avtobog‘lash shartlari (bo‘sh = cheklov yo‘q)
+  expeditor_assignment_rules Json                    @default("{}")
   /// Jadval ustunlari, sahifa o‘lchami va boshqa UI — foydalanuvchiga xos (JSON)
-  ui_preferences        Json     @default("{}")
-  cash_desk_links       CashDeskUserLink[]
+  ui_preferences             Json                    @default("{}")
+  /// Savdo yo‘nalishi (spravochnik) — `trade_direction` matni avtomatik sinxronlanadi
+  trade_direction_id         Int?
+  agent_route_days           AgentRouteDay[]
+  agent_visits               AgentVisit[]
+  cash_desk_shifts_closed    CashDeskShift[]         @relation("CashDeskShiftClosedBy")
+  cash_desk_shifts_opened    CashDeskShift[]         @relation("CashDeskShiftOpenedBy")
+  cash_desk_links            CashDeskUserLink[]
+  client_agent_slots         ClientAgentAssignment[] @relation("ClientAgentSlotAgents")
+  expeditor_assignments      ClientAgentAssignment[] @relation("ExpeditorOnAssignment")
+  client_audit_logs          ClientAuditLog[]
+  balance_movements          ClientBalanceMovement[]
+  payments_created           Payment[]               @relation("PaymentCreator")
+  clients_as_agent           Client[]                @relation("UserAgents")
+  goods_receipts_created     GoodsReceipt[]          @relation("GoodsReceiptCreator")
+  in_app_notifications       InAppNotification[]
+  kpi_group_links            KpiGroupAgent[]
+  order_change_logs          OrderChangeLog[]
+  order_status_changes       OrderStatusLog[]
+  orders_as_agent            Order[]                 @relation("OrderAgents")
+  orders_as_expeditor        Order[]                 @relation("OrderExpeditor")
+  refresh_tokens             RefreshToken[]
+  sales_returns_created      SalesReturn[]           @relation("SalesReturnCreator")
+  stock_takes_created        StockTake[]             @relation("StockTakeCreator")
+  tenant_audit_events        TenantAuditEvent[]      @relation("TenantAuditEventActor")
+  tenant_tasks_assigned      TenantTask[]            @relation("TenantTaskAssignee")
+  tenant_tasks_created       TenantTask[]            @relation("TenantTaskCreator")
+  return_warehouse           Warehouse?              @relation("UserReturnWarehouse", fields: [return_warehouse_id], references: [id])
+  supervisor                 User?                   @relation("UserSupervisor", fields: [supervisor_user_id], references: [id])
+  supervisees                User[]                  @relation("UserSupervisor")
+  tenant                     Tenant                  @relation(fields: [tenant_id], references: [id])
+  trade_direction_row        TradeDirection?         @relation("UserTradeDirection", fields: [trade_direction_id], references: [id])
+  warehouse                  Warehouse?              @relation("UserWarehouse", fields: [warehouse_id], references: [id])
+  warehouse_links            WarehouseUserLink[]
+  expenses_created           Expense[]               @relation("ExpenseCreator")
+  expenses_approved          Expense[]               @relation("ExpenseApprover")
+  territory_assignments      TerritoryUserLink[]     @relation("TerritoryAssigner")
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
+  @@index([trade_direction_id])
   @@map("users")
 }
 
 model RefreshToken {
   id          Int       @id @default(autoincrement())
   tenant_id   Int
-  tenant      Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   user_id     Int
-  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   token_hash  String    @unique
   expires_at  DateTime
   revoked_at  DateTime?
@@ -129,29 +159,31 @@ model RefreshToken {
   device_name String?
   ip_address  String?   @db.VarChar(64)
   user_agent  String?   @db.VarChar(512)
+  tenant      Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, user_id])
   @@map("refresh_tokens")
 }
 
 model ProductCategory {
-  id         Int               @id @default(autoincrement())
-  tenant_id  Int
-  tenant     Tenant            @relation(fields: [tenant_id], references: [id])
-  name       String
-  parent_id  Int?
-  parent     ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
-  children   ProductCategory[] @relation("CategoryHierarchy")
-  products   Product[]
+  id           Int               @id @default(autoincrement())
+  tenant_id    Int
+  name         String
+  parent_id    Int?
+  created_at   DateTime          @default(now())
+  updated_at   DateTime          @updatedAt
   /// Qisqa kod (masalan SKU prefiks / filtr)
-  code            String?  @db.VarChar(24)
-  sort_order      Int?
+  code         String?           @db.VarChar(24)
+  sort_order   Int?
   /// Kategoriya uchun tavsiya etilgan birlik (mahsulot `unit` bilan mos kelishi mumkin)
-  default_unit    String?  @db.VarChar(64)
-  is_active       Boolean  @default(true)
-  comment         String?  @db.Text
-  created_at DateTime          @default(now())
-  updated_at DateTime          @updatedAt
+  default_unit String?           @db.VarChar(64)
+  is_active    Boolean           @default(true)
+  comment      String?
+  parent       ProductCategory?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children     ProductCategory[] @relation("CategoryHierarchy")
+  tenant       Tenant            @relation(fields: [tenant_id], references: [id])
+  products     Product[]
 
   @@index([tenant_id])
   @@index([tenant_id, parent_id])
@@ -159,47 +191,50 @@ model ProductCategory {
 }
 
 model Product {
-  id          Int              @id @default(autoincrement())
-  tenant_id   Int
-  tenant      Tenant           @relation(fields: [tenant_id], references: [id])
-  sku         String
-  name        String
-  category_id Int?
-  category    ProductCategory? @relation(fields: [category_id], references: [id])
-  unit        String           @default("dona")
-  barcode     String?
-  is_active   Boolean          @default(true)
+  id                    Int                           @id @default(autoincrement())
+  tenant_id             Int
+  sku                   String
+  name                  String
+  category_id           Int?
+  unit                  String                        @default("dona")
+  barcode               String?
+  is_active             Boolean                       @default(true)
+  created_at            DateTime                      @default(now())
+  updated_at            DateTime                      @updatedAt
   /// «Группа товаров» (katalog guruh — kategoriya ierarxiyasidan alohida)
-  product_group_id Int?
-  product_group    ProductCatalogGroup? @relation(fields: [product_group_id], references: [id], onDelete: SetNull)
-  brand_id         Int?
-  brand            ProductBrand? @relation(fields: [brand_id], references: [id], onDelete: SetNull)
-  manufacturer_id  Int?
-  manufacturer     ProductManufacturer? @relation(fields: [manufacturer_id], references: [id], onDelete: SetNull)
-  segment_id       Int?
-  segment          ProductSegment? @relation(fields: [segment_id], references: [id], onDelete: SetNull)
-  weight_kg        Decimal? @db.Decimal(12, 4)
-  volume_m3        Decimal? @db.Decimal(14, 6)
-  qty_per_block    Int?
+  product_group_id      Int?
+  brand_id              Int?
+  manufacturer_id       Int?
+  segment_id            Int?
+  weight_kg             Decimal?                      @db.Decimal(12, 4)
+  volume_m3             Decimal?                      @db.Decimal(14, 6)
+  qty_per_block         Int?
   /// o‘lchov: `cm` yoki `m` (UI: santimetr / metr)
-  dimension_unit   String?  @db.VarChar(8)
-  width_cm         Decimal? @db.Decimal(12, 2)
-  height_cm        Decimal? @db.Decimal(12, 2)
-  length_cm        Decimal? @db.Decimal(12, 2)
-  ikpu_code        String?  @db.VarChar(64)
-  hs_code          String?  @db.VarChar(32)
-  sell_code        String?  @db.VarChar(64)
-  comment          String?  @db.Text
-  sort_order       Int?
-  is_blocked       Boolean  @default(false)
-  created_at  DateTime         @default(now())
-  updated_at  DateTime         @updatedAt
-
-  stock       Stock[]
-  order_items OrderItem[]
-  prices      ProductPrice[]
+  dimension_unit        String?                       @db.VarChar(8)
+  width_cm              Decimal?                      @db.Decimal(12, 2)
+  height_cm             Decimal?                      @db.Decimal(12, 2)
+  length_cm             Decimal?                      @db.Decimal(12, 2)
+  ikpu_code             String?                       @db.VarChar(64)
+  hs_code               String?                       @db.VarChar(32)
+  sell_code             String?                       @db.VarChar(64)
+  comment               String?
+  sort_order            Int?
+  is_blocked            Boolean                       @default(false)
+  goods_receipt_lines   GoodsReceiptLine[]
   interchangeable_links InterchangeableGroupProduct[]
   kpi_group_products    KpiGroupProduct[]
+  order_items           OrderItem[]
+  prices                ProductPrice[]
+  brand                 ProductBrand?                 @relation(fields: [brand_id], references: [id])
+  category              ProductCategory?              @relation(fields: [category_id], references: [id])
+  manufacturer          ProductManufacturer?          @relation(fields: [manufacturer_id], references: [id])
+  product_group         ProductCatalogGroup?          @relation(fields: [product_group_id], references: [id])
+  segment               ProductSegment?               @relation(fields: [segment_id], references: [id])
+  tenant                Tenant                        @relation(fields: [tenant_id], references: [id])
+  sales_return_lines    SalesReturnLine[]
+  stock                 Stock[]
+  stock_take_lines      StockTakeLine[]
+  price_matrix          PriceMatrix[]
 
   @@unique([tenant_id, sku])
   @@index([tenant_id, name])
@@ -211,15 +246,15 @@ model Product {
 
 /// Katalog: «группа товаров»
 model ProductCatalogGroup {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
-  code       String?  @db.VarChar(24)
+  code       String?   @db.VarChar(24)
   sort_order Int?
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   products   Product[]
 
   @@index([tenant_id])
@@ -227,15 +262,15 @@ model ProductCatalogGroup {
 }
 
 model ProductBrand {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
-  code       String?  @db.VarChar(24)
+  code       String?   @db.VarChar(24)
   sort_order Int?
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   products   Product[]
 
   @@index([tenant_id])
@@ -243,15 +278,15 @@ model ProductBrand {
 }
 
 model ProductManufacturer {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
-  code       String?  @db.VarChar(24)
+  code       String?   @db.VarChar(24)
   sort_order Int?
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   products   Product[]
 
   @@index([tenant_id])
@@ -259,15 +294,15 @@ model ProductManufacturer {
 }
 
 model ProductSegment {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
-  code       String?  @db.VarChar(24)
+  code       String?   @db.VarChar(24)
   sort_order Int?
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   products   Product[]
 
   @@index([tenant_id])
@@ -275,18 +310,18 @@ model ProductSegment {
 }
 
 model InterchangeableProductGroup {
-  id         Int      @id @default(autoincrement())
-  tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  name       String
-  code       String?  @db.VarChar(24)
-  sort_order Int?
-  comment    String?  @db.Text
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  products        InterchangeableGroupProduct[]
+  id               Int                             @id @default(autoincrement())
+  tenant_id        Int
+  name             String
+  code             String?                         @db.VarChar(24)
+  sort_order       Int?
+  comment          String?
+  is_active        Boolean                         @default(true)
+  created_at       DateTime                        @default(now())
+  updated_at       DateTime                        @updatedAt
   price_type_links InterchangeableGroupPriceType[]
+  products         InterchangeableGroupProduct[]
+  tenant           Tenant                          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id])
   @@map("interchangeable_product_groups")
@@ -305,7 +340,7 @@ model InterchangeableGroupProduct {
 
 model InterchangeableGroupPriceType {
   group_id   Int
-  price_type String @db.VarChar(128)
+  price_type String                      @db.VarChar(128)
   group      InterchangeableProductGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
 
   @@id([group_id, price_type])
@@ -314,16 +349,16 @@ model InterchangeableGroupPriceType {
 
 /// Mahsulot narxlari (narx turi: masalan retail, wholesale — bonus `price_type` bilan bog‘lanishi mumkin)
 model ProductPrice {
-  id          Int      @id @default(autoincrement())
-  tenant_id   Int
-  tenant      Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  product_id  Int
-  product     Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  price_type  String
-  price       Decimal  @db.Decimal(15, 2)
-  currency    String   @default("UZS")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  product_id Int
+  price_type String
+  price      Decimal  @db.Decimal(15, 2)
+  currency   String   @default("UZS")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  product    Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@unique([tenant_id, product_id, price_type])
   @@index([tenant_id, product_id])
@@ -331,80 +366,80 @@ model ProductPrice {
 }
 
 model Client {
-  id            Int      @id @default(autoincrement())
-  tenant_id     Int
-  tenant        Tenant   @relation(fields: [tenant_id], references: [id])
-  name          String
-  /// Yuridik / rasmiy nom (ko‘rsatish uchun)
-  legal_name    String?
-  address       String?
-  phone         String?
+  id                    Int                     @id @default(autoincrement())
+  tenant_id             Int
+  name                  String
+  address               String?
+  phone                 String?
+  agent_id              Int?
+  category              String?
+  credit_limit          Decimal                 @default(0) @db.Decimal(15, 2)
+  is_active             Boolean                 @default(true)
+  created_at            DateTime                @default(now())
+  updated_at            DateTime                @updatedAt
   /// Faqat raqamlar (dublikat va yagona bazada qidiruv uchun)
-  phone_normalized String?
-  agent_id      Int?
-  agent         User?    @relation("UserAgents", fields: [agent_id], references: [id])
-  category      String?
-  /// Mijoz turi kodi (spravochnik bilan bog‘lanishi mumkin)
-  client_type_code String?
-  credit_limit  Decimal  @default(0) @db.Decimal(15, 2)
-  is_active     Boolean  @default(true)
-
-  /// Mas'ul shaxs, mo'ljal, STIR, P-D-L, logistika, litsenziya, ish vaqti
-  responsible_person String?
-  landmark           String?
-  inn                String?
-  pdl                String?
-  logistics_service  String?
-  license_until      DateTime?
-  working_hours      String?
-
-  /// Manzil bo‘laklari + GPS matni + tashrif sanasi + izoh
-  region         String?
-  district       String?
-  neighborhood   String?
-  street         String?
-  house_number   String?
-  apartment      String?
-  gps_text       String?
-  visit_date     DateTime?
-  notes          String?
-
-  /// Mijoz formati (masalan savdo kanali / turi) — keyinroq qoidalarga bog‘lash mumkin
-  client_format String?
-  /// Qisqa ichki kod (masalan 20 belgi)
-  client_code     String?  @db.VarChar(32)
-  /// Savdo kanali (Lalaku: «Канал продаж»)
-  sales_channel   String?
-  /// Mahsulot toifasi (spravochnikdan tanlangan qiymat matni)
-  product_category_ref String?
-  /// Bank rekvizitlari
-  bank_name       String?
-  bank_account    String?
-  bank_mfo        String?
-  /// Mijoz JSHSHIR / ПИНФЛ
-  client_pinfl    String?  @db.VarChar(20)
-  oked            String?
-  contract_number String?
-  vat_reg_code    String?
-  /// Xarita (Yandex / GPS)
-  latitude        Decimal? @db.Decimal(11, 8)
-  longitude       Decimal? @db.Decimal(11, 8)
-  /// Zona (Lalaku jadvalidagi «Зона»)
-  zone            String?
-
-  /// 10 ta kontakt: [{ "firstName", "lastName", "phone" }, ...]
-  contact_persons Json @default("[]")
+  phone_normalized      String?
   /// Birlashtirishdan keyin asosiy yozuv
   merged_into_client_id Int?
-  merged_into           Client?  @relation("ClientMerge", fields: [merged_into_client_id], references: [id])
-  merged_from           Client[] @relation("ClientMerge")
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  orders          Order[]
-  client_balances ClientBalance[]
-  audit_logs      ClientAuditLog[]
-  agent_assignments ClientAgentAssignment[]
+  /// Mas'ul shaxs, mo'ljal, STIR, P-D-L, logistika, litsenziya, ish vaqti
+  responsible_person    String?
+  landmark              String?
+  inn                   String?
+  pdl                   String?
+  logistics_service     String?
+  license_until         DateTime?
+  working_hours         String?
+  /// Manzil bo‘laklari + GPS matni + tashrif sanasi + izoh
+  region                String?
+  district              String?
+  /// Shahar / город (viloyat va tuman o‘rtasida yoki alohida spravochnik)
+  city                  String?
+  neighborhood          String?
+  street                String?
+  house_number          String?
+  apartment             String?
+  gps_text              String?
+  visit_date            DateTime?
+  notes                 String?
+  /// Mijoz formati (masalan savdo kanali / turi) — keyinroq qoidalarga bog‘lash mumkin
+  client_format         String?
+  /// 10 ta kontakt: [{ "firstName", "lastName", "phone" }, ...]
+  contact_persons       Json                    @default("[]")
+  /// Yuridik / rasmiy nom (ko‘rsatish uchun)
+  legal_name            String?
+  /// Mijoz turi kodi (spravochnik bilan bog‘lanishi mumkin)
+  client_type_code      String?
+  /// Qisqa ichki kod (masalan 20 belgi)
+  client_code           String?                 @db.VarChar(32)
+  /// Savdo kanali (Lalaku: «Канал продаж»)
+  sales_channel         String?
+  /// Mahsulot toifasi (spravochnikdan tanlangan qiymat matni)
+  product_category_ref  String?
+  /// Bank rekvizitlari
+  bank_name             String?
+  bank_account          String?
+  bank_mfo              String?
+  /// Mijoz JSHSHIR / ПИНФЛ
+  client_pinfl          String?                 @db.VarChar(20)
+  oked                  String?
+  contract_number       String?
+  vat_reg_code          String?
+  /// Xarita (Yandex / GPS)
+  latitude              Decimal?                @db.Decimal(11, 8)
+  longitude             Decimal?                @db.Decimal(11, 8)
+  /// Zona (Lalaku jadvalidagi «Зона»)
+  zone                  String?
+  agent_visits          AgentVisit[]
+  agent_assignments     ClientAgentAssignment[]
+  audit_logs            ClientAuditLog[]
+  client_balances       ClientBalance[]
+  payments              Payment[]
+  agent                 User?                   @relation("UserAgents", fields: [agent_id], references: [id])
+  merged_into           Client?                 @relation("ClientMerge", fields: [merged_into_client_id], references: [id])
+  merged_from           Client[]                @relation("ClientMerge")
+  tenant                Tenant                  @relation(fields: [tenant_id], references: [id])
+  orders                Order[]
+  sales_returns         SalesReturn[]
 
   @@index([tenant_id])
   @@index([tenant_id, name])
@@ -414,23 +449,23 @@ model Client {
 
 /// Mijozga 1..10 gacha agent slotlari (tashrif sanasi + ekspeditor telefoni).
 model ClientAgentAssignment {
-  id               Int       @id @default(autoincrement())
-  tenant_id        Int
-  tenant           Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  client_id        Int
-  client           Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
-  slot             Int
-  agent_id         Int?
-  agent            User?     @relation("ClientAgentSlotAgents", fields: [agent_id], references: [id], onDelete: SetNull)
-  visit_date       DateTime?
-  expeditor_phone  String?
+  id                Int       @id @default(autoincrement())
+  tenant_id         Int
+  client_id         Int
+  slot              Int
+  agent_id          Int?
+  visit_date        DateTime?
+  expeditor_phone   String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  /// Tashrif kunlari: [1..7] — 1=Du, 7=Ya (ISO hafta kuni emas, savdo UI)
+  visit_weekdays    Json      @default("[]")
   /// Tanlangan foydalanuvchi (ekspeditor ro‘yxatidan)
   expeditor_user_id Int?
-  expeditor_user    User?    @relation("ExpeditorOnAssignment", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
-  /// Tashrif kunlari: [1..7] — 1=Du, 7=Ya (ISO hafta kuni emas, savdo UI)
-  visit_weekdays   Json      @default("[]")
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  agent             User?     @relation("ClientAgentSlotAgents", fields: [agent_id], references: [id])
+  client            Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  expeditor_user    User?     @relation("ExpeditorOnAssignment", fields: [expeditor_user_id], references: [id])
+  tenant            Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@unique([client_id, slot])
   @@index([tenant_id, client_id])
@@ -439,15 +474,14 @@ model ClientAgentAssignment {
 
 /// Mijoz hisob saldosi (yozuvlar yig‘indisi bilan sinxron).
 model ClientBalance {
-  id         Int      @id @default(autoincrement())
+  id         Int                     @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id])
   client_id  Int
-  client     Client   @relation(fields: [client_id], references: [id])
-  balance    Decimal  @default(0) @db.Decimal(15, 2)
-  updated_at DateTime @updatedAt
-
-  movements ClientBalanceMovement[]
+  balance    Decimal                 @default(0) @db.Decimal(15, 2)
+  updated_at DateTime                @updatedAt
+  movements  ClientBalanceMovement[]
+  client     Client                  @relation(fields: [client_id], references: [id])
+  tenant     Tenant                  @relation(fields: [tenant_id], references: [id])
 
   @@unique([tenant_id, client_id])
   @@index([tenant_id])
@@ -457,12 +491,12 @@ model ClientBalance {
 model ClientBalanceMovement {
   id                Int           @id @default(autoincrement())
   client_balance_id Int
-  client_balance    ClientBalance @relation(fields: [client_balance_id], references: [id], onDelete: Cascade)
   delta             Decimal       @db.Decimal(15, 2)
   note              String?
   user_id           Int?
-  user              User?         @relation(fields: [user_id], references: [id], onDelete: SetNull)
   created_at        DateTime      @default(now())
+  client_balance    ClientBalance @relation(fields: [client_balance_id], references: [id], onDelete: Cascade)
+  user              User?         @relation(fields: [user_id], references: [id])
 
   @@index([client_balance_id])
   @@map("client_balance_movements")
@@ -472,14 +506,14 @@ model ClientBalanceMovement {
 model ClientAuditLog {
   id         Int      @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   client_id  Int
-  client     Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
   user_id    Int?
-  user       User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
   action     String
   detail     Json     @default("{}")
   created_at DateTime @default(now())
+  client     Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [user_id], references: [id])
 
   @@index([tenant_id, client_id])
   @@map("client_audit_logs")
@@ -489,14 +523,14 @@ model ClientAuditLog {
 model TenantAuditEvent {
   id            Int      @id @default(autoincrement())
   tenant_id     Int
-  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   actor_user_id Int?
-  actor         User?    @relation("TenantAuditEventActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
   entity_type   String   @db.VarChar(64)
   entity_id     String   @db.VarChar(64)
   action        String   @db.VarChar(128)
   payload       Json     @default("{}")
   created_at    DateTime @default(now())
+  actor         User?    @relation("TenantAuditEventActor", fields: [actor_user_id], references: [id])
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, created_at(sort: Desc)])
   @@index([tenant_id, entity_type, entity_id])
@@ -504,82 +538,190 @@ model TenantAuditEvent {
 }
 
 model Warehouse {
-  id         Int      @id @default(autoincrement())
-  tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id])
-  name       String
-  type       String?
-  address    String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  stock  Stock[]
-  orders Order[]
-  users_default User[] @relation("UserWarehouse")
-  users_return  User[] @relation("UserReturnWarehouse")
+  id             Int                 @id @default(autoincrement())
+  tenant_id      Int
+  name           String
+  type           String?
+  address        String?
+  created_at     DateTime            @default(now())
+  updated_at     DateTime            @updatedAt
+  code           String?             @db.VarChar(40)
+  /// To‘lov usuli (ixtiyoriy matn)
+  payment_method String?             @db.VarChar(200)
+  /// Van-selling ombor
+  van_selling    Boolean             @default(false)
+  is_active      Boolean             @default(true)
+  /// Остатки: sales = склад реализации, return = возврат, reserve = резерв
+  stock_purpose  String              @default("sales") @db.VarChar(16)
+  goods_receipts GoodsReceipt[]
+  orders         Order[]
+  sales_returns  SalesReturn[]
+  stock          Stock[]
+  stock_takes    StockTake[]
+  users_return   User[]              @relation("UserReturnWarehouse")
+  users_default  User[]              @relation("UserWarehouse")
+  links          WarehouseUserLink[]
+  tenant         Tenant              @relation(fields: [tenant_id], references: [id])
 
   @@index([tenant_id])
   @@map("warehouses")
 }
 
+/// Omborga biriktirilgan foydalanuvchi (bir foydalanuvchi bir omborda bitta link_role)
+model WarehouseUserLink {
+  id           Int       @id @default(autoincrement())
+  warehouse_id Int
+  user_id      Int
+  /// agent | cashier | manager | operator | supervisor | expeditor (kassa bilan mos)
+  link_role    String    @db.VarChar(32)
+  created_at   DateTime  @default(now())
+  user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  warehouse    Warehouse @relation(fields: [warehouse_id], references: [id], onDelete: Cascade)
+
+  @@unique([warehouse_id, user_id])
+  @@index([warehouse_id, link_role])
+  @@index([user_id])
+  @@map("warehouse_user_links")
+}
+
 model Stock {
-  id            Int       @id @default(autoincrement())
-  tenant_id     Int
-  tenant        Tenant    @relation(fields: [tenant_id], references: [id])
-  warehouse_id  Int
-  warehouse     Warehouse @relation(fields: [warehouse_id], references: [id])
-  product_id    Int
-  product       Product   @relation(fields: [product_id], references: [id])
-  qty           Decimal   @default(0) @db.Decimal(15, 3)
-  reserved_qty  Decimal   @default(0) @db.Decimal(15, 3)
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  id           Int       @id @default(autoincrement())
+  tenant_id    Int
+  warehouse_id Int
+  product_id   Int
+  qty          Decimal   @default(0) @db.Decimal(15, 3)
+  reserved_qty Decimal   @default(0) @db.Decimal(15, 3)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  product      Product   @relation(fields: [product_id], references: [id])
+  tenant       Tenant    @relation(fields: [tenant_id], references: [id])
+  warehouse    Warehouse @relation(fields: [warehouse_id], references: [id])
 
   @@unique([tenant_id, warehouse_id, product_id])
   @@index([tenant_id])
   @@map("stock")
 }
 
-model Order {
-  id           Int        @id @default(autoincrement())
-  tenant_id    Int
-  tenant       Tenant     @relation(fields: [tenant_id], references: [id])
-  number       String
-  client_id    Int
-  client       Client     @relation(fields: [client_id], references: [id])
-  agent_id     Int?
-  agent        User?      @relation("OrderAgents", fields: [agent_id], references: [id])
-  expeditor_user_id Int?
-  expeditor_user    User? @relation("OrderExpeditor", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
-  warehouse_id Int?
-  warehouse    Warehouse? @relation(fields: [warehouse_id], references: [id])
-  status       String     @default("new")
-  total_sum    Decimal    @default(0) @db.Decimal(15, 2)
-  bonus_sum    Decimal    @default(0) @db.Decimal(15, 2)
-  /// Faqat `once_per_client` bo‘lgan va shu zakazda avtomatik qo‘llangan qoidalar (takrorlanmasligi uchun)
-  applied_auto_bonus_rule_ids Int[] @default([])
-  created_at   DateTime   @default(now())
-  updated_at   DateTime   @updatedAt
+/// Ta’minotchilar (поступление)
+model Supplier {
+  id             Int            @id @default(autoincrement())
+  tenant_id      Int
+  name           String         @db.VarChar(255)
+  code           String?        @db.VarChar(64)
+  phone          String?        @db.VarChar(64)
+  comment        String?
+  is_active      Boolean        @default(true)
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
+  goods_receipts GoodsReceipt[]
+  tenant         Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
-  items        OrderItem[]
-  status_logs  OrderStatusLog[]
-  change_logs  OrderChangeLog[]
+  @@index([tenant_id])
+  @@index([tenant_id, is_active])
+  @@map("suppliers")
+}
+
+/// Omborga hujjatli kirim (Поступление)
+model GoodsReceipt {
+  id                 Int                @id @default(autoincrement())
+  tenant_id          Int
+  number             String             @db.VarChar(40)
+  warehouse_id       Int
+  supplier_id        Int?
+  /// draft | posted | cancelled
+  status             String             @default("posted") @db.VarChar(16)
+  receipt_at         DateTime?
+  comment            String?
+  price_type         String             @db.VarChar(128)
+  external_ref       String?            @db.VarChar(128)
+  total_qty          Decimal            @default(0) @db.Decimal(15, 3)
+  total_sum          Decimal            @default(0) @db.Decimal(15, 2)
+  total_volume_m3    Decimal            @default(0) @db.Decimal(18, 6)
+  total_weight_kg    Decimal            @default(0) @db.Decimal(18, 4)
+  created_by_user_id Int?
+  created_at         DateTime           @default(now())
+  updated_at         DateTime           @updatedAt
+  lines              GoodsReceiptLine[]
+  created_by         User?              @relation("GoodsReceiptCreator", fields: [created_by_user_id], references: [id])
+  supplier           Supplier?          @relation(fields: [supplier_id], references: [id])
+  tenant             Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  warehouse          Warehouse          @relation(fields: [warehouse_id], references: [id])
+
+  @@unique([tenant_id, number])
+  @@index([tenant_id, warehouse_id])
+  @@index([tenant_id, supplier_id])
+  @@index([tenant_id, status])
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id         Int          @id @default(autoincrement())
+  receipt_id Int
+  product_id Int
+  qty        Decimal      @db.Decimal(15, 3)
+  unit_price Decimal      @db.Decimal(15, 2)
+  line_total Decimal      @db.Decimal(15, 2)
+  defect_qty Decimal?     @db.Decimal(15, 3)
+  volume_m3  Decimal?     @db.Decimal(14, 6)
+  weight_kg  Decimal?     @db.Decimal(12, 4)
+  sort_order Int          @default(0)
+  product    Product      @relation(fields: [product_id], references: [id])
+  receipt    GoodsReceipt @relation(fields: [receipt_id], references: [id], onDelete: Cascade)
+
+  @@index([receipt_id])
+  @@index([product_id])
+  @@map("goods_receipt_lines")
+}
+
+model Order {
+  id                          Int              @id @default(autoincrement())
+  tenant_id                   Int
+  number                      String
+  client_id                   Int
+  agent_id                    Int?
+  warehouse_id                Int?
+  /// Hujjat tipi: order | return | exchange | partial_return | return_by_order
+  order_type                  String           @default("order") @db.VarChar(20)
+  status                      String           @default("new")
+  total_sum                   Decimal          @default(0) @db.Decimal(15, 2)
+  bonus_sum                   Decimal          @default(0) @db.Decimal(15, 2)
+  /// Foizli chegirma summasi (bonus qo‘llashda `total_sum` dan oldingi yig‘indi − chegirmadan keyin)
+  discount_sum                Decimal          @default(0) @db.Decimal(15, 2)
+  created_at                  DateTime         @default(now())
+  updated_at                  DateTime         @updatedAt
+  /// Faqat `once_per_client` bo‘lgan va shu zakazda avtomatik qo‘llangan qoidalar (takrorlanmasligi uchun)
+  applied_auto_bonus_rule_ids Int[]            @default([])
+  expeditor_user_id           Int?
+  /// Operator izohi (ichki)
+  comment                     String?
+  payments                    Payment[]
+  change_logs                 OrderChangeLog[]
+  items                       OrderItem[]
+  status_logs                 OrderStatusLog[]
+  agent                       User?            @relation("OrderAgents", fields: [agent_id], references: [id])
+  client                      Client           @relation(fields: [client_id], references: [id])
+  expeditor_user              User?            @relation("OrderExpeditor", fields: [expeditor_user_id], references: [id])
+  tenant                      Tenant           @relation(fields: [tenant_id], references: [id])
+  warehouse                   Warehouse?       @relation(fields: [warehouse_id], references: [id])
+  sales_returns               SalesReturn[]
 
   @@unique([tenant_id, number])
   @@index([tenant_id, status])
   @@index([tenant_id, expeditor_user_id])
+  @@index([tenant_id, status, created_at(sort: Desc)])
   @@map("orders")
 }
 
 model OrderStatusLog {
   id          Int      @id @default(autoincrement())
   order_id    Int
-  order       Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
   from_status String
   to_status   String
   user_id     Int?
-  user        User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
   created_at  DateTime @default(now())
+  order       Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [user_id], references: [id])
 
   @@index([order_id])
   @@map("order_status_logs")
@@ -589,27 +731,97 @@ model OrderStatusLog {
 model OrderChangeLog {
   id         Int      @id @default(autoincrement())
   order_id   Int
-  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
   user_id    Int?
-  user       User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
   action     String
   payload    Json     @default("{}")
   created_at DateTime @default(now())
+  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [user_id], references: [id])
 
   @@index([order_id])
   @@map("order_change_logs")
 }
 
+/// Mijozdan kelgan to‘lov (balansga qo‘shiladi).
+model Payment {
+  id                 Int      @id @default(autoincrement())
+  tenant_id          Int
+  client_id          Int
+  order_id           Int?
+  amount             Decimal  @db.Decimal(15, 2)
+  payment_type       String   @db.VarChar(64)
+  note               String?
+  created_by_user_id Int?
+  created_at         DateTime @default(now())
+  client             Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  created_by         User?    @relation("PaymentCreator", fields: [created_by_user_id], references: [id])
+  order              Order?   @relation(fields: [order_id], references: [id])
+  tenant             Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, client_id])
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, order_id])
+  @@map("client_payments")
+}
+
+/// Mahsulot qaytarish — ombor qoldig’ini oshiradi, ixtiyoriy pul qaytarish balansga.
+model SalesReturn {
+  id                 Int               @id @default(autoincrement())
+  tenant_id          Int
+  number             String            @db.VarChar(48)
+  client_id          Int?
+  order_id           Int?
+  warehouse_id       Int
+  /// posted | cancelled
+  status             String            @default("posted") @db.VarChar(16)
+  refund_amount      Decimal?          @db.Decimal(15, 2)
+  note               String?
+  created_by_user_id Int?
+  created_at         DateTime          @default(now())
+  /// Davr asosidagi vazvrat uchun
+  date_from          DateTime?
+  date_to            DateTime?
+  /// Vazvrat turi: order_full (holat o’zgartirish) yoki partial (polki — ro’yxatdan tanlab qaytarish)
+  return_type        String            @default("partial") @db.VarChar(20)
+  lines              SalesReturnLine[]
+  client             Client?           @relation(fields: [client_id], references: [id])
+  created_by         User?             @relation("SalesReturnCreator", fields: [created_by_user_id], references: [id])
+  order              Order?            @relation(fields: [order_id], references: [id])
+  tenant             Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  warehouse          Warehouse         @relation(fields: [warehouse_id], references: [id])
+
+  @@unique([tenant_id, number])
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@map("sales_returns")
+}
+
+model SalesReturnLine {
+  id         Int         @id @default(autoincrement())
+  return_id  Int
+  product_id Int
+  qty        Decimal     @db.Decimal(15, 3)
+  /// Shu qaytarishdagi bepul/bonus qismi
+  bonus_qty  Decimal?    @db.Decimal(15, 3)
+  /// Shu qaytarishdagi pullik qismi (bonus qayta hisoblashdan keyin)
+  paid_qty   Decimal?    @db.Decimal(15, 3)
+  product    Product     @relation(fields: [product_id], references: [id])
+  return     SalesReturn @relation(fields: [return_id], references: [id], onDelete: Cascade)
+
+  @@index([return_id])
+  @@index([product_id])
+  @@map("sales_return_lines")
+}
+
 model OrderItem {
   id         Int     @id @default(autoincrement())
   order_id   Int
-  order      Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
   product_id Int
-  product    Product @relation(fields: [product_id], references: [id])
   qty        Decimal @db.Decimal(15, 3)
   price      Decimal @db.Decimal(15, 2)
   total      Decimal @db.Decimal(15, 2)
   is_bonus   Boolean @default(false)
+  order      Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [product_id], references: [id])
 
   @@index([order_id])
   @@map("order_items")
@@ -619,15 +831,16 @@ model OrderItem {
 model TradeDirection {
   id                    Int      @id @default(autoincrement())
   tenant_id             Int
-  tenant                Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name                  String
   sort_order            Int      @default(0)
   code                  String?  @db.VarChar(20)
-  comment               String?  @db.Text
+  comment               String?
   is_active             Boolean  @default(true)
   use_in_order_proposal Boolean  @default(false)
   created_at            DateTime @default(now())
   updated_at            DateTime @updatedAt
+  tenant                Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  staff_users           User[]   @relation("UserTradeDirection")
 
   @@unique([tenant_id, code])
   @@index([tenant_id, is_active])
@@ -638,14 +851,14 @@ model TradeDirection {
 model SalesChannelRef {
   id         Int      @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
   code       String?  @db.VarChar(20)
-  comment    String?  @db.Text
+  comment    String?
   sort_order Int      @default(0)
   is_active  Boolean  @default(true)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@unique([tenant_id, code])
   @@index([tenant_id, is_active])
@@ -653,19 +866,18 @@ model SalesChannelRef {
 }
 
 model KpiGroup {
-  id         Int      @id @default(autoincrement())
+  id         Int               @id @default(autoincrement())
   tenant_id  Int
-  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   name       String
-  code       String?  @db.VarChar(20)
-  sort_order Int      @default(0)
-  comment    String?  @db.Text
-  is_active  Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  products KpiGroupProduct[]
-  agents   KpiGroupAgent[]
+  code       String?           @db.VarChar(20)
+  sort_order Int               @default(0)
+  comment    String?
+  is_active  Boolean           @default(true)
+  created_at DateTime          @default(now())
+  updated_at DateTime          @updatedAt
+  agents     KpiGroupAgent[]
+  products   KpiGroupProduct[]
+  tenant     Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, is_active])
   @@map("kpi_groups")
@@ -693,23 +905,66 @@ model KpiGroupAgent {
   @@map("kpi_group_agents")
 }
 
-model BonusRule {
-  id            Int       @id @default(autoincrement())
-  tenant_id     Int
-  tenant        Tenant    @relation(fields: [tenant_id], references: [id])
-  name          String
-  type          String
-  buy_qty       Int?
-  free_qty      Int?
-  min_sum       Decimal?  @db.Decimal(15, 2)
-  discount_pct  Decimal?  @db.Decimal(5, 2)
-  priority      Int       @default(0)
-  is_active     Boolean   @default(true)
-  valid_from    DateTime?
-  valid_to      DateTime?
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+/// Mahsulot uchun kategoriya/tur/kanal bo'yicha narx matritsasi — `ProductPrice` ustidan qo'shimcha chegirma/koeffitsiyent
+model PriceMatrix {
+  id              Int       @id @default(autoincrement())
+  tenant_id       Int
+  product_id      Int
+  client_category String    @db.VarChar(128)
+  client_type     String?   @db.VarChar(128)
+  sales_channel   String?   @db.VarChar(128)
+  price           Decimal   @db.Decimal(15, 2)
+  min_price       Decimal?  @db.Decimal(15, 2)
+  max_price       Decimal?  @db.Decimal(15, 2)
+  currency        String    @default("UZS") @db.VarChar(8)
+  valid_from      DateTime?
+  valid_to        DateTime?
+  is_active       Boolean   @default(true)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  product         Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  tenant          Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
+  @@unique([tenant_id, product_id, client_category, client_type, sales_channel, currency])
+  @@index([tenant_id, client_category])
+  @@index([tenant_id, product_id])
+  @@map("price_matrix")
+}
+
+/// KPI natijalari (agent performance tracking)
+model KpiResult {
+  id            Int      @id @default(autoincrement())
+  tenant_id     Int
+  user_id       Int
+  kpi_group_id  Int?
+  period_month  String   @db.VarChar(7) // "2026-04"
+  metric        String   @db.VarChar(64) // "sales_volume", "order_count", "payment_rate", ...
+  value         Decimal  @db.Decimal(15, 2)
+  target        Decimal? @db.Decimal(15, 2)
+  score         Decimal? @db.Decimal(5, 2) // 0-100
+  comment       String?
+  calculated_at DateTime @default(now())
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, user_id, period_month])
+  @@map("kpi_results")
+}
+
+model BonusRule {
+  id                   Int                  @id @default(autoincrement())
+  tenant_id            Int
+  name                 String
+  type                 String
+  buy_qty              Int?
+  free_qty             Int?
+  min_sum              Decimal?             @db.Decimal(15, 2)
+  discount_pct         Decimal?             @db.Decimal(5, 2)
+  priority             Int                  @default(0)
+  is_active            Boolean              @default(true)
+  valid_from           DateTime?
+  valid_to             DateTime?
+  created_at           DateTime             @default(now())
+  updated_at           DateTime             @updatedAt
   /// Doctor-style: mijoz toifasi (Client.category bilan mos kelishi mumkin)
   client_category      String?
   payment_type         String?
@@ -717,19 +972,18 @@ model BonusRule {
   sales_channel        String?
   price_type           String?
   /// Bo‘sh = barcha mahsulotlar (engine talqini)
-  product_ids          Int[] @default([])
-  bonus_product_ids    Int[] @default([])
-  product_category_ids Int[] @default([])
-  target_all_clients   Boolean @default(true)
-  selected_client_ids  Int[] @default([])
-
-  is_manual         Boolean @default(false)
+  product_ids          Int[]                @default([])
+  bonus_product_ids    Int[]                @default([])
+  product_category_ids Int[]                @default([])
+  target_all_clients   Boolean              @default(true)
+  selected_client_ids  Int[]                @default([])
+  is_manual            Boolean              @default(false)
   /// true: har to‘liq blok uchun bonus (masalan 13 ta → 6+6 → 2 bonus); false: engine boshqa siyosat
-  in_blocks         Boolean @default(true)
-  once_per_client   Boolean @default(false)
-  one_plus_one_gift Boolean @default(false)
-
-  conditions BonusRuleCondition[]
+  in_blocks            Boolean              @default(true)
+  once_per_client      Boolean              @default(false)
+  one_plus_one_gift    Boolean              @default(false)
+  conditions           BonusRuleCondition[]
+  tenant               Tenant               @relation(fields: [tenant_id], references: [id])
 
   @@index([tenant_id])
   @@map("bonus_rules")
@@ -738,13 +992,13 @@ model BonusRule {
 model BonusRuleCondition {
   id            Int       @id @default(autoincrement())
   bonus_rule_id Int
-  bonus_rule    BonusRule @relation(fields: [bonus_rule_id], references: [id], onDelete: Cascade)
   min_qty       Decimal?  @db.Decimal(15, 3)
   max_qty       Decimal?  @db.Decimal(15, 3)
   step_qty      Decimal   @db.Decimal(15, 3)
   bonus_qty     Decimal   @db.Decimal(15, 3)
   max_bonus_qty Decimal?  @db.Decimal(15, 3)
   sort_order    Int       @default(0)
+  bonus_rule    BonusRule @relation(fields: [bonus_rule_id], references: [id], onDelete: Cascade)
 
   @@index([bonus_rule_id])
   @@map("bonus_rule_conditions")
@@ -752,23 +1006,23 @@ model BonusRuleCondition {
 
 /// Kassa (kassa punkti) — foydalanuvchilar rollari va joylashuv
 model CashDesk {
-  id          Int      @id @default(autoincrement())
-  tenant_id   Int
-  tenant      Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  name        String
-  timezone    String   @default("Asia/Tashkent") @db.VarChar(64)
-  sort_order  Int?
-  code        String?  @db.VarChar(20)
-  comment     String?  @db.Text
-  latitude    Decimal? @db.Decimal(10, 7)
-  longitude   Decimal? @db.Decimal(10, 7)
-  is_active   Boolean  @default(true)
+  id         Int                @id @default(autoincrement())
+  tenant_id  Int
+  name       String
+  timezone   String             @default("Asia/Tashkent") @db.VarChar(64)
+  sort_order Int?
+  code       String?            @db.VarChar(20)
+  comment    String?
+  latitude   Decimal?           @db.Decimal(10, 7)
+  longitude  Decimal?           @db.Decimal(10, 7)
+  is_active  Boolean            @default(true)
   /// Yopilgan / yakunlangan sessiya holati (UI «статус закрытия»)
-  is_closed   Boolean  @default(false)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  links CashDeskUserLink[]
+  is_closed  Boolean            @default(false)
+  created_at DateTime           @default(now())
+  updated_at DateTime           @updatedAt
+  shifts     CashDeskShift[]
+  links      CashDeskUserLink[]
+  tenant     Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, is_active])
   @@map("cash_desks")
@@ -776,17 +1030,229 @@ model CashDesk {
 
 /// Bir kassaga biriktirilgan foydalanuvchi (bir foydalanuvchi bir kassada faqat bitta «rol slot»ida)
 model CashDeskUserLink {
-  id            Int      @id @default(autoincrement())
-  cash_desk_id  Int
-  cash_desk     CashDesk @relation(fields: [cash_desk_id], references: [id], onDelete: Cascade)
-  user_id       Int
-  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id           Int      @id @default(autoincrement())
+  cash_desk_id Int
+  user_id      Int
   /// cashier | manager | operator | supervisor | expeditor
-  link_role     String   @db.VarChar(32)
-  created_at    DateTime @default(now())
+  link_role    String   @db.VarChar(32)
+  created_at   DateTime @default(now())
+  cash_desk    CashDesk @relation(fields: [cash_desk_id], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([cash_desk_id, user_id])
   @@index([cash_desk_id, link_role])
   @@index([user_id])
   @@map("cash_desk_user_links")
+}
+
+/// Kassa smenasi: ochish/yopish, kassa qoldiqlari.
+model CashDeskShift {
+  id                Int       @id @default(autoincrement())
+  tenant_id         Int
+  cash_desk_id      Int
+  opened_at         DateTime  @default(now())
+  closed_at         DateTime?
+  opened_by_user_id Int?
+  closed_by_user_id Int?
+  opening_float     Decimal?  @db.Decimal(15, 2)
+  closing_float     Decimal?  @db.Decimal(15, 2)
+  notes             String?
+  cash_desk         CashDesk  @relation(fields: [cash_desk_id], references: [id], onDelete: Cascade)
+  closed_by         User?     @relation("CashDeskShiftClosedBy", fields: [closed_by_user_id], references: [id])
+  opened_by         User?     @relation("CashDeskShiftOpenedBy", fields: [opened_by_user_id], references: [id])
+  tenant            Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, cash_desk_id])
+  @@index([cash_desk_id, closed_at])
+  @@map("cash_desk_shifts")
+}
+
+/// Inventarizatsiya hujjati (draft → posted).
+model StockTake {
+  id                 Int             @id @default(autoincrement())
+  tenant_id          Int
+  warehouse_id       Int
+  status             String          @default("draft") @db.VarChar(16)
+  title              String?         @db.VarChar(500)
+  notes              String?
+  created_by_user_id Int?
+  posted_at          DateTime?
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+  lines              StockTakeLine[]
+  created_by         User?           @relation("StockTakeCreator", fields: [created_by_user_id], references: [id])
+  tenant             Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  warehouse          Warehouse       @relation(fields: [warehouse_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, warehouse_id])
+  @@index([tenant_id, status])
+  @@map("stock_takes")
+}
+
+model StockTakeLine {
+  id            Int       @id @default(autoincrement())
+  stock_take_id Int
+  product_id    Int
+  system_qty    Decimal   @db.Decimal(15, 3)
+  counted_qty   Decimal?  @db.Decimal(15, 3)
+  product       Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  stock_take    StockTake @relation(fields: [stock_take_id], references: [id], onDelete: Cascade)
+
+  @@unique([stock_take_id, product_id])
+  @@index([stock_take_id])
+  @@map("stock_take_lines")
+}
+
+/// Agent tashrif / check-in (maydon).
+model AgentVisit {
+  id             Int       @id @default(autoincrement())
+  tenant_id      Int
+  agent_id       Int
+  client_id      Int?
+  checked_in_at  DateTime  @default(now())
+  checked_out_at DateTime?
+  latitude       Decimal?  @db.Decimal(11, 8)
+  longitude      Decimal?  @db.Decimal(11, 8)
+  notes          String?
+  agent          User      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  client         Client?   @relation(fields: [client_id], references: [id])
+  tenant         Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, agent_id])
+  @@index([tenant_id, checked_in_at(sort: Desc)])
+  @@map("agent_visits")
+}
+
+model TenantTask {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  title              String    @db.VarChar(500)
+  description        String?
+  status             String    @default("open") @db.VarChar(32)
+  priority           String    @default("normal") @db.VarChar(16)
+  due_at             DateTime?
+  assignee_user_id   Int?
+  created_by_user_id Int?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  assignee           User?     @relation("TenantTaskAssignee", fields: [assignee_user_id], references: [id])
+  created_by         User?     @relation("TenantTaskCreator", fields: [created_by_user_id], references: [id])
+  tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, status])
+  @@index([tenant_id, assignee_user_id])
+  @@map("tenant_tasks")
+}
+
+/// Kunlik marshrut (agent + sana + mijozlar tartibi).
+model AgentRouteDay {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  agent_id   Int
+  route_date DateTime
+  stops      Json     @default("[]")
+  notes      String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  agent      User     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, agent_id, route_date])
+  @@index([tenant_id, route_date])
+  @@map("agent_route_days")
+}
+
+/// Ilova ichidagi bildirishnomalar (push o’rniga polling / keyinroq FCM).
+model InAppNotification {
+  id         Int       @id @default(autoincrement())
+  tenant_id  Int
+  user_id    Int
+  title      String    @db.VarChar(500)
+  body       String?
+  link_href  String?   @db.VarChar(512)
+  read_at    DateTime?
+  created_at DateTime  @default(now())
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, user_id, read_at])
+  @@map("in_app_notifications")
+}
+
+/// Hudud / Territory — agentlarga biriktiriladigan savdo hududlari
+model Territory {
+  id          Int                 @id @default(autoincrement())
+  tenant_id   Int
+  name        String              @db.VarChar(256)
+  code        String?             @db.VarChar(64)
+  description String?
+  polygon     Json                @default("[]") // [{lat: number, lng: number}, ...]
+  is_active   Boolean             @default(true)
+  created_at  DateTime            @default(now())
+  updated_at  DateTime            @updatedAt
+  tenant      Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  userLinks   TerritoryUserLink[]
+
+  @@unique([tenant_id, code])
+  @@index([tenant_id])
+  @@map("territories")
+}
+
+model TerritoryUserLink {
+  id             Int       @id @default(autoincrement())
+  territory_id   Int
+  user_id        Int
+  assigned_at    DateTime  @default(now())
+  assigned_by    Int?
+  territory      Territory @relation(fields: [territory_id], references: [id], onDelete: Cascade)
+  assignedByUser User?     @relation("TerritoryAssigner", fields: [assigned_by], references: [id])
+
+  @@unique([territory_id, user_id])
+  @@index([territory_id])
+  @@index([user_id])
+  @@map("territory_user_links")
+}
+
+/// Xarajat (Expense) — draft → approved / rejected
+model Expense {
+  id                  Int      @id @default(autoincrement())
+  tenant_id           Int
+  expense_type        String   @db.VarChar(64)
+  agent_id            Int?
+  amount              Decimal  @db.Decimal(15, 2)
+  currency            String   @default("UZS") @db.VarChar(8)
+  warehouse_id        Int?
+  status              String   @default("draft") @db.VarChar(16)
+  note                String?
+  expense_date        DateTime
+  created_by_user_id  Int?
+  approved_by_user_id Int?
+  rejection_note      String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  tenant              Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by          User?    @relation("ExpenseCreator", fields: [created_by_user_id], references: [id])
+  approved_by         User?    @relation("ExpenseApprover", fields: [approved_by_user_id], references: [id])
+
+  @@index([tenant_id, status])
+  @@index([tenant_id, expense_date(sort: Desc)])
+  @@index([tenant_id, expense_type])
+  @@index([tenant_id, agent_id])
+  @@index([tenant_id, warehouse_id])
+  @@map("expenses")
+}
+
+/// Toʻlov taqsimoti — payment -> order allocation (FIFO)
+model PaymentAllocation {
+  id         Int      @id @default(autoincrement())
+  tenant_id  Int
+  payment_id Int
+  order_id   Int
+  amount     Decimal  @db.Decimal(15, 2)
+  created_at DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, payment_id])
+  @@index([tenant_id, order_id])
+  @@map("payment_allocations")
 }

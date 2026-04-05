@@ -13,7 +13,7 @@
  * - Категория клиента (код) → `category`
  * - Тип клиента (код) → `client_type_code`
  * - Формат (код) → `client_format`
- * - Город (код) → `district` / `region` (tuman, viloyat)
+ * - Город (код) → `city` / `district` / `region`
  * - Широта / Долгота → `gps_text` dan parse yoki kelajakda alohida maydonlar
  * - Агент 1 → `agent_name` (User)
  * - Агент 2…10 → hozircha birovchi agent yo‘q → —
@@ -38,17 +38,19 @@ export function displayAddress(row: ClientRow): string | null {
     nonEmpty(row.apartment) ? `кв.${row.apartment}` : null,
     nonEmpty(row.neighborhood),
     nonEmpty(row.district),
+    nonEmpty(row.city),
     nonEmpty(row.region)
   ].filter(Boolean) as string[];
   return parts.length ? parts.join(", ") : null;
 }
 
-/** Shahar / hudud: tuman + viloyat */
+/** Shahar / hudud: shahar, tuman, viloyat */
 export function displayCityCode(row: ClientRow): string | null {
+  const c = nonEmpty(row.city);
   const d = nonEmpty(row.district);
   const r = nonEmpty(row.region);
-  if (d && r) return `${d}, ${r}`;
-  return d ?? r ?? null;
+  const parts = [c, d, r].filter(Boolean) as string[];
+  return parts.length ? parts.join(", ") : null;
 }
 
 export function parseGpsText(gps: string | null): { lat: string | null; lng: string | null } {
@@ -151,4 +153,25 @@ export function displayClientType(row: ClientRow): string | null {
 
 export function displayFormatCode(row: ClientRow): string | null {
   return nonEmpty(row.client_format);
+}
+
+/** Slot bo‘yicha jadvalda «mazmun» bormi (agent / kun / eks.) — bo‘sh ustunlarni yashirish uchun */
+export function clientSlotHasAnyDisplayData(row: ClientRow, slot: number): boolean {
+  if (slot < 1 || slot > 10) return false;
+  if (getVisitWeekdaysForSlot(row, slot).length > 0) return true;
+  if (displayAgentName(row, slot)) return true;
+  if (displayAgentDay(row, slot)) return true;
+  if (displayExpeditorPhone(row, slot)) return true;
+  return false;
+}
+
+/** Joriy qatorlar ro‘yxatida qaysi slotlar kamida bitta maydonda maʼlumotga ega */
+export function getClientSlotsWithDataInRows(rows: ClientRow[]): Set<number> {
+  const s = new Set<number>();
+  for (const row of rows) {
+    for (let slot = 1; slot <= 10; slot++) {
+      if (clientSlotHasAnyDisplayData(row, slot)) s.add(slot);
+    }
+  }
+  return s;
 }

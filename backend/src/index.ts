@@ -4,6 +4,7 @@ import { buildApp } from "./app";
 import { prisma } from "./config/database";
 import { logger } from "./config/logger";
 import { closeOrderEventBusRedis, initOrderEventBusRedis } from "./lib/order-event-bus";
+import { disableAutoClose, enableAutoClose } from "./lib/order-auto-cron";
 
 async function main() {
   await prisma.$connect();
@@ -13,7 +14,11 @@ async function main() {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`Server listening on port ${env.PORT}`);
 
+  enableAutoClose();
+  app.log.info("Auto-status cron worker enabled.");
+
   const shutdown = async () => {
+    disableAutoClose();
     await app.close();
     await closeOrderEventBusRedis();
     process.exit(0);

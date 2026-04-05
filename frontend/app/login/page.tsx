@@ -80,6 +80,12 @@ export default function LoginPage() {
           <div className="mx-auto h-1.5 w-12 rounded-full bg-primary" aria-hidden />
           <h1 className="text-xl font-semibold tracking-tight">Kirish</h1>
           <p className="text-sm text-muted-foreground">Diler slug va foydalanuvchi ma’lumotlari</p>
+          <p className="text-xs text-muted-foreground">
+            Import: <code className="text-[10px]">npm run import:once</code> — slug bilan bir xil kirish kerak
+            (odatda <span className="font-medium">test1</span>). Namuna xodimlar:{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">demo_sup_sample</code> va hokazo — parol{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">Parol123!</code>.
+          </p>
         </div>
         <form className="space-y-4" onSubmit={onSubmit}>
           <div className="space-y-2">

@@ -5,6 +5,7 @@ import { prisma } from "../../config/database";
 import { createCashDeskUserLink } from "../cash-desks/cash-desks.service";
 import { listActiveTradeDirectionLabels } from "../sales-directions/sales-directions.service";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import { territoryRegionPickerNames } from "../tenant-settings/tenant-settings.service";
 import { listTenantAuditEvents } from "../audit-events/audit-events.service";
 
 type StaffKind = "agent" | "expeditor" | "supervisor" | "operator";
@@ -47,6 +48,7 @@ export type StaffRow = {
   /** Bir nechta narx turi (ko‘rsatish) */
   price_types: string[];
   warehouse: string | null;
+  trade_direction_id: number | null;
   trade_direction: string | null;
   branch: string | null;
   position: string | null;
@@ -94,6 +96,7 @@ export type CreateStaffInput = {
   agent_price_types?: string[];
   warehouse_id?: number | null;
   return_warehouse_id?: number | null;
+  trade_direction_id?: number | null;
   trade_direction?: string | null;
   branch?: string | null;
   position?: string | null;
@@ -126,6 +129,59 @@ function kindRole(kind: StaffKind): string {
   if (kind === "supervisor") return "supervisor";
   if (kind === "operator") return "operator";
   return "expeditor";
+}
+
+function tradeDirectionDisplayFromRef(
+  ref: { code: string | null; name: string } | null | undefined,
+  legacy: string | null
+): string | null {
+  if (ref) {
+    const v = (ref.code?.trim() || ref.name).trim();
+    if (v) return v;
+  }
+  return legacy?.trim() || null;
+}
+
+async function applyTradeDirectionPatch(
+  tenantId: number,
+  input: { trade_direction_id?: number | null; trade_direction?: string | null },
+  data: Prisma.UserUpdateInput
+): Promise<void> {
+  if (input.trade_direction_id !== undefined) {
+    if (input.trade_direction_id === null) {
+      data.trade_direction_row = { disconnect: true };
+      data.trade_direction = null;
+    } else {
+      const row = await prisma.tradeDirection.findFirst({
+        where: { id: input.trade_direction_id, tenant_id: tenantId }
+      });
+      if (!row) throw new Error("BAD_TRADE_DIRECTION");
+      data.trade_direction = (row.code?.trim() || row.name).trim() || null;
+      data.trade_direction_row = { connect: { id: row.id } };
+    }
+    return;
+  }
+  if (input.trade_direction !== undefined) {
+    data.trade_direction_row = { disconnect: true };
+    data.trade_direction = input.trade_direction?.trim() || null;
+  }
+}
+
+async function tradeDirectionForCreate(
+  tenantId: number,
+  input: { trade_direction_id?: number | null; trade_direction?: string | null }
+): Promise<{ label: string | null; connectId: number | null }> {
+  if (input.trade_direction_id != null && input.trade_direction_id > 0) {
+    const row = await prisma.tradeDirection.findFirst({
+      where: { id: input.trade_direction_id, tenant_id: tenantId }
+    });
+    if (!row) throw new Error("BAD_TRADE_DIRECTION");
+    return {
+      label: (row.code?.trim() || row.name).trim() || null,
+      connectId: row.id
+    };
+  }
+  return { label: input.trade_direction?.trim() || null, connectId: null };
 }
 
 function toFio(u: { first_name: string | null; last_name: string | null; middle_name: string | null; name: string }) {
@@ -314,6 +370,21 @@ export async function listSupervisorFilterOptions(tenantId: number): Promise<{ p
   return { positions: [...positions].sort(sort) };
 }
 
+function refStringListFromTenantSettings(settings: unknown, key: string): string[] {
+  const ref = (settings as { references?: Record<string, unknown> } | null | undefined)?.references;
+  const v = ref?.[key];
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+    .map((s) => s.trim());
+}
+
+/**
+ * Ekspektor filtrlari va «Условия привязки → Территория» tanlovlari.
+ * Avval faqat boshqa ekspektorlarning `User.territory` qatoridan yig‘ilgan — bo‘sh tenantlarda «Нет вариантов» chiqardi.
+ * Endi tenant `references` (viloyat/shahar/tuman/zona/mahalla) va mijoz jadvalidagi noyob qiymatlar ham qo‘shiladi
+ * (`expeditorRulesMatch` mijoz manzil matnida substring qidiradi).
+ */
 export async function listExpeditorFilterOptions(tenantId: number): Promise<{
   branches: string[];
   trade_directions: string[];
@@ -322,18 +393,59 @@ export async function listExpeditorFilterOptions(tenantId: number): Promise<{
   /** Filtrlarda «область/город» uchun qisqa tokenlar (territory qatoridan ajratilgan) */
   territory_tokens: string[];
 }> {
-  const [rows, dbTrade] = await Promise.all([
+  const [rows, dbTrade, tenantRow, cr, cc, cd, cz, cn] = await Promise.all([
     prisma.user.findMany({
       where: { tenant_id: tenantId, role: "expeditor" },
       select: { branch: true, trade_direction: true, position: true, territory: true }
     }),
-    listActiveTradeDirectionLabels(tenantId)
+    listActiveTradeDirectionLabels(tenantId),
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { settings: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, region: { not: null } },
+      distinct: ["region"],
+      select: { region: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, city: { not: null } },
+      distinct: ["city"],
+      select: { city: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, district: { not: null } },
+      distinct: ["district"],
+      select: { district: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, zone: { not: null } },
+      distinct: ["zone"],
+      select: { zone: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, neighborhood: { not: null } },
+      distinct: ["neighborhood"],
+      select: { neighborhood: true }
+    })
   ]);
   const branches = new Set<string>();
   const trade_directions = new Set<string>();
   const positions = new Set<string>();
   const territories = new Set<string>();
   const territory_tokens = new Set<string>();
+
+  const pushTerritoryToken = (raw: string | null | undefined) => {
+    const t = (raw ?? "").trim();
+    if (t.length < 2) return;
+    territories.add(t);
+    territory_tokens.add(t);
+    for (const part of t.split(/[,;\n|]+/)) {
+      const p = part.trim();
+      if (p.length >= 2) territory_tokens.add(p);
+    }
+  };
+
   for (const r of rows) {
     if (r.branch?.trim()) branches.add(r.branch.trim());
     if (r.trade_direction?.trim()) trade_directions.add(r.trade_direction.trim());
@@ -346,6 +458,21 @@ export async function listExpeditorFilterOptions(tenantId: number): Promise<{
       }
     }
   }
+
+  const st = tenantRow?.settings;
+  const refObj = (st as { references?: Record<string, unknown> } | null | undefined)?.references;
+  for (const s of territoryRegionPickerNames(refObj)) pushTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_cities")) pushTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_districts")) pushTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_zones")) pushTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_neighborhoods")) pushTerritoryToken(s);
+
+  for (const r of cr) pushTerritoryToken(r.region);
+  for (const r of cc) pushTerritoryToken(r.city);
+  for (const r of cd) pushTerritoryToken(r.district);
+  for (const r of cz) pushTerritoryToken(r.zone);
+  for (const r of cn) pushTerritoryToken(r.neighborhood);
+
   for (const v of dbTrade) trade_directions.add(v);
   const sort = (a: string, b: string) => a.localeCompare(b, "ru");
   return {
@@ -396,7 +523,8 @@ export async function listStaff(
     include: {
       warehouse: { select: { name: true } },
       return_warehouse: { select: { name: true } },
-      supervisor: { select: { id: true, name: true } }
+      supervisor: { select: { id: true, name: true } },
+      trade_direction_row: { select: { id: true, name: true, code: true } }
     },
     orderBy: { created_at: "desc" }
   });
@@ -491,7 +619,8 @@ export async function listStaff(
     price_type: u.price_type,
     price_types: mergePriceTypesForUser(u.agent_price_types, u.price_type),
     warehouse: u.warehouse?.name ?? null,
-    trade_direction: u.trade_direction,
+    trade_direction_id: u.trade_direction_id ?? null,
+    trade_direction: tradeDirectionDisplayFromRef(u.trade_direction_row, u.trade_direction),
     branch: u.branch,
     position: u.position,
     created_at: u.created_at.toISOString(),
@@ -683,6 +812,8 @@ export async function createStaff(
           ? [legacyPrice]
           : [];
 
+  const tdRes = await tradeDirectionForCreate(tenantId, input);
+
   const created = await prisma.user.create({
     data: {
       tenant_id: tenantId,
@@ -710,7 +841,7 @@ export async function createStaff(
       kpi_color: input.kpi_color?.trim().slice(0, 16) || null,
       warehouse_id: input.warehouse_id ?? null,
       return_warehouse_id: input.return_warehouse_id ?? null,
-      trade_direction: input.trade_direction?.trim() || null,
+      trade_direction: tdRes.label,
       branch: input.branch?.trim() || null,
       position: input.position?.trim() || null,
       app_access: input.app_access ?? true,
@@ -769,6 +900,7 @@ export type PatchAgentInput = {
   agent_price_types?: string[];
   warehouse_id?: number | null;
   return_warehouse_id?: number | null;
+  trade_direction_id?: number | null;
   trade_direction?: string | null;
   branch?: string | null;
   position?: string | null;
@@ -854,7 +986,9 @@ export async function patchAgent(
         ? { disconnect: true }
         : { connect: { id: input.return_warehouse_id } };
   }
-  if (input.trade_direction !== undefined) data.trade_direction = input.trade_direction?.trim() || null;
+  if (input.trade_direction_id !== undefined || input.trade_direction !== undefined) {
+    await applyTradeDirectionPatch(tenantId, input, data);
+  }
   if (input.branch !== undefined) data.branch = input.branch?.trim() || null;
   if (input.position !== undefined) data.position = input.position?.trim() || null;
   if (input.app_access !== undefined) data.app_access = input.app_access;
@@ -1000,7 +1134,9 @@ export async function patchSupervisor(
         ? { disconnect: true }
         : { connect: { id: input.return_warehouse_id } };
   }
-  if (input.trade_direction !== undefined) data.trade_direction = input.trade_direction?.trim() || null;
+  if (input.trade_direction_id !== undefined || input.trade_direction !== undefined) {
+    await applyTradeDirectionPatch(tenantId, input, data);
+  }
   if (input.branch !== undefined) data.branch = input.branch?.trim() || null;
   if (input.position !== undefined) data.position = input.position?.trim() || null;
   if (input.app_access !== undefined) data.app_access = input.app_access;
@@ -1780,7 +1916,9 @@ export async function patchExpeditor(
         ? { disconnect: true }
         : { connect: { id: input.return_warehouse_id } };
   }
-  if (input.trade_direction !== undefined) data.trade_direction = input.trade_direction?.trim() || null;
+  if (input.trade_direction_id !== undefined || input.trade_direction !== undefined) {
+    await applyTradeDirectionPatch(tenantId, input, data);
+  }
   if (input.branch !== undefined) data.branch = input.branch?.trim() || null;
   if (input.position !== undefined) data.position = input.position?.trim() || null;
   if (input.app_access !== undefined) data.app_access = input.app_access;

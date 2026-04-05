@@ -119,6 +119,8 @@ export type BranchDto = {
   territory?: string | null;
   city?: string | null;
   cashbox?: string | null;
+  /** Filial uchun asosiy kassa (`cash_desks.id`) */
+  cash_desk_id?: number | null;
   user_links?: {
     role: string;
     user_ids: number[];
@@ -148,6 +150,7 @@ export type TenantProfileDto = {
     client_product_category_refs: string[];
     /** Manzil / logistika — mijoz kartasida tanlanadi, shu yerda yaratiladi */
     client_districts: string[];
+    client_cities: string[];
     client_neighborhoods: string[];
     client_zones: string[];
     client_logistics_services: string[];
@@ -360,6 +363,14 @@ function parseBranch(item: unknown): BranchDto | null {
   const territory = typeof row.territory === "string" ? row.territory.trim() : "";
   const city = typeof row.city === "string" ? row.city.trim() : "";
   const cashbox = typeof row.cashbox === "string" ? row.cashbox.trim() : "";
+  let cash_desk_id: number | null = null;
+  const rawDesk = row.cash_desk_id;
+  if (typeof rawDesk === "number" && Number.isInteger(rawDesk) && rawDesk > 0) {
+    cash_desk_id = rawDesk;
+  } else if (typeof rawDesk === "string" && /^\d+$/.test(rawDesk.trim())) {
+    const n = Number.parseInt(rawDesk.trim(), 10);
+    if (n > 0) cash_desk_id = n;
+  }
   const user_links = Array.isArray(row.user_links)
     ? row.user_links
         .map((x) => {
@@ -384,6 +395,7 @@ function parseBranch(item: unknown): BranchDto | null {
     territory: territory || null,
     city: city || null,
     cashbox: cashbox || null,
+    cash_desk_id,
     user_links
   };
 }
@@ -393,16 +405,100 @@ function branchesFromUnknown(v: unknown): BranchDto[] {
   return v.map(parseBranch).filter((x): x is BranchDto => x != null);
 }
 
-function flattenActiveTerritoryNames(nodes: TerritoryNodeDto[]): string[] {
-  const out: string[] = [];
-  const walk = (list: TerritoryNodeDto[]) => {
+async function assertBranchCashDeskAssignments(
+  tenantId: number,
+  branches: { cash_desk_id?: number | null }[]
+): Promise<void> {
+  const ids: number[] = [];
+  for (const b of branches) {
+    if (b.cash_desk_id != null && b.cash_desk_id > 0) ids.push(b.cash_desk_id);
+  }
+  if (!ids.length) return;
+  const uniq = new Set(ids);
+  if (uniq.size !== ids.length) throw new Error("DUPLICATE_BRANCH_CASH_DESK");
+  const n = await prisma.cashDesk.count({
+    where: { tenant_id: tenantId, id: { in: [...uniq] } }
+  });
+  if (n !== uniq.size) throw new Error("INVALID_BRANCH_CASH_DESK");
+}
+
+/** Kassa qatorida filial nomini ko‘rsatish (profil JSON bo‘yicha). */
+export async function mapCashDeskIdToBranchName(tenantId: number): Promise<Map<number, string>> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const branches = branchesFromUnknown((asRecord(row?.settings) as any).references?.branches);
+  const m = new Map<number, string>();
+  for (const b of branches) {
+    const cid = b.cash_desk_id;
+    if (typeof cid === "number" && cid > 0 && !m.has(cid)) m.set(cid, b.name);
+  }
+  return m;
+}
+
+function maxTerritoryDepth(nodes: TerritoryNodeDto[]): number {
+  if (!nodes?.length) return 0;
+  let m = 1;
+  for (const n of nodes) {
+    const ch = n.children ?? [];
+    if (ch.length) m = Math.max(m, 1 + maxTerritoryDepth(ch));
+  }
+  return m;
+}
+
+function activeTerritoryNamesAtDepth(nodes: TerritoryNodeDto[], targetDepth: number): string[] {
+  const out = new Set<string>();
+  const walk = (list: TerritoryNodeDto[], d: number) => {
     for (const n of list) {
-      if (n.active !== false && n.name.trim()) out.push(n.name.trim());
-      if (n.children.length) walk(n.children);
+      if (n.active !== false && d === targetDepth) {
+        const t = (n.name ?? "").trim();
+        if (t) out.add(t);
+      }
+      const ch = n.children ?? [];
+      if (ch.length) walk(ch, d + 1);
     }
   };
-  walk(nodes);
-  return Array.from(new Set(out));
+  walk(nodes, 0);
+  return [...out].sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/**
+ * Mijoz «Teritoriya», filial «Территория», `references.regions` — daraxtdan faqat viloyat qatlami.
+ * 3+ daraja (masalan Zona→Oblast→Gorod) bo‘lsa ildizdagi zonalar ro‘yxatga kirmaydi.
+ */
+export function territoryRegionPickerNames(ref: Record<string, unknown> | undefined): string[] {
+  if (ref == null) return [];
+  const nodes = territoryNodesFromUnknown(ref.territory_nodes);
+  if (nodes.length === 0) {
+    return stringArrayFromUnknown(ref.regions);
+  }
+  const L = stringArrayFromUnknown(ref.territory_levels).length;
+  const treeDepth = maxTerritoryDepth(nodes);
+  let d = 0;
+  if (L >= 3) d = 1;
+  else if (L >= 1) d = 0;
+  else if (treeDepth >= 3) d = 1;
+  else d = 0;
+  const picked = activeTerritoryNamesAtDepth(nodes, d);
+  return picked.length > 0 ? picked : stringArrayFromUnknown(ref.regions);
+}
+
+/** Filiallar «shahar» tanlovi — daraxtning shahar qatlami. */
+export function territoryCityPickerNames(ref: Record<string, unknown> | undefined): string[] {
+  if (ref == null) return [];
+  const nodes = territoryNodesFromUnknown(ref.territory_nodes);
+  if (nodes.length === 0) return [];
+  const L = stringArrayFromUnknown(ref.territory_levels).length;
+  const treeDepth = maxTerritoryDepth(nodes);
+  let d = 1;
+  if (L >= 3) d = 2;
+  else if (L === 2) d = 1;
+  else if (L === 1) d = 1;
+  else if (treeDepth >= 3) d = 2;
+  else if (treeDepth >= 2) d = 1;
+  else d = 1;
+  return activeTerritoryNamesAtDepth(nodes, d);
 }
 
 function legacyRowsToNodes(rows: { zone: string; region: string; cities: string[] }[]): TerritoryNodeDto[] {
@@ -496,7 +592,10 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
     references: {
       payment_types: stringArrayFromUnknown(ref.payment_types),
       return_reasons: stringArrayFromUnknown(ref.return_reasons),
-      regions: stringArrayFromUnknown(ref.regions),
+      regions:
+        territory_nodes.length > 0
+          ? territoryRegionPickerNames({ ...ref, territory_nodes } as Record<string, unknown>)
+          : stringArrayFromUnknown(ref.regions),
       client_categories,
       client_type_codes,
       client_formats,
@@ -507,6 +606,7 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
       trade_directions: mergeStrLists(tradeFromSettings, dbTradeLabels),
       client_product_category_refs: stringArrayFromUnknown(ref.client_product_category_refs),
       client_districts: stringArrayFromUnknown(ref.client_districts),
+      client_cities: stringArrayFromUnknown(ref.client_cities),
       client_neighborhoods: stringArrayFromUnknown(ref.client_neighborhoods),
       client_zones: stringArrayFromUnknown(ref.client_zones),
       client_logistics_services: stringArrayFromUnknown(ref.client_logistics_services),
@@ -540,6 +640,7 @@ export async function patchTenantProfile(
       sales_channels?: string[];
       client_product_category_refs?: string[];
       client_districts?: string[];
+      client_cities?: string[];
       client_neighborhoods?: string[];
       client_zones?: string[];
       client_logistics_services?: string[];
@@ -618,6 +719,9 @@ export async function patchTenantProfile(
       if (patch.references.client_districts != null) {
         merged.client_districts = patch.references.client_districts;
       }
+      if (patch.references.client_cities != null) {
+        merged.client_cities = patch.references.client_cities;
+      }
       if (patch.references.client_neighborhoods != null) {
         merged.client_neighborhoods = patch.references.client_neighborhoods;
       }
@@ -629,16 +733,20 @@ export async function patchTenantProfile(
       }
       if (patch.references.territory_levels != null) {
         merged.territory_levels = patch.references.territory_levels;
+        const nodesRaw = merged.territory_nodes;
+        if (nodesRaw != null && Array.isArray(nodesRaw) && nodesRaw.length > 0) {
+          merged.regions = territoryRegionPickerNames(merged as Record<string, unknown>);
+        }
       }
       if (patch.references.territory_nodes != null) {
         merged.territory_nodes = patch.references.territory_nodes;
-        // Mavjud mijoz modullarida ishlatiladigan `regions` ro'yxatini ham yangilab boramiz.
-        merged.regions = flattenActiveTerritoryNames(patch.references.territory_nodes);
+        merged.regions = territoryRegionPickerNames(merged as Record<string, unknown>);
       }
       if (patch.references.unit_measures != null) {
         merged.unit_measures = patch.references.unit_measures;
       }
       if (patch.references.branches != null) {
+        await assertBranchCashDeskAssignments(tenantId, patch.references.branches);
         merged.branches = patch.references.branches;
       }
       if (patch.references.client_format_entries != null) {

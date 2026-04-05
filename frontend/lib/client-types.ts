@@ -37,6 +37,7 @@ export type ClientRow = {
   working_hours: string | null;
   region: string | null;
   district: string | null;
+  city: string | null;
   neighborhood: string | null;
   street: string | null;
   house_number: string | null;

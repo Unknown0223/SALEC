@@ -1,14 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
-import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { DIRECTORY_READ_ROLES, getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import { createCashDesk, getCashDesk, listCashDesks, listCashDeskPickers, patchCashDesk } from "./cash-desks.service";
+import {
+  closeShift,
+  getOpenShift,
+  listShiftsForDesk,
+  openShift
+} from "./cash-desk-shifts.service";
 
 const writeRoles = ["admin", "operator"] as const;
 
 const linkSchema = z.object({
   user_id: z.number().int().positive(),
-  link_role: z.enum(["cashier", "manager", "operator", "supervisor", "expeditor"])
+  link_role: z.enum([
+    "agent",
+    "cashier",
+    "manager",
+    "operator",
+    "storekeeper",
+    "supervisor",
+    "expeditor"
+  ])
 });
 
 const createBodySchema = z.object({
@@ -86,6 +100,85 @@ export async function registerCashDeskRoutes(app: FastifyInstance) {
       if (msg === "UserRoleMismatch" || msg === "InvalidLinkRole") {
         return reply.status(400).send({ error: msg });
       }
+      throw e;
+    }
+  });
+
+  app.get("/api/:slug/cash-desks/:id/shifts", {
+    preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const id = z.coerce.number().int().positive().parse((request.params as { id: string }).id);
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(100).optional() }).parse(request.query);
+    const rows = await listShiftsForDesk(tenantId, id, q.limit ?? 30);
+    if (rows === null) return reply.status(404).send({ error: "NotFound" });
+    return reply.send({ data: rows });
+  });
+
+  app.get("/api/:slug/cash-desks/:id/shifts/open", {
+    preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const id = z.coerce.number().int().positive().parse((request.params as { id: string }).id);
+    const desk = await getCashDesk(tenantId, id);
+    if (!desk) return reply.status(404).send({ error: "NotFound" });
+    const open = await getOpenShift(tenantId, id);
+    return reply.send({ data: open });
+  });
+
+  const shiftOpenBody = z.object({
+    opening_float: z.number().finite().nullable().optional(),
+    notes: z.string().max(2000).nullable().optional()
+  });
+
+  app.post("/api/:slug/cash-desks/:id/shifts/open", {
+    preHandler: [jwtAccessVerify, requireRoles(...writeRoles)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const id = z.coerce.number().int().positive().parse((request.params as { id: string }).id);
+    const body = shiftOpenBody.parse(request.body ?? {});
+    const viewer = getAccessUser(request);
+    const uid = Number.parseInt(viewer.sub, 10);
+    if (!Number.isFinite(uid) || uid < 1) return reply.status(400).send({ error: "BadUser" });
+    try {
+      const row = await openShift(tenantId, id, uid, body);
+      return reply.status(201).send({ data: row });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "CashDeskNotFound") return reply.status(404).send({ error: "NotFound" });
+      if (msg === "ShiftAlreadyOpen") return reply.status(409).send({ error: "ShiftAlreadyOpen" });
+      if (msg === "UserNotFound") return reply.status(400).send({ error: "UserNotFound" });
+      throw e;
+    }
+  });
+
+  const shiftCloseBody = z.object({
+    closing_float: z.number().finite().nullable().optional(),
+    notes: z.string().max(2000).nullable().optional()
+  });
+
+  app.post("/api/:slug/cash-desks/:id/shifts/:shiftId/close", {
+    preHandler: [jwtAccessVerify, requireRoles(...writeRoles)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const id = z.coerce.number().int().positive().parse((request.params as { id: string }).id);
+    const shiftId = z.coerce.number().int().positive().parse((request.params as { shiftId: string }).shiftId);
+    const body = shiftCloseBody.parse(request.body ?? {});
+    const viewer = getAccessUser(request);
+    const uid = Number.parseInt(viewer.sub, 10);
+    if (!Number.isFinite(uid) || uid < 1) return reply.status(400).send({ error: "BadUser" });
+    try {
+      const row = await closeShift(tenantId, id, shiftId, uid, body);
+      return reply.send({ data: row });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "ShiftNotFound") return reply.status(404).send({ error: "NotFound" });
+      if (msg === "ShiftAlreadyClosed") return reply.status(409).send({ error: "ShiftAlreadyClosed" });
+      if (msg === "UserNotFound") return reply.status(400).send({ error: "UserNotFound" });
       throw e;
     }
   });

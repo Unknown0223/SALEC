@@ -17,7 +17,8 @@ export const ORDER_LIST_COLUMN_IDS = [
   "client_id",
   "qty",
   "total_sum",
-  "bonus_sum",
+  "discount_sum",
+  "bonus_qty",
   "balance",
   "debt",
   "price_type",
@@ -48,7 +49,8 @@ const LABELS: Record<(typeof ORDER_LIST_COLUMN_IDS)[number], string> = {
   client_id: "Ид клиента",
   qty: "Кол-во",
   total_sum: "Сумма",
-  bonus_sum: "Bonus",
+  discount_sum: "Скидка",
+  bonus_qty: "Бонус (шт)",
   balance: "Баланс",
   debt: "Долг",
   price_type: "Тип цены",
@@ -97,8 +99,10 @@ export function orderListExportCell(o: OrderListRow, colId: string): string {
       return String(o.qty);
     case "total_sum":
       return String(o.total_sum);
-    case "bonus_sum":
-      return String(o.bonus_sum);
+    case "discount_sum":
+      return String(o.discount_sum ?? "0");
+    case "bonus_qty":
+      return String(o.bonus_qty ?? "0");
     case "balance":
       return o.balance ?? "";
     case "debt":

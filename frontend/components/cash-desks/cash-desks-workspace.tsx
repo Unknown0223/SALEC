@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
@@ -19,20 +18,21 @@ import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import {
-  ClipboardList,
-  Filter,
-  ListOrdered,
-  MapPin,
-  Pencil,
-  RefreshCw,
-  Search
-} from "lucide-react";
+  RoleLinkPickerGrid,
+  cloneRoleSets,
+  emptySetsForRoles,
+  linksFromRoleSets,
+  setsFromRoleLinks,
+  type RolePickerColumn
+} from "@/components/role-link-picker/role-link-picker-grid";
+import { ClipboardList, Clock, MapPin, Pencil, RefreshCw, Search, X } from "lucide-react";
 
 const CASH_DESK_TABLE_ID = "cash_desks.v1";
 
 const COLUMN_IDS = [
   "closing",
   "name",
+  "branch_name",
   "created_at",
   "roles",
   "user_total",
@@ -48,6 +48,7 @@ const COLUMN_META = COLUMN_IDS.map((id) => ({
     {
       closing: "Статус закрытия",
       name: "Названия",
+      branch_name: "Филиал",
       created_at: "Дата создания",
       roles: "Пользователи по ролям",
       user_total: "Всего пользователей",
@@ -59,52 +60,36 @@ const COLUMN_META = COLUMN_IDS.map((id) => ({
 }));
 
 const ROLE_LABELS: Record<string, string> = {
+  agent: "Агент",
   cashier: "Кассир",
   manager: "Менеджер",
   operator: "Оператор",
+  storekeeper: "Склад",
   supervisor: "Супервайзер",
   expeditor: "Экспедитор"
 };
 
-const LINK_ROLES = ["cashier", "manager", "operator", "supervisor", "expeditor"] as const;
-type LinkRole = (typeof LINK_ROLES)[number];
+const CASH_ROLE_ORDER = [
+  "agent",
+  "cashier",
+  "manager",
+  "operator",
+  "storekeeper",
+  "supervisor",
+  "expeditor"
+] as const;
 
-const SUP_EXP_PICKER_COLS: { role: LinkRole; label: string; pool: "supervisors" | "expeditors" }[] = [
-  { role: "supervisor", label: "Супервайзер", pool: "supervisors" },
-  { role: "expeditor", label: "Экспедитор", pool: "expeditors" }
+const CASH_ROLE_KEYS = [...CASH_ROLE_ORDER];
+
+const CASH_ROLE_COLUMNS: RolePickerColumn[] = [
+  { role: "agent", label: ROLE_LABELS.agent, pool: "agents" },
+  { role: "cashier", label: ROLE_LABELS.cashier, pool: "operators" },
+  { role: "manager", label: ROLE_LABELS.manager, pool: "operators" },
+  { role: "operator", label: ROLE_LABELS.operator, pool: "operators" },
+  { role: "storekeeper", label: ROLE_LABELS.storekeeper, pool: "operators" },
+  { role: "supervisor", label: ROLE_LABELS.supervisor, pool: "supervisors" },
+  { role: "expeditor", label: ROLE_LABELS.expeditor, pool: "expeditors" }
 ];
-
-const OPERATOR_DESK_LINK_ROLES = ["cashier", "manager", "operator"] as const;
-type OperatorDeskLinkRole = (typeof OPERATOR_DESK_LINK_ROLES)[number];
-
-function getOperatorDeskLinkRole(
-  sets: Record<LinkRole, Set<number>>,
-  userId: number
-): "" | OperatorDeskLinkRole {
-  for (const r of OPERATOR_DESK_LINK_ROLES) {
-    if (sets[r].has(userId)) return r;
-  }
-  return "";
-}
-
-function setOperatorDeskLink(
-  sets: Record<LinkRole, Set<number>>,
-  userId: number,
-  role: "" | OperatorDeskLinkRole
-): Record<LinkRole, Set<number>> {
-  const next: Record<LinkRole, Set<number>> = {
-    cashier: new Set(sets.cashier),
-    manager: new Set(sets.manager),
-    operator: new Set(sets.operator),
-    supervisor: new Set(sets.supervisor),
-    expeditor: new Set(sets.expeditor)
-  };
-  for (const r of OPERATOR_DESK_LINK_ROLES) {
-    next[r].delete(userId);
-  }
-  if (role) next[role].add(userId);
-  return next;
-}
 
 const TIMEZONES = [
   { value: "Asia/Tashkent", label: "Asia/Tashkent (+05:00)" },
@@ -118,6 +103,7 @@ type PickerUser = { id: number; name: string; login: string };
 type CashDeskRow = {
   id: number;
   name: string;
+  branch_name?: string | null;
   timezone: string;
   sort_order: number | null;
   code: string | null;
@@ -133,293 +119,14 @@ type CashDeskRow = {
 };
 
 type PickersData = {
+  agents: PickerUser[];
   operators: PickerUser[];
   supervisors: PickerUser[];
   expeditors: PickerUser[];
 };
 
-function poolUsers(p: PickersData, pool: "operators" | "supervisors" | "expeditors"): PickerUser[] {
-  if (pool === "operators") return p.operators;
-  if (pool === "supervisors") return p.supervisors;
-  return p.expeditors;
-}
-
-function setsFromLinks(links: { link_role: string; user_id: number }[]) {
-  const m: Record<LinkRole, Set<number>> = {
-    cashier: new Set(),
-    manager: new Set(),
-    operator: new Set(),
-    supervisor: new Set(),
-    expeditor: new Set()
-  };
-  for (const l of links) {
-    const r = l.link_role as LinkRole;
-    if (m[r]) m[r].add(l.user_id);
-  }
-  return m;
-}
-
-function linksFromSets(sets: Record<LinkRole, Set<number>>): { user_id: number; link_role: LinkRole }[] {
-  const out: { user_id: number; link_role: LinkRole }[] = [];
-  for (const role of LINK_ROLES) {
-    sets[role].forEach((uid) => {
-      out.push({ user_id: uid, link_role: role });
-    });
-  }
-  return out;
-}
-
-function toggleUserInRole(
-  sets: Record<LinkRole, Set<number>>,
-  role: LinkRole,
-  userId: number,
-  on: boolean
-): Record<LinkRole, Set<number>> {
-  const next: Record<LinkRole, Set<number>> = {
-    cashier: new Set(sets.cashier),
-    manager: new Set(sets.manager),
-    operator: new Set(sets.operator),
-    supervisor: new Set(sets.supervisor),
-    expeditor: new Set(sets.expeditor)
-  };
-  if (on) {
-    for (const r of LINK_ROLES) {
-      if (r !== role) next[r].delete(userId);
-    }
-    next[role].add(userId);
-  } else {
-    next[role].delete(userId);
-  }
-  return next;
-}
-
-function UserPickerDialog({
-  open,
-  onOpenChange,
-  pickers,
-  selection,
-  onApply,
-  search,
-  onSearchChange
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  pickers: PickersData | undefined;
-  selection: Record<LinkRole, Set<number>>;
-  onApply: (next: Record<LinkRole, Set<number>>) => void;
-  search: string;
-  onSearchChange: (s: string) => void;
-}) {
-  const [local, setLocal] = useState(selection);
-  useEffect(() => {
-    if (open) setLocal(selection);
-  }, [open, selection]);
-
-  const q = search.trim().toLowerCase();
-  const match = (u: PickerUser) =>
-    !q || u.name.toLowerCase().includes(q) || u.login.toLowerCase().includes(q);
-
-  if (!pickers) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="z-[100] max-w-md gap-0 p-0 sm:max-w-md"
-          showCloseButton
-        >
-          <DialogHeader className="border-b px-4 py-3">
-            <DialogTitle>Пользователи кассы</DialogTitle>
-            <DialogDescription className="text-left text-xs text-muted-foreground">
-              Один сотрудник может быть привязан к кассе только с одной ролью привязки.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">Загрузка…</p>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className={cn(
-          "z-[100] flex max-h-[min(92vh,720px)] w-[min(100vw-1rem,1120px)] max-w-none flex-col gap-0 overflow-hidden p-0",
-          "rounded-xl border border-border bg-card shadow-lg sm:max-w-none"
-        )}
-        showCloseButton
-      >
-        <DialogHeader className="shrink-0 space-y-1.5 border-b border-border px-4 pb-3 pt-4">
-          <DialogTitle className="text-base font-semibold tracking-tight">Пользователи кассы</DialogTitle>
-          <DialogDescription className="text-left text-xs leading-relaxed text-muted-foreground">
-            Для сотрудников с ролью «оператор» в системе выберите одну роль на кассе: кассир, менеджер или оператор
-            кассы — либо оставьте «не назначено». Супервайзер и экспедитор назначаются отдельно; у одного человека на
-            этой кассе может быть только одна роль привязки.
-          </DialogDescription>
-          <div className="relative pt-1">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              placeholder="Поиск"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="h-10 w-full pl-9 pr-3"
-              aria-label="Поиск пользователей"
-            />
-          </div>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/20">
-          <div className="flex h-[min(58vh,520px)] min-w-[720px] divide-x divide-border">
-            <div className="flex min-w-0 flex-[2] flex-col bg-background">
-              <div className="shrink-0 border-b border-border bg-muted/40 px-3 py-2.5">
-                <span className="text-sm font-semibold text-foreground">Операторы (роль на кассе)</span>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
-                {(() => {
-                  const opUsers = poolUsers(pickers, "operators").filter(match);
-                  if (opUsers.length === 0) {
-                    return (
-                      <p className="px-1 py-4 text-center text-xs text-muted-foreground">Нет совпадений</p>
-                    );
-                  }
-                  return (
-                    <ul className="space-y-1">
-                      {opUsers.map((u) => (
-                        <li
-                          key={u.id}
-                          className="flex flex-wrap items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-xs hover:bg-muted/60 sm:flex-nowrap"
-                        >
-                          <div className="min-w-0 flex-1 leading-snug">
-                            <span className="block font-medium text-foreground">{u.name}</span>
-                            <span className="block text-[11px] text-muted-foreground">{u.login}</span>
-                          </div>
-                          <select
-                            className="h-9 w-full shrink-0 rounded-md border border-input bg-background px-2 text-xs sm:w-[200px]"
-                            aria-label={`Роль на кассе для ${u.name}`}
-                            value={getOperatorDeskLinkRole(local, u.id)}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setLocal((prev) =>
-                                setOperatorDeskLink(
-                                  prev,
-                                  u.id,
-                                  v === "" ? "" : (v as OperatorDeskLinkRole)
-                                )
-                              );
-                            }}
-                          >
-                            <option value="">Не назначено</option>
-                            <option value="cashier">{ROLE_LABELS.cashier}</option>
-                            <option value="manager">{ROLE_LABELS.manager}</option>
-                            <option value="operator">{ROLE_LABELS.operator} кассы</option>
-                          </select>
-                        </li>
-                      ))}
-                    </ul>
-                  );
-                })()}
-              </div>
-            </div>
-            {SUP_EXP_PICKER_COLS.map((col) => {
-              const users = poolUsers(pickers, col.pool).filter(match);
-              const allIds = users.map((u) => u.id);
-              const allOn = allIds.length > 0 && allIds.every((id) => local[col.role].has(id));
-              return (
-                <div key={col.role} className="flex w-[220px] shrink-0 flex-col bg-background">
-                  <div className="shrink-0 border-b border-border bg-muted/40 px-3 py-2.5 text-center">
-                    <span className="text-sm font-semibold text-foreground">{col.label}</span>
-                  </div>
-                  <label
-                    className={cn(
-                      "flex shrink-0 cursor-pointer items-center gap-2 border-b border-border px-3 py-2 text-xs",
-                      allIds.length === 0 && "cursor-not-allowed opacity-50"
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      className="size-4 rounded border-input accent-primary"
-                      checked={allOn}
-                      disabled={allIds.length === 0}
-                      onChange={(e) => {
-                        setLocal((prev) => {
-                          let next: Record<LinkRole, Set<number>> = {
-                            cashier: new Set(prev.cashier),
-                            manager: new Set(prev.manager),
-                            operator: new Set(prev.operator),
-                            supervisor: new Set(prev.supervisor),
-                            expeditor: new Set(prev.expeditor)
-                          };
-                          if (e.target.checked) {
-                            for (const id of allIds) {
-                              next = toggleUserInRole(next, col.role, id, true);
-                            }
-                          } else {
-                            next[col.role] = new Set();
-                          }
-                          return next;
-                        });
-                      }}
-                    />
-                    <span className="font-medium text-foreground">Выбрать все</span>
-                  </label>
-                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
-                    {users.length === 0 ? (
-                      <p className="px-1 py-4 text-center text-xs text-muted-foreground">Нет совпадений</p>
-                    ) : (
-                      <ul className="space-y-0.5">
-                        {users.map((u) => (
-                          <li key={u.id}>
-                            <label
-                              className={cn(
-                                "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
-                                "hover:bg-muted/80 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
-                                checked={local[col.role].has(u.id)}
-                                onChange={(ev) => {
-                                  setLocal((prev) => toggleUserInRole(prev, col.role, u.id, ev.target.checked));
-                                }}
-                              />
-                              <span className="min-w-0 leading-snug">
-                                <span className="block font-medium text-foreground">{u.name}</span>
-                                <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                  {u.login}
-                                  <span className="text-muted-foreground/80"> · {col.label}</span>
-                                </span>
-                              </span>
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <DialogFooter className="shrink-0 flex-row justify-end gap-2 border-t border-border/80 bg-background px-4 py-3">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              onApply(local);
-              onOpenChange(false);
-            }}
-          >
-            Готово
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+function emptyCashLinkSets() {
+  return emptySetsForRoles(CASH_ROLE_KEYS);
 }
 
 type Props = { tenantSlug: string; canWrite: boolean };
@@ -433,6 +140,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
   const [columnOpen, setColumnOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CashDeskRow | null>(null);
+  const [shiftDesk, setShiftDesk] = useState<CashDeskRow | null>(null);
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
     tableId: CASH_DESK_TABLE_ID,
@@ -503,6 +211,8 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
             return r.is_closed ? "Закрыта" : "Открыта";
           case "name":
             return r.name;
+          case "branch_name":
+            return r.branch_name ?? "";
           case "created_at":
             return new Date(r.created_at).toLocaleString("ru-RU");
           case "roles":
@@ -556,26 +266,18 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
             </button>
           </div>
           {canWrite ? (
-            <Button type="button" size="sm" onClick={() => setFormOpen(true)}>
-              Добавить
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setColumnOpen(true)}>
+                Столбцы
+              </Button>
+              <Button type="button" size="sm" onClick={() => setFormOpen(true)}>
+                Добавить
+              </Button>
+            </div>
           ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1 px-2 text-xs"
-            title="Столбцы"
-            onClick={() => setColumnOpen(true)}
-          >
-            <ListOrdered className="size-3.5" />
-          </Button>
-          <Button type="button" variant="outline" size="icon-sm" className="h-8 w-8" disabled title="Фильтр">
-            <Filter className="size-3.5" />
-          </Button>
           <select
             className="h-8 rounded-md border border-input bg-background px-2 text-xs"
             value={limit}
@@ -675,6 +377,8 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
                           </button>
                         ) : colId === "name" ? (
                           <span className="font-medium">{r.name}</span>
+                        ) : colId === "branch_name" ? (
+                          <span className="text-muted-foreground">{r.branch_name ?? "—"}</span>
                         ) : colId === "created_at" ? (
                           new Date(r.created_at).toLocaleString("ru-RU")
                         ) : colId === "roles" ? (
@@ -717,17 +421,28 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
                       </td>
                     ))}
                     <td className="px-2 py-2 text-right">
-                      {canWrite ? (
+                      <div className="flex justify-end gap-0.5">
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon-sm"
-                          title="Редактировать"
-                          onClick={() => setEditing(r)}
+                          title="Смены кассы"
+                          onClick={() => setShiftDesk(r)}
                         >
-                          <Pencil className="size-4" />
+                          <Clock className="size-4" />
                         </Button>
-                      ) : null}
+                        {canWrite ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            title="Редактировать"
+                            onClick={() => setEditing(r)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -776,7 +491,183 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
           setEditing(null);
         }}
       />
+      <CashDeskShiftsDialog
+        tenantSlug={tenantSlug}
+        desk={shiftDesk}
+        canWrite={canWrite}
+        onClose={() => setShiftDesk(null)}
+      />
     </div>
+  );
+}
+
+type ShiftApiRow = {
+  id: number;
+  opened_at: string;
+  closed_at: string | null;
+  opening_float: string | null;
+  closing_float: string | null;
+  notes: string | null;
+  opened_by: { id: number; name: string; login: string } | null;
+  closed_by: { id: number; name: string; login: string } | null;
+};
+
+function CashDeskShiftsDialog({
+  tenantSlug,
+  desk,
+  canWrite,
+  onClose
+}: {
+  tenantSlug: string;
+  desk: CashDeskRow | null;
+  canWrite: boolean;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const open = Boolean(desk);
+  const deskId = desk?.id;
+
+  const listQ = useQuery({
+    queryKey: ["cash-desk-shifts", tenantSlug, deskId],
+    enabled: open && deskId != null,
+    queryFn: async () => {
+      const { data } = await api.get<{ data: ShiftApiRow[] }>(
+        `/api/${tenantSlug}/cash-desks/${deskId}/shifts?limit=40`
+      );
+      return data.data;
+    }
+  });
+
+  const openShiftQ = useQuery({
+    queryKey: ["cash-desk-shift-open", tenantSlug, deskId],
+    enabled: open && deskId != null,
+    queryFn: async () => {
+      const { data } = await api.get<{ data: ShiftApiRow | null }>(
+        `/api/${tenantSlug}/cash-desks/${deskId}/shifts/open`
+      );
+      return data.data;
+    }
+  });
+
+  const [openingFloat, setOpeningFloat] = useState("");
+  const [closingFloat, setClosingFloat] = useState("");
+
+  const openMut = useMutation({
+    mutationFn: async () => {
+      const n = openingFloat.trim() === "" ? null : Number.parseFloat(openingFloat.replace(",", "."));
+      await api.post(`/api/${tenantSlug}/cash-desks/${deskId}/shifts/open`, {
+        opening_float: n != null && Number.isFinite(n) ? n : null,
+        notes: null
+      });
+    },
+    onSuccess: async () => {
+      setOpeningFloat("");
+      await qc.invalidateQueries({ queryKey: ["cash-desk-shifts", tenantSlug, deskId] });
+      await qc.invalidateQueries({ queryKey: ["cash-desk-shift-open", tenantSlug, deskId] });
+      await qc.invalidateQueries({ queryKey: ["cash-desks", tenantSlug] });
+    }
+  });
+
+  const closeMut = useMutation({
+    mutationFn: async (shiftId: number) => {
+      const n = closingFloat.trim() === "" ? null : Number.parseFloat(closingFloat.replace(",", "."));
+      await api.post(`/api/${tenantSlug}/cash-desks/${deskId}/shifts/${shiftId}/close`, {
+        closing_float: n != null && Number.isFinite(n) ? n : null,
+        notes: null
+      });
+    },
+    onSuccess: async () => {
+      setClosingFloat("");
+      await qc.invalidateQueries({ queryKey: ["cash-desk-shifts", tenantSlug, deskId] });
+      await qc.invalidateQueries({ queryKey: ["cash-desk-shift-open", tenantSlug, deskId] });
+      await qc.invalidateQueries({ queryKey: ["cash-desks", tenantSlug] });
+    }
+  });
+
+  const active = openShiftQ.data;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Смены — {desk?.name ?? ""}</DialogTitle>
+        </DialogHeader>
+        {active ? (
+          <div className="space-y-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm">
+            <p className="font-medium text-emerald-700 dark:text-emerald-400">Смена открыта</p>
+            <p className="text-xs text-muted-foreground">
+              С {new Date(active.opened_at).toLocaleString("ru-RU")}
+              {active.opened_by ? ` · ${active.opened_by.name}` : ""}
+            </p>
+            {canWrite ? (
+              <div className="flex flex-wrap items-end gap-2 pt-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Остаток при закрытии</Label>
+                  <Input
+                    className="h-8 w-32 text-xs"
+                    value={closingFloat}
+                    onChange={(e) => setClosingFloat(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={closeMut.isPending}
+                  onClick={() => void closeMut.mutate(active.id)}
+                >
+                  Закрыть смену
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : canWrite ? (
+          <div className="space-y-2 rounded-md border p-3 text-sm">
+            <p className="text-muted-foreground">Нет активной смены.</p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Наличные на открытии</Label>
+                <Input
+                  className="h-8 w-32 text-xs"
+                  value={openingFloat}
+                  onChange={(e) => setOpeningFloat(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <Button type="button" size="sm" disabled={openMut.isPending} onClick={() => void openMut.mutate()}>
+                Открыть смену
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Нет активной смены.</p>
+        )}
+        <div className="border-t pt-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Последние смены</p>
+          <ul className="max-h-48 space-y-2 overflow-y-auto text-xs">
+            {(listQ.data ?? []).map((s) => (
+              <li key={s.id} className="rounded border px-2 py-1.5">
+                <span className="font-mono tabular-nums">{new Date(s.opened_at).toLocaleString("ru-RU")}</span>
+                {s.closed_at ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    → {new Date(s.closed_at).toLocaleString("ru-RU")}
+                  </span>
+                ) : (
+                  <span className="text-emerald-600"> · открыта</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Закрыть
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -805,14 +696,16 @@ function CashDeskFormDialog({
   const [lng, setLng] = useState("");
   const [active, setActive] = useState(true);
   const [mapOpen, setMapOpen] = useState(false);
-  const [linkSets, setLinkSets] = useState(() =>
-    setsFromLinks([] as { link_role: string; user_id: number }[])
-  );
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState("");
+  const [linkSets, setLinkSets] = useState(() => emptyCashLinkSets());
+  const [usersSubOpen, setUsersSubOpen] = useState(false);
+  const [draftLinkSets, setDraftLinkSets] = useState(() => emptyCashLinkSets());
+  const [userPickerSearch, setUserPickerSearch] = useState("");
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setUsersSubOpen(false);
+      return;
+    }
     if (initial) {
       setName(initial.name);
       setTimezone(initial.timezone);
@@ -824,7 +717,10 @@ function CashDeskFormDialog({
       setActive(initial.is_active);
       setMapOpen(Boolean(initial.latitude && initial.longitude));
       setLinkSets(
-        setsFromLinks(initial.links.map((l) => ({ link_role: l.link_role, user_id: l.user.id })))
+        setsFromRoleLinks(
+          CASH_ROLE_KEYS,
+          initial.links.map((l) => ({ link_role: l.link_role, user_id: l.user.id }))
+        )
       );
     } else {
       setName("");
@@ -836,18 +732,18 @@ function CashDeskFormDialog({
       setLng("");
       setActive(true);
       setMapOpen(false);
-      setLinkSets(setsFromLinks([]));
+      setLinkSets(emptyCashLinkSets());
     }
   }, [open, initial]);
 
   const selectedUserCount = useMemo(
-    () => LINK_ROLES.reduce((n, r) => n + linkSets[r].size, 0),
+    () => CASH_ROLE_KEYS.reduce((n, r) => n + (linkSets[r]?.size ?? 0), 0),
     [linkSets]
   );
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const links = linksFromSets(linkSets);
+      const links = linksFromRoleSets(CASH_ROLE_KEYS, linkSets);
       const sortNum = sortOrder.trim() === "" ? null : Number.parseInt(sortOrder, 10);
       const latN = lat.trim() === "" ? null : Number.parseFloat(lat.replace(",", "."));
       const lngN = lng.trim() === "" ? null : Number.parseFloat(lng.replace(",", "."));
@@ -879,78 +775,112 @@ function CashDeskFormDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto" showCloseButton>
-          <DialogHeader>
-            <DialogTitle>{initial ? "Редактировать" : "Добавить"}</DialogTitle>
+        <DialogContent
+          className={cn(
+            "flex max-h-[96vh] w-full flex-col gap-0 overflow-x-hidden overflow-y-auto p-0",
+            "!max-w-xl sm:!max-w-xl"
+          )}
+          showCloseButton
+        >
+          <DialogHeader className="shrink-0 border-b border-border px-5 pb-3 pt-4 pr-14 text-left">
+            <DialogTitle className="text-base font-semibold">
+              {initial ? "Редактировать" : "Добавить"}
+            </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div className="grid gap-1.5">
-              <Label>Названия *</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} className={!name.trim() ? "border-destructive/60" : ""} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Часовой пояс</Label>
-              <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-              >
-                {TIMEZONES.map((tz) => (
-                  <option key={tz.value} value={tz.value}>
-                    {tz.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Button type="button" variant="outline" className="w-full justify-center" onClick={() => setPickerOpen(true)}>
-              {initial ? "Пользователи кассы" : "Добавить пользователей"}
-            </Button>
-            {selectedUserCount > 0 ? (
-              <p className="text-center text-xs text-muted-foreground">
-                Выбрано пользователей:{" "}
-                <span className="font-medium text-foreground">{selectedUserCount}</span>
+
+          <div className="shrink-0 overflow-visible px-5 py-4">
+            <div className="mx-auto grid w-full max-w-xl gap-5">
+              <div className="grid gap-4 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-0">
+                <div className="grid min-w-0 gap-2">
+                  <Label className="text-sm font-medium">Название *</Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className={cn("h-10", !name.trim() ? "border-destructive/60" : "")}
+                  />
+                </div>
+                <div className="grid min-w-0 gap-2">
+                  <Label className="text-sm font-medium">Часовой пояс</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-4">
+              <p className="mb-2.5 text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">Пользователи</span>
+                {": "}
+                {selectedUserCount}
               </p>
-            ) : null}
-            <div className="grid gap-1.5">
-              <Label>Сортировка</Label>
-              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value.replace(/[^\d-]/g, ""))} />
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full border-2 border-teal-600/45 text-sm font-medium text-teal-800 shadow-none hover:bg-teal-50 dark:border-teal-500/50 dark:text-teal-300 dark:hover:bg-teal-950/40"
+                onClick={() => {
+                  setDraftLinkSets(cloneRoleSets(CASH_ROLE_KEYS, linkSets));
+                  setUserPickerSearch("");
+                  setUsersSubOpen(true);
+                }}
+              >
+                Редактировать добавленных пользователей
+              </Button>
             </div>
-            <div className="grid gap-1.5">
-              <div className="flex justify-between">
-                <Label>Код</Label>
-                <span className="text-xs text-muted-foreground">{code.length} / 20</span>
+            <div className="grid gap-2">
+              <Label className="text-sm font-medium">Сортировка</Label>
+              <Input
+                className="h-10"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value.replace(/[^\d-]/g, ""))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label className="text-sm font-medium">Код</Label>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{code.length} / 20</span>
               </div>
               <Input
+                className="h-10"
                 value={code}
                 maxLength={20}
                 onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))}
               />
             </div>
-            <div className="grid gap-1.5">
-              <Label>Комментарий</Label>
+            <div className="grid gap-2">
+              <Label className="text-sm font-medium">Комментарий</Label>
               <textarea
-                className="min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm shadow-sm"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
             </div>
-            <button
-              type="button"
-              className="text-left text-sm text-primary underline-offset-2 hover:underline"
-              onClick={() => setMapOpen((v) => !v)}
-            >
-              {mapOpen ? "Скрыть местоположение" : initial ? "Изменить местоположение" : "Добавить местоположение"}
-            </button>
+            <div>
+              <button
+                type="button"
+                className="text-left text-sm font-medium text-primary underline-offset-4 hover:underline"
+                onClick={() => setMapOpen((v) => !v)}
+              >
+                {mapOpen ? "Скрыть местоположение" : initial ? "Изменить местоположение" : "Добавить местоположение"}
+              </button>
+            </div>
             {mapOpen ? (
-              <div className="grid gap-2 rounded-md border p-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-xs">Широта</Label>
-                    <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="41.31" />
+              <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:p-4">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid min-w-0 gap-1.5">
+                    <Label className="text-xs font-medium">Широта</Label>
+                    <Input className="h-10" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="41.31" />
                   </div>
-                  <div>
-                    <Label className="text-xs">Долгота</Label>
-                    <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="69.24" />
+                  <div className="grid min-w-0 gap-1.5">
+                    <Label className="text-xs font-medium">Долгота</Label>
+                    <Input className="h-10" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="69.24" />
                   </div>
                 </div>
                 {(() => {
@@ -967,17 +897,24 @@ function CashDeskFormDialog({
                 })()}
               </div>
             ) : null}
-            <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              <span>Активный</span>
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 rounded-lg border border-input bg-background px-4 py-2.5 text-sm shadow-sm">
+              <span className="font-medium">Активный</span>
+              <input
+                type="checkbox"
+                className="size-4 accent-teal-600"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+              />
             </label>
+            </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+          <DialogFooter className="mx-0 mb-0 shrink-0 flex-row justify-end gap-3 rounded-b-xl border-t border-border bg-background px-5 py-4 pb-5">
+            <Button type="button" variant="outline" className="min-h-10 min-w-[7rem]" onClick={onClose}>
               Отмена
             </Button>
             <Button
               type="button"
+              className="min-h-10 min-w-[7rem] bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-600 dark:hover:bg-teal-500"
               disabled={!name.trim() || saveMut.isPending}
               onClick={() => saveMut.mutate()}
             >
@@ -987,15 +924,88 @@ function CashDeskFormDialog({
         </DialogContent>
       </Dialog>
 
-      <UserPickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        pickers={pickers}
-        selection={linkSets}
-        search={pickerSearch}
-        onSearchChange={setPickerSearch}
-        onApply={(next) => setLinkSets(next)}
-      />
+      <Dialog open={usersSubOpen} onOpenChange={setUsersSubOpen}>
+        <DialogContent
+          className={cn(
+            "flex max-h-[min(92vh,720px)] w-[min(100vw-1.5rem,1180px)] flex-col gap-0 overflow-x-hidden overflow-y-auto p-0",
+            "!max-w-[min(100vw-1.5rem,1180px)] sm:!max-w-[min(100vw-1.5rem,1180px)] z-[100]"
+          )}
+          showCloseButton
+        >
+          <DialogHeader className="shrink-0 border-b border-border bg-muted/20 px-4 pb-4 pt-5 pr-14 sm:pt-4">
+            <div className="flex flex-col gap-3 text-left">
+              <div className="min-w-0 pr-1">
+                <DialogTitle className="text-lg font-semibold tracking-tight">Пользователи по ролям</DialogTitle>
+                <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                  Блоки по ролям; длинный список внутри блока с прокруткой. Один сотрудник — в одной колонке.
+                </p>
+              </div>
+              <div className="w-full max-w-2xl">
+                <div className="rounded-xl border border-border/90 bg-background p-1 shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.07]">
+                  <div className="relative flex items-center">
+                    <Search
+                      className="pointer-events-none absolute left-3.5 top-1/2 size-[1.125rem] -translate-y-1/2 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <Input
+                      placeholder="Поиск по имени или логину"
+                      value={userPickerSearch}
+                      onChange={(e) => setUserPickerSearch(e.target.value)}
+                      className={cn(
+                        "h-11 w-full border-0 bg-transparent pl-11 text-sm shadow-none",
+                        "placeholder:text-muted-foreground/70",
+                        "focus-visible:ring-0 focus-visible:ring-offset-0",
+                        userPickerSearch.trim() ? "pr-11" : "pr-4"
+                      )}
+                      aria-label="Поиск пользователей"
+                    />
+                    {userPickerSearch.trim() ? (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 z-10 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label="Очистить поиск"
+                        onClick={() => setUserPickerSearch("")}
+                      >
+                        <X className="size-4 shrink-0" strokeWidth={2.25} />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="flex flex-col bg-muted/10 px-3 pt-2 pb-1 sm:px-4">
+            <RoleLinkPickerGrid
+              roleOrder={CASH_ROLE_KEYS}
+              columns={CASH_ROLE_COLUMNS}
+              pickers={pickers}
+              local={draftLinkSets}
+              setLocal={setDraftLinkSets}
+              search={userPickerSearch}
+            />
+          </div>
+          <DialogFooter className="mx-0 mb-0 shrink-0 flex-col-reverse gap-2.5 rounded-b-xl border-t border-border bg-background px-5 pt-4 pb-5 sm:flex-row sm:justify-end sm:gap-3 sm:pb-5">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full min-h-10 sm:w-auto sm:min-w-[7.5rem]"
+              onClick={() => setUsersSubOpen(false)}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              className="w-full min-h-10 bg-teal-600 text-white hover:bg-teal-700 sm:w-auto sm:min-w-[7.5rem] dark:bg-teal-600 dark:hover:bg-teal-500"
+              onClick={() => {
+                setLinkSets(cloneRoleSets(CASH_ROLE_KEYS, draftLinkSets));
+                setUsersSubOpen(false);
+              }}
+            >
+              Готово
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

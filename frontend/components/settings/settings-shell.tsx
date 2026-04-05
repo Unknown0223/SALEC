@@ -5,9 +5,9 @@ import type { SettingsItem } from "@/lib/settings-structure";
 import { resolveSettingsItemHref, settingsSections } from "@/lib/settings-structure";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -16,10 +16,31 @@ function stripHash(href: string): string {
   return idx >= 0 ? href.slice(0, idx) : href;
 }
 
-function isItemActive(pathname: string, href: string): boolean {
-  const base = stripHash(href);
-  if (pathname === base) return true;
-  return pathname.startsWith(`${base}/`);
+function parseHrefPathAndQuery(href: string): { path: string; query: URLSearchParams } {
+  const raw = stripHash(href);
+  const q = raw.indexOf("?");
+  if (q < 0) return { path: raw, query: new URLSearchParams() };
+  return { path: raw.slice(0, q), query: new URLSearchParams(raw.slice(q + 1)) };
+}
+
+/** Joriy URL va havola (ichida ?tab= bo‘lishi mumkin) bo‘yicha aktiv yorliq. */
+function isItemActive(pathname: string, currentSearch: string, href: string): boolean {
+  const { path: hPath, query: hQuery } = parseHrefPathAndQuery(href);
+  if (pathname !== hPath) {
+    return pathname.startsWith(`${hPath}/`);
+  }
+  const cur = new URLSearchParams(currentSearch.replace(/^\?/, ""));
+  if (Array.from(hQuery.keys()).length === 0) {
+    if (hPath === "/settings/products") {
+      const tab = cur.get("tab");
+      return !tab || tab === "items";
+    }
+    return true;
+  }
+  for (const [k, v] of Array.from(hQuery.entries())) {
+    if (cur.get(k) !== v) return false;
+  }
+  return true;
 }
 
 function filterSettingsItem(item: SettingsItem, q: string): SettingsItem | null {
@@ -49,17 +70,21 @@ function normalizeSettingsPathname(pathname: string): string {
 }
 
 /**
- * Ikkinchi «Sozlamalar» paneli faqat `/settings` hub sahifasida.
- * Modul sahifalari (/settings/cash-desks, /settings/territories va h.k.) — to‘liq kenglik.
+ * Ikkinchi «Sozlamalar» paneli — barcha sozlamalar ichki sahifalarida ochiq qoladi
+ * (territoriya, kassalar, narxlar va h.k.); spravochnik filiali o‘z navigatsiyasi bilan — panel yo‘q.
  */
 export function shouldShowSettingsSecondaryAside(pathname: string): boolean {
   const path = normalizeSettingsPathname(pathname);
   if (isSettingsSpravochnikBranchPath(pathname)) return false;
-  return path === "/settings";
+  /** Kassalar — asosiy yon paneldagi havola; ikkinchi sozlamalar paneli kerak emas */
+  if (path === "/settings/cash-desks" || path.startsWith("/settings/cash-desks/")) return false;
+  return path === "/settings" || path.startsWith("/settings/");
 }
 
 export function SettingsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentSearch = searchParams.toString();
   const hideSettingsAside = !shouldShowSettingsSecondaryAside(pathname);
   const role = useEffectiveRole();
   const [search, setSearch] = useState("");
@@ -72,14 +97,14 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         for (const item of section.items) {
           if (!item.children?.length) continue;
           const anyActive = item.children.some((c) =>
-            isItemActive(pathname, resolveSettingsItemHref(c))
+            isItemActive(pathname, currentSearch, resolveSettingsItemHref(c))
           );
           if (anyActive) next[item.slug] = true;
         }
       }
       return next;
     });
-  }, [pathname]);
+  }, [pathname, currentSearch]);
 
   useEffect(() => {
     const q = search.trim().toLowerCase();
@@ -137,37 +162,48 @@ export function SettingsShell({ children }: { children: ReactNode }) {
       >
         <div className="shrink-0 space-y-2 border-b border-border/60 px-3 py-3 md:px-4">
           <div className="flex items-baseline justify-between gap-2 px-0.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sozlamalar</p>
+            <p className="text-sm font-bold text-foreground">Настройки</p>
             <Link
               href="/dashboard"
               className="text-[11px] text-primary underline-offset-4 hover:underline md:text-xs"
             >
-              ← Panel
+              ← Дашборд
             </Link>
           </div>
-          <Input
-            placeholder="Поиск"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9"
-            aria-label="Sozlamalar bo‘yicha qidiruv"
-          />
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              placeholder="Поиск"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-9 pl-9"
+              aria-label="Sozlamalar bo‘yicha qidiruv"
+            />
+          </div>
         </div>
         <nav
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 md:px-3 md:py-3"
           aria-label="Sozlamalar ichki menyu"
         >
-          {filteredSections.map((section) => (
-            <section key={section.slug} className="mb-4 last:mb-2">
-              <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {filteredSections.map((section, sectionIndex) => (
+            <section key={section.slug} className="mb-1 last:mb-0">
+              <p
+                className={cn(
+                  "mb-2 px-0.5 text-[15px] font-bold leading-tight tracking-tight text-foreground",
+                  sectionIndex > 0 && "mt-6"
+                )}
+              >
                 {section.title}
               </p>
-              <ul className="space-y-0.5 text-sm">
+              <ul className="space-y-0.5 text-[13px] leading-snug">
                 {section.items.map((item) => {
                   if (item.children?.length) {
                     const open = openGroups[item.slug] ?? false;
                     const groupChildActive = item.children.some((c) =>
-                      isItemActive(pathname, resolveSettingsItemHref(c))
+                      isItemActive(pathname, currentSearch, resolveSettingsItemHref(c))
                     );
                     return (
                       <li key={item.slug} className="space-y-0.5">
@@ -177,30 +213,34 @@ export function SettingsShell({ children }: { children: ReactNode }) {
                             setOpenGroups((prev) => ({ ...prev, [item.slug]: !open }))
                           }
                           className={cn(
-                            "flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                            "flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2 pr-2 text-left text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground",
                             groupChildActive && "font-medium text-foreground"
                           )}
                           aria-expanded={open}
                         >
                           {open ? (
-                            <ChevronDown className="size-4 shrink-0 opacity-70" aria-hidden />
+                            <ChevronDown className="size-3.5 shrink-0 opacity-70" aria-hidden />
                           ) : (
-                            <ChevronRight className="size-4 shrink-0 opacity-70" aria-hidden />
+                            <ChevronRight className="size-3.5 shrink-0 opacity-70" aria-hidden />
                           )}
                           <span>{item.title}</span>
                         </button>
                         {open && (
-                          <ul className="ml-1 space-y-0.5 border-l border-border/70 py-0.5 pl-2">
+                          <ul className="space-y-0.5 py-0.5 pl-2">
                             {item.children.map((child) => {
                               const chref = resolveSettingsItemHref(child);
-                              const childActive = isItemActive(pathname, chref);
+                              const childActive = isItemActive(pathname, currentSearch, chref);
                               return (
                                 <li key={child.slug}>
                                   <Link
                                     href={chref}
                                     className={cn(
-                                      "block rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                                      childActive && "bg-primary/15 font-medium text-foreground"
+                                      "relative block rounded-md py-1.5 pl-8 pr-2 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground",
+                                      "before:absolute before:left-4 before:top-1/2 before:size-1 before:-translate-y-1/2 before:rounded-full before:bg-muted-foreground/45",
+                                      childActive &&
+                                        "bg-primary/10 font-medium text-foreground before:bg-primary",
+                                      childActive &&
+                                        "after:pointer-events-none after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-0.5 after:rounded-l-sm after:bg-primary"
                                     )}
                                   >
                                     {child.title}
@@ -215,14 +255,17 @@ export function SettingsShell({ children }: { children: ReactNode }) {
                   }
 
                   const href = resolveSettingsItemHref(item);
-                  const active = isItemActive(pathname, href);
+                  const active = isItemActive(pathname, currentSearch, href);
                   return (
                     <li key={item.slug}>
                       <Link
                         href={href}
                         className={cn(
-                          "block rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                          active && "bg-primary/15 font-medium text-foreground"
+                          "relative block rounded-md py-1.5 pl-6 pr-2 text-[13px] font-normal text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground",
+                          "before:absolute before:left-2 before:top-1/2 before:size-1 before:-translate-y-1/2 before:rounded-full before:bg-muted-foreground/45",
+                          active && "bg-primary/10 font-medium text-foreground before:bg-primary",
+                          active &&
+                            "after:pointer-events-none after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-0.5 after:rounded-l-sm after:bg-primary"
                         )}
                       >
                         {item.title}

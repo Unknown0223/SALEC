@@ -1,0 +1,13 @@
+[
+  {
+    "sku": "DEMO-001",
+    "name": "Namuna mahsulot 1",
+    "unit": "dona",
+    "barcode": "8600000000001"
+  },
+  {
+    "sku": "DEMO-002",
+    "name": "Namuna mahsulot 2",
+    "unit": "quti"
+  }
+]

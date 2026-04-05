@@ -3,11 +3,12 @@
 import { OrderDetailView } from "@/components/orders/order-detail-view";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 
 export default function OrderDetailPage() {
   const params = useParams();
@@ -16,8 +17,17 @@ export default function OrderDetailPage() {
   const orderId = Number.parseInt(idStr ?? "", 10);
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
+  const [showPrint, setShowPrint] = useState(false);
 
   const invalid = !Number.isFinite(orderId) || orderId < 1;
+
+  const handlePrint = () => {
+    setShowPrint(true);
+    setTimeout(() => {
+      window.print();
+      setShowPrint(false);
+    }, 200);
+  };
 
   return (
     <PageShell className="pb-12">
@@ -28,21 +38,25 @@ export default function OrderDetailPage() {
           "h-8 w-fit -ml-2 text-muted-foreground"
         )}
       >
-        ← Zakazlar ro‘yxati
+        ← Zakazlar ro’yxati
       </Link>
       <PageHeader
         title="Zakaz tafsilotlari"
         description={!invalid ? `id #${orderId}` : undefined}
         actions={
           <>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-              Boshqaruv
+            <button
+              type="button"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+              onClick={handlePrint}
+            >
+              🖨 Chop etish
+            </button>
+            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href={`/payments/new?order_id=${orderId}`}>
+              To’lov qabul
             </Link>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/clients">
-              Klientlar
-            </Link>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/products">
-              Mahsulotlar
+            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href={`/returns/new?order_id=${orderId}`}>
+              Qaytarish
             </Link>
           </>
         }
@@ -57,9 +71,9 @@ export default function OrderDetailPage() {
           </Link>
         </p>
       ) : invalid ? (
-        <p className="text-sm text-destructive">Zakaz identifikatori noto‘g‘ri.</p>
+        <p className="text-sm text-destructive">Zakaz identifikatori noto’g’ri.</p>
       ) : (
-        <OrderDetailView tenantSlug={tenantSlug} orderId={orderId} />
+        <OrderDetailView tenantSlug={tenantSlug} orderId={orderId} showPrintView={showPrint} />
       )}
     </PageShell>
   );

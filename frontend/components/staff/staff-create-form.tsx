@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { FilterSelect } from "@/components/ui/filter-select";
+import { messageFromStaffCreateError } from "@/lib/staff-api-errors";
 
 type Kind = "agent" | "expeditor" | "supervisor";
 
@@ -37,7 +39,7 @@ const emptyForm = {
   product: "",
   agent_type: "",
   price_type: "",
-  trade_direction: "",
+  trade_direction_id: "",
   warehouse_id: "",
   return_warehouse_id: "",
   can_authorize: true,
@@ -48,6 +50,7 @@ const emptyForm = {
 export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props) {
   const qc = useQueryClient();
   const [form, setForm] = useState(emptyForm);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "staff-create"],
@@ -76,6 +79,17 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
     }
   });
 
+  const tradeDirectionsQ = useQuery({
+    queryKey: ["trade-directions", tenantSlug, "staff-create"],
+    enabled: Boolean(tenantSlug) && (kind === "agent" || kind === "expeditor"),
+    queryFn: async () => {
+      const { data } = await api.get<{
+        data: Array<{ id: number; name: string; code: string | null }>;
+      }>(`/api/${tenantSlug}/trade-directions?is_active=true`);
+      return data.data;
+    }
+  });
+
   const createMut = useMutation({
     mutationFn: async () => {
       const path =
@@ -95,7 +109,12 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
         product: kind === "supervisor" ? null : form.product || null,
         agent_type: kind === "supervisor" ? null : form.agent_type || null,
         price_type: kind === "supervisor" ? null : form.price_type || null,
-        trade_direction: kind === "supervisor" ? null : form.trade_direction || null,
+        trade_direction_id:
+          kind === "supervisor"
+            ? null
+            : form.trade_direction_id.trim()
+              ? Number.parseInt(form.trade_direction_id.trim(), 10)
+              : null,
         warehouse_id:
           kind === "supervisor" ? null : form.warehouse_id ? Number.parseInt(form.warehouse_id, 10) : null,
         return_warehouse_id:
@@ -110,12 +129,17 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
       });
     },
     onSuccess: async () => {
+      setLocalError(null);
       await qc.invalidateQueries({ queryKey: [kind, tenantSlug] });
       if (kind === "supervisor") {
         await qc.invalidateQueries({ queryKey: ["supervisors", tenantSlug, "clients-toolbar"] });
       }
       setForm(emptyForm);
       onSuccess();
+    },
+    onError: (e: Error) => {
+      const m = messageFromStaffCreateError(e);
+      setLocalError(m ?? e.message ?? "Xatolik");
     }
   });
 
@@ -124,18 +148,37 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
 
   if (kind === "supervisor") {
     return (
-      <div className="mx-auto flex max-w-md flex-col gap-6 pb-10">
+      <div className="mx-auto flex max-w-2xl flex-col gap-6 pb-10">
         <PageHeader
           title={title}
           description="Faqat kirish uchun kerakli maydonlar"
           actions={
-            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-              Orqaga
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+                Orqaga
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={createMut.isPending}
+                onClick={() => {
+                  setLocalError(null);
+                  createMut.mutate();
+                }}
+              >
+                {createMut.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
+              </Button>
+            </div>
           }
         />
-        <div className="grid gap-2">
+        {localError ? (
+          <p className="text-sm text-destructive" role="alert">
+            {localError}
+          </p>
+        ) : null}
+        <div className="grid gap-4 sm:grid-cols-2">
           <Input
+            className="sm:col-span-2"
             placeholder="Ism *"
             value={form.first_name}
             onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
@@ -151,17 +194,21 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
             onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
           />
           <Input
+            className="font-mono sm:col-span-2"
             placeholder="Login *"
             value={form.login}
             onChange={(e) => setForm((p) => ({ ...p, login: e.target.value }))}
+            autoComplete="off"
           />
           <Input
+            className="sm:col-span-2"
             placeholder="Parol * (min. 6)"
             type="password"
             value={form.password}
             onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+            autoComplete="new-password"
           />
-          <label className="inline-flex items-center gap-2 text-xs">
+          <label className="inline-flex items-center gap-2 text-xs sm:col-span-2">
             <input
               type="checkbox"
               checked={form.can_authorize}
@@ -169,10 +216,21 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
             />
             Tizimga kirish ruxsati
           </label>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground sm:col-span-2">
             Agentlar ro‘yxatida «Супервайзер» ustunidan ushbu foydalanuvchini tanlang.
           </p>
-          <Button onClick={() => createMut.mutate()} disabled={createMut.isPending}>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Bekor
+          </Button>
+          <Button
+            onClick={() => {
+              setLocalError(null);
+              createMut.mutate();
+            }}
+            disabled={createMut.isPending}
+          >
             {createMut.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
           </Button>
         </div>
@@ -181,18 +239,37 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
   }
 
   return (
-    <div className="mx-auto flex max-w-md flex-col gap-6 pb-10">
+    <div className="mx-auto flex max-w-2xl flex-col gap-6 pb-10">
       <PageHeader
         title={title}
         description="To‘liq sahifada qo‘shish"
         actions={
-          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            Orqaga
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+              Orqaga
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={createMut.isPending}
+              onClick={() => {
+                setLocalError(null);
+                createMut.mutate();
+              }}
+            >
+              {createMut.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
+            </Button>
+          </div>
         }
       />
 
-      <div className="grid gap-2">
+      {localError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {localError}
+        </p>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
         <Input
           placeholder="Имя"
           value={form.first_name}
@@ -245,6 +322,22 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
           value={form.position}
           onChange={(e) => setForm((p) => ({ ...p, position: e.target.value }))}
         />
+        {kind === "agent" || kind === "expeditor" ? (
+          <FilterSelect
+            className="h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm sm:col-span-2"
+            emptyLabel="Savdo yo‘nalishi (spravochnik)"
+            aria-label="Savdo yo‘nalishi"
+            value={form.trade_direction_id}
+            onChange={(e) => setForm((p) => ({ ...p, trade_direction_id: e.target.value }))}
+          >
+            {(tradeDirectionsQ.data ?? []).map((t) => (
+              <option key={t.id} value={String(t.id)}>
+                {t.name}
+                {t.code ? ` (${t.code})` : ""}
+              </option>
+            ))}
+          </FilterSelect>
+        ) : null}
         <Input placeholder="Логин" value={form.login} onChange={(e) => setForm((p) => ({ ...p, login: e.target.value }))} />
         <Input
           placeholder="Пароль"
@@ -264,20 +357,22 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
               value={form.agent_type}
               onChange={(e) => setForm((p) => ({ ...p, agent_type: e.target.value }))}
             />
-            <Input
-              placeholder="Тип цены"
-              list="staff-create-price-types"
+            <FilterSelect
+              className="h-10 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+              emptyLabel="Тип цены"
+              aria-label="Тип цены"
               value={form.price_type}
               onChange={(e) => setForm((p) => ({ ...p, price_type: e.target.value }))}
-            />
-            <datalist id="staff-create-price-types">
+            >
               {(priceTypesQ.data ?? []).map((t) => (
-                <option key={t} value={t} />
+                <option key={t} value={t}>
+                  {t}
+                </option>
               ))}
-            </datalist>
+            </FilterSelect>
           </>
         ) : null}
-        <div className="flex items-center justify-between text-xs">
+        <div className="flex items-center justify-between text-xs sm:col-span-2">
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -296,7 +391,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
           </label>
         </div>
         {kind === "agent" ? (
-          <label className="inline-flex items-center gap-2 text-xs">
+          <label className="inline-flex items-center gap-2 text-xs sm:col-span-2">
             <input
               type="checkbox"
               checked={form.consignment}
@@ -305,9 +400,20 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
             Консигнация
           </label>
         ) : null}
-        <Button onClick={() => createMut.mutate()} disabled={createMut.isPending}>
-          {createMut.isPending ? "Сохранение..." : "Добавить"}
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-4 sm:col-span-2">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Bekor
+          </Button>
+          <Button
+            onClick={() => {
+              setLocalError(null);
+              createMut.mutate();
+            }}
+            disabled={createMut.isPending}
+          >
+            {createMut.isPending ? "Сохранение..." : "Добавить"}
+          </Button>
+        </div>
       </div>
     </div>
   );

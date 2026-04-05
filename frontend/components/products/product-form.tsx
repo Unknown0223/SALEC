@@ -15,6 +15,7 @@ import {
 import { FilterSelect } from "@/components/ui/filter-select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   tenantSlug: string | null;
@@ -22,13 +23,24 @@ type Props = {
   productId: number | null;
   /** Yangi mahsulot: URL dan kategoriya */
   initialCategoryId?: string;
+  /** `modal` — Dialog: вкладки «Главные данные» / «Дополнительные данные», подвал как в эталоне */
+  layout?: "page" | "modal";
   onSuccess: () => void;
   onCancel: () => void;
 };
 
-export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, onSuccess, onCancel }: Props) {
+export function ProductForm({
+  tenantSlug,
+  mode,
+  productId,
+  initialCategoryId,
+  layout = "page",
+  onSuccess,
+  onCancel
+}: Props) {
   const qc = useQueryClient();
   const isEdit = mode === "edit" && productId != null && productId > 0;
+  const isModal = layout === "modal";
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
   const [unitSelect, setUnitSelect] = useState("dona");
@@ -56,7 +68,12 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
   const [sortOrder, setSortOrder] = useState("");
   const [isBlocked, setIsBlocked] = useState(false);
   const [extraOpen, setExtraOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<"main" | "extra">("main");
   const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isModal) setModalTab("main");
+  }, [isModal, isEdit, productId]);
 
   const productQ = useQuery({
     queryKey: ["product-detail-form", tenantSlug, productId],
@@ -272,13 +289,17 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
   });
 
   if (isEdit && productQ.isLoading) {
-    return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
+    return (
+      <p className={cn("text-sm text-muted-foreground", isModal && "px-6 py-4")}>Yuklanmoqda…</p>
+    );
   }
 
   if (isEdit && productQ.isError) {
     return (
-      <div className="space-y-3">
-        <PageHeader title="Mahsulot" description="Topilmadi yoki xato" />
+      <div className={cn("space-y-3", isModal && "px-6 py-4")}>
+        {!isModal ? <PageHeader title="Mahsulot" description="Topilmadi yoki xato" /> : (
+          <p className="text-sm font-medium">Topilmadi yoki xato</p>
+        )}
         <Button type="button" variant="outline" onClick={onCancel}>
           Orqaga
         </Button>
@@ -287,34 +308,57 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
   }
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-6 pb-10">
-      <PageHeader
-        title={isEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"}
-        description="To‘liq sahifada saqlash"
-        actions={
-          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            Orqaga
-          </Button>
-        }
-      />
+    <div
+      className={cn(
+        "flex flex-col",
+        isModal ? "w-full gap-4 px-6 py-4" : "mx-auto max-w-lg gap-6 pb-10"
+      )}
+    >
+      {isModal ? (
+        <div className="border-b border-border pb-4">
+          <h2 className="text-lg font-semibold tracking-tight">{isEdit ? "Редактировать" : "Добавить"}</h2>
+          <div className="mt-3 flex gap-1 rounded-lg bg-muted/60 p-1">
+            <button
+              type="button"
+              className={cn(
+                "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                modalTab === "main"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setModalTab("main")}
+            >
+              Главные данные
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                modalTab === "extra"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setModalTab("extra")}
+            >
+              Дополнительные данные
+            </button>
+          </div>
+        </div>
+      ) : (
+        <PageHeader
+          title={isEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"}
+          description="To‘liq sahifada saqlash"
+          actions={
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+              Orqaga
+            </Button>
+          }
+        />
+      )}
 
       <div className="grid gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="pf-sku">SKU</Label>
-          <Input
-            id="pf-sku"
-            value={sku}
-            onChange={(e) => setSku(e.target.value)}
-            disabled={mutation.isPending}
-            autoComplete="off"
-          />
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="pf-name">
-            Nomi <span className="text-destructive">*</span>
-          </Label>
-          <Input id="pf-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
-        </div>
+        {!isModal ? (
+          <>
         <div className="grid gap-1.5">
           <Label htmlFor="pf-category">
             Kategoriya <span className="text-destructive">*</span>
@@ -334,6 +378,22 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
               </option>
             ))}
           </FilterSelect>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="pf-name">
+            Nomi <span className="text-destructive">*</span>
+          </Label>
+          <Input id="pf-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="pf-sku">SKU</Label>
+          <Input
+            id="pf-sku"
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            disabled={mutation.isPending}
+            autoComplete="off"
+          />
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="pf-unit">
@@ -362,6 +422,21 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
               autoComplete="off"
             />
           ) : null}
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="pf-qty-per-block">Количество в блоке</Label>
+          <Input
+            id="pf-qty-per-block"
+            inputMode="numeric"
+            placeholder="Напр. 5 — сколько штук в одной упаковке"
+            value={qtyPerBlock}
+            onChange={(e) => setQtyPerBlock(e.target.value.replace(/[^0-9]/g, ""))}
+            disabled={mutation.isPending}
+          />
+          <p className="text-xs text-muted-foreground">
+            Одна упаковка (блок): сколько единиц товара (дона и т.д.) внутри. Используется при поступлении: кол-во = число
+            блоков × это значение.
+          </p>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="pf-barcode">Shtrix-kod (ixtiyoriy)</Label>
@@ -453,7 +528,7 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
                 </FilterSelect>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2">
               <div className="grid gap-1.5">
                 <Label>Вес (kg)</Label>
                 <Input value={weightKg} onChange={(e) => setWeightKg(e.target.value)} disabled={mutation.isPending} />
@@ -461,14 +536,6 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
               <div className="grid gap-1.5">
                 <Label>Объём (m³)</Label>
                 <Input value={volumeM3} onChange={(e) => setVolumeM3(e.target.value)} disabled={mutation.isPending} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Кол-во в блоке</Label>
-                <Input
-                  value={qtyPerBlock}
-                  onChange={(e) => setQtyPerBlock(e.target.value.replace(/[^0-9]/g, ""))}
-                  disabled={mutation.isPending}
-                />
               </div>
             </div>
             <div className="grid gap-2">
@@ -586,16 +653,350 @@ export function ProductForm({ tenantSlug, mode, productId, initialCategoryId, on
           </label>
         ) : null}
         {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
+          </>
+        ) : (
+          <>
+            {modalTab === "main" ? (
+              <div className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-category">
+                    Категория <span className="text-destructive">*</span>
+                  </Label>
+                  <FilterSelect
+                    id="pf-m-category"
+                    className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    emptyLabel="Категория"
+                    aria-label="Категория"
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-name">
+                    Название <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="pf-m-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-sku">SKU</Label>
+                  <Input
+                    id="pf-m-sku"
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    disabled={mutation.isPending}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-unit">
+                    Единицы измерения <span className="text-destructive">*</span>
+                  </Label>
+                  <select
+                    id="pf-m-unit"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    value={unitSelect}
+                    onChange={(e) => setUnitSelect(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    {PRODUCT_UNIT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {unitSelect === PRODUCT_UNIT_CUSTOM ? (
+                    <Input
+                      id="pf-m-unit-custom"
+                      placeholder="Например: упак."
+                      value={unitCustom}
+                      onChange={(e) => setUnitCustom(e.target.value)}
+                      disabled={mutation.isPending}
+                      autoComplete="off"
+                    />
+                  ) : null}
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-weight">Вес</Label>
+                  <Input
+                    id="pf-m-weight"
+                    placeholder="кг"
+                    value={weightKg}
+                    onChange={(e) => setWeightKg(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-m-qty-per-block">Количество в блоке</Label>
+                  <Input
+                    id="pf-m-qty-per-block"
+                    inputMode="numeric"
+                    placeholder="Напр. 5"
+                    value={qtyPerBlock}
+                    onChange={(e) => setQtyPerBlock(e.target.value.replace(/[^0-9]/g, ""))}
+                    disabled={mutation.isPending}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Сколько штук в одной упаковке; при поступлении: кол-во = блоки × это значение.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Габариты</Label>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="pf-dim-m"
+                        checked={dimensionUnit === "m"}
+                        onChange={() => setDimensionUnit("m")}
+                      />
+                      В метре
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="pf-dim-m"
+                        checked={dimensionUnit === "cm"}
+                        onChange={() => setDimensionUnit("cm")}
+                      />
+                      В сантиметре
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Ширина"
+                      value={widthCm}
+                      onChange={(e) => setWidthCm(e.target.value)}
+                      disabled={mutation.isPending}
+                    />
+                    <Input
+                      placeholder="Высота"
+                      value={heightCm}
+                      onChange={(e) => setHeightCm(e.target.value)}
+                      disabled={mutation.isPending}
+                    />
+                    <Input
+                      placeholder="Длина"
+                      value={lengthCm}
+                      onChange={(e) => setLengthCm(e.target.value)}
+                      disabled={mutation.isPending}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-x-barcode">Штрих-код</Label>
+                  <Input
+                    id="pf-x-barcode"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5 sm:grid-cols-2 sm:gap-3">
+                  <div className="grid gap-1.5">
+                    <Label>Группа товаров</Label>
+                    <FilterSelect
+                      className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                      emptyLabel="Группа товаров"
+                      aria-label="Группа товаров"
+                      value={productGroupId}
+                      onChange={(e) => setProductGroupId(e.target.value)}
+                      disabled={mutation.isPending}
+                    >
+                      {productGroups.map((x) => (
+                        <option key={x.id} value={String(x.id)}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Бренд</Label>
+                    <FilterSelect
+                      className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                      emptyLabel="Бренд"
+                      aria-label="Бренд"
+                      value={brandId}
+                      onChange={(e) => setBrandId(e.target.value)}
+                      disabled={mutation.isPending}
+                    >
+                      {brands.map((x) => (
+                        <option key={x.id} value={String(x.id)}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Производитель</Label>
+                    <FilterSelect
+                      className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                      emptyLabel="Производитель"
+                      aria-label="Производитель"
+                      value={manufacturerId}
+                      onChange={(e) => setManufacturerId(e.target.value)}
+                      disabled={mutation.isPending}
+                    >
+                      {manufacturers.map((x) => (
+                        <option key={x.id} value={String(x.id)}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Сегмент</Label>
+                    <FilterSelect
+                      className="flex h-9 w-full min-w-0 max-w-none rounded-md border border-input bg-background px-2 text-sm"
+                      emptyLabel="Сегмент"
+                      aria-label="Сегмент"
+                      value={segmentId}
+                      onChange={(e) => setSegmentId(e.target.value)}
+                      disabled={mutation.isPending}
+                    >
+                      {segments.map((x) => (
+                        <option key={x.id} value={String(x.id)}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pf-x-vol">Объём (m³)</Label>
+                  <Input
+                    id="pf-x-vol"
+                    value={volumeM3}
+                    onChange={(e) => setVolumeM3(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label>ИКПУ</Label>
+                    <Input value={ikpuCode} onChange={(e) => setIkpuCode(e.target.value)} disabled={mutation.isPending} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>ТН ВЭД</Label>
+                    <Input value={hsCode} onChange={(e) => setHsCode(e.target.value)} disabled={mutation.isPending} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Sell code</Label>
+                    <Input value={sellCode} onChange={(e) => setSellCode(e.target.value)} disabled={mutation.isPending} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Сортировка</Label>
+                    <Input
+                      value={sortOrder}
+                      onChange={(e) => setSortOrder(e.target.value.replace(/[^0-9-]/g, ""))}
+                      disabled={mutation.isPending}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Комментарий</Label>
+                  <textarea
+                    className="min-h-[64px] rounded-md border bg-background px-2 py-1 text-sm"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={isBlocked}
+                    onChange={(e) => setIsBlocked(e.target.checked)}
+                    disabled={mutation.isPending}
+                  />
+                  Блок / ограничение (is_blocked)
+                </label>
+                <div className="grid gap-2 rounded-md border border-border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Цены (UZS, retail / wholesale)</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="pf-x-retail">Chakana (retail)</Label>
+                      <Input
+                        id="pf-x-retail"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="25000"
+                        value={retailPrice}
+                        onChange={(e) => setRetailPrice(e.target.value)}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="pf-x-wholesale">Ulgurji (wholesale)</Label>
+                      <Input
+                        id="pf-x-wholesale"
+                        type="text"
+                        inputMode="decimal"
+                        value={wholesalePrice}
+                        onChange={(e) => setWholesalePrice(e.target.value)}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
+          </>
+        )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
-          Bekor
-        </Button>
-        <Button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
-        </Button>
-      </div>
+      {!isModal ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
+            Bekor
+          </Button>
+          <Button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-col gap-4 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                  disabled={mutation.isPending}
+                />
+                Активный
+              </label>
+              <Button type="button" variant="outline" size="sm" disabled className="pointer-events-none opacity-60">
+                Загрузить фото
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
+                Отмена
+              </Button>
+              <Button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+                {mutation.isPending ? "Сохранение…" : isEdit ? "Сохранить" : "Добавить"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -257,6 +257,7 @@ export async function updateProduct(
   return row;
 }
 
+/** Ma’lumotlar bazasidan qator o‘chirilmaydi — faqat `is_active: false` (neaktiv). */
 export async function softDeleteProduct(
   tenantId: number,
   productId: number,

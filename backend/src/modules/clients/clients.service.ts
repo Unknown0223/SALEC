@@ -6,7 +6,8 @@ import { appendTenantAuditEvent } from "../../lib/tenant-audit";
 import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 import {
   activeValuesFromClientRefEntries,
-  clientRefEntriesFromUnknown
+  clientRefEntriesFromUnknown,
+  territoryRegionPickerNames
 } from "../tenant-settings/tenant-settings.service";
 import { listActiveSalesChannelLabels } from "../sales-directions/sales-directions.service";
 
@@ -56,6 +57,7 @@ export type ClientListRow = {
   working_hours: string | null;
   region: string | null;
   district: string | null;
+  city: string | null;
   neighborhood: string | null;
   street: string | null;
   house_number: string | null;
@@ -136,6 +138,7 @@ export type ClientReferences = {
   client_type_codes: string[];
   regions: string[];
   districts: string[];
+  cities: string[];
   neighborhoods: string[];
   zones: string[];
   client_formats: string[];
@@ -423,6 +426,7 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
         client_type_code: true,
         region: true,
         district: true,
+        city: true,
         neighborhood: true,
         zone: true,
         client_format: true,
@@ -444,7 +448,7 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     if (!Array.isArray(v)) return [];
     return v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((s) => s.trim());
   };
-  const settingsRegions = strArr("regions");
+  const settingsRegions = territoryRegionPickerNames(settingsRef as Record<string, unknown> | undefined);
   const catParsed = clientRefEntriesFromUnknown(settingsRef?.client_category_entries);
   const setCat =
     catParsed.length > 0 ? activeValuesFromClientRefEntries(catParsed) : strArr("client_categories");
@@ -457,6 +461,7 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
   const setSales = strArr("sales_channels");
   const setProdCat = strArr("client_product_category_refs");
   const setDistricts = strArr("client_districts");
+  const setCities = strArr("client_cities");
   const setNeighborhoods = strArr("client_neighborhoods");
   const setZonesRef = strArr("client_zones");
   const setLogistics = strArr("client_logistics_services");
@@ -466,6 +471,7 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     client_type_codes: normalizeDistinct([...setTypes, ...clientRows.map((r) => r.client_type_code)]),
     regions: normalizeDistinct([...settingsRegions, ...clientRows.map((r) => r.region)]),
     districts: normalizeDistinct([...setDistricts, ...clientRows.map((r) => r.district)]),
+    cities: normalizeDistinct([...setCities, ...clientRows.map((r) => r.city)]),
     neighborhoods: normalizeDistinct([...setNeighborhoods, ...clientRows.map((r) => r.neighborhood)]),
     zones: normalizeDistinct([...setZonesRef, ...clientRows.map((r) => r.zone)]),
     client_formats: normalizeDistinct([...setFormats, ...clientRows.map((r) => r.client_format)]),
@@ -582,6 +588,7 @@ export async function buildClientListWhereInput(
         { phone: { contains: search, mode: "insensitive" } },
         { inn: { contains: search, mode: "insensitive" } },
         { region: { contains: search, mode: "insensitive" } },
+        { city: { contains: search, mode: "insensitive" } },
         { district: { contains: search, mode: "insensitive" } },
         { landmark: { contains: search, mode: "insensitive" } },
         { responsible_person: { contains: search, mode: "insensitive" } },
@@ -614,6 +621,7 @@ export async function exportClientsFilteredCsv(
     "Telefon",
     "INN",
     "Viloyat",
+    "Shahar",
     "Tuman",
     "Zona",
     "Toifa",
@@ -643,6 +651,7 @@ export async function exportClientsFilteredCsv(
       phone: true,
       inn: true,
       region: true,
+      city: true,
       district: true,
       zone: true,
       category: true,
@@ -664,6 +673,7 @@ export async function exportClientsFilteredCsv(
         r.phone ?? "",
         r.inn ?? "",
         r.region ?? "",
+        r.city ?? "",
         r.district ?? "",
         r.zone ?? "",
         r.category ?? "",
@@ -771,6 +781,7 @@ export async function listClientsForTenantPaged(
         working_hours: true,
         region: true,
         district: true,
+        city: true,
         neighborhood: true,
         street: true,
         house_number: true,
@@ -844,6 +855,7 @@ export async function listClientsForTenantPaged(
         working_hours: c.working_hours,
         region: c.region,
         district: c.district,
+        city: c.city,
         neighborhood: c.neighborhood,
         street: c.street,
         house_number: c.house_number,
@@ -910,6 +922,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         working_hours: true,
         region: true,
         district: true,
+        city: true,
         neighborhood: true,
         street: true,
         house_number: true,
@@ -998,6 +1011,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     working_hours: c.working_hours,
     region: c.region,
     district: c.district,
+    city: c.city,
     neighborhood: c.neighborhood,
     street: c.street,
     house_number: c.house_number,
@@ -1148,6 +1162,7 @@ export type UpdateClientInput = {
   working_hours?: string | null;
   region?: string | null;
   district?: string | null;
+  city?: string | null;
   neighborhood?: string | null;
   street?: string | null;
   house_number?: string | null;
@@ -1228,6 +1243,7 @@ export type CreateClientMinimalInput = {
   client_type_code?: string | null;
   region?: string | null;
   district?: string | null;
+  city?: string | null;
   neighborhood?: string | null;
   zone?: string | null;
   client_format?: string | null;
@@ -1264,6 +1280,7 @@ export async function createClientMinimal(
       client_type_code: str(input.client_type_code),
       region: str(input.region),
       district: str(input.district),
+      city: str(input.city),
       neighborhood: str(input.neighborhood),
       zone: str(input.zone),
       client_format: str(input.client_format),
@@ -1279,6 +1296,7 @@ export async function createClientMinimal(
     client_type_code: str(input.client_type_code),
     region: str(input.region),
     district: str(input.district),
+    city: str(input.city),
     neighborhood: str(input.neighborhood),
     zone: str(input.zone),
     client_format: str(input.client_format),
@@ -1408,6 +1426,9 @@ export async function updateClientFields(
   }
   if (input.district !== undefined) {
     data.district = input.district?.trim() || null;
+  }
+  if (input.city !== undefined) {
+    data.city = input.city?.trim() || null;
   }
   if (input.neighborhood !== undefined) {
     data.neighborhood = input.neighborhood?.trim() || null;
@@ -1693,6 +1714,7 @@ export const CLIENT_IMPORT_COLUMN_KEYS = [
   "working_hours",
   "region",
   "district",
+  "city",
   "neighborhood",
   "street",
   "house_number",
@@ -1734,6 +1756,10 @@ const HEADER_ALIASES: Record<string, string> = {
   ish_vaqti: "working_hours",
   viloyat: "region",
   tuman: "district",
+  shahar: "city",
+  gorod: "city",
+  город: "city",
+  city: "city",
   mahalla: "neighborhood",
   kocha: "street",
   uy: "house_number",
@@ -1872,6 +1898,7 @@ export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
     if (key === "credit_limit") return "0";
     if (key === "is_active") return "ha";
     if (key === "region") return "Toshkent";
+    if (key === "city") return "Toshkent shahri";
     if (key.startsWith("contact1_")) {
       if (key === "contact1_firstName") return "Ali";
       if (key === "contact1_lastName") return "Valiyev";
@@ -2066,6 +2093,7 @@ export async function importClientsFromXlsx(
     const working_hours = readArrayCell(row, colIndexByKey.working_hours);
     const region = readArrayCell(row, colIndexByKey.region);
     const district = readArrayCell(row, colIndexByKey.district);
+    const city = readArrayCell(row, colIndexByKey.city);
     const neighborhood = readArrayCell(row, colIndexByKey.neighborhood);
     const street = readArrayCell(row, colIndexByKey.street);
     const house_number = readArrayCell(row, colIndexByKey.house_number);
@@ -2120,6 +2148,7 @@ export async function importClientsFromXlsx(
           working_hours,
           region,
           district,
+          city,
           neighborhood,
           street,
           house_number,

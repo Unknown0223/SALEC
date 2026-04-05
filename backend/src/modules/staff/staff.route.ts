@@ -67,6 +67,7 @@ const createBodySchema = z.object({
   agent_entitlements: agentEntitlementsSchema,
   warehouse_id: z.number().int().positive().nullable().optional(),
   return_warehouse_id: z.number().int().positive().nullable().optional(),
+  trade_direction_id: z.number().int().positive().nullable().optional(),
   trade_direction: z.string().nullable().optional(),
   branch: z.string().nullable().optional(),
   position: z.string().nullable().optional(),
@@ -95,6 +96,7 @@ const patchStaffMutableBody = z.object({
   agent_price_types: z.array(z.string()).optional(),
   warehouse_id: z.number().int().positive().nullable().optional(),
   return_warehouse_id: z.number().int().positive().nullable().optional(),
+  trade_direction_id: z.number().int().positive().nullable().optional(),
   trade_direction: z.string().nullable().optional(),
   branch: z.string().nullable().optional(),
   position: z.string().nullable().optional(),
@@ -354,6 +356,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
       if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
       if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
       if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+      if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
       if (msg === "BAD_ENTITLEMENT_CATEGORY" || msg === "BAD_ENTITLEMENT_PRODUCT") {
         return reply.status(400).send({ error: "BadEntitlements" });
       }
@@ -384,6 +387,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "BAD_SUPERVISOR") return reply.status(400).send({ error: "BadSupervisor" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
         if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
         if (msg === "BAD_ENTITLEMENT_CATEGORY" || msg === "BAD_ENTITLEMENT_PRODUCT") {
@@ -454,6 +458,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
         if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
         if (msg === "BAD_SUPERVISEE_AGENT") return reply.status(400).send({ error: "BadSuperviseeAgent" });
@@ -542,6 +547,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         throw e;
       }
     }
@@ -662,6 +668,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
         if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
         if (msg === "BAD_EXPEDITOR_RULE_AGENT") return reply.status(400).send({ error: "BadExpeditorRuleAgent" });
@@ -698,6 +705,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "LOGIN_EXISTS") return reply.status(409).send({ error: "LoginExists" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_RETURN_WAREHOUSE") return reply.status(400).send({ error: "BadReturnWarehouse" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         throw e;
       }
     }

@@ -35,7 +35,9 @@ function auditActionLabel(action: string): string {
   const m: Record<string, string> = {
     "client.patch": "Rekvizitlar",
     "client.balance_movement": "Balans",
-    "client.merge": "Birlashtirish"
+    "client.merge": "Birlashtirish",
+    "client.payment": "To‘lov",
+    "client.sales_return": "Qaytarish"
   };
   return m[action] ?? action;
 }
@@ -53,7 +55,17 @@ type Props = {
   clientId: number;
 };
 
-type DetailTab = "main" | "balance" | "orders" | "audit";
+type DetailTab = "main" | "balance" | "orders" | "payments" | "audit";
+
+type PaymentRow = {
+  id: number;
+  amount: string;
+  payment_type: string;
+  note: string | null;
+  created_at: string;
+  order_id: number | null;
+  order_number: string | null;
+};
 
 type ClientAuditResponse = {
   data: Array<{
@@ -111,6 +123,17 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       return body;
     },
     enabled: tab === "audit"
+  });
+
+  const paymentsTabQ = useQuery({
+    queryKey: ["client-payments-tab", tenantSlug, clientId],
+    queryFn: async () => {
+      const { data: body } = await api.get<{ data: PaymentRow[] }>(
+        `/api/${tenantSlug}/clients/${clientId}/payments`
+      );
+      return body.data;
+    },
+    enabled: tab === "payments"
   });
 
   const addMovement = useMutation({
@@ -197,6 +220,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             ["main", "Asosiy"],
             ["balance", "Balans"],
             ["orders", "Zakazlar"],
+            ["payments", "To‘lovlar"],
             ["audit", "Tarix"]
           ] as const
         ).map(([id, label]) => (
@@ -468,6 +492,66 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
               </Link>
             </li>
           </ul>
+        </div>
+      ) : null}
+
+      {tab === "payments" ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">Mijozga bog‘langan to‘lov yozuvlari.</p>
+            <Link
+              className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+              href={`/payments/new?client_id=${clientId}`}
+            >
+              + Yangi to‘lov
+            </Link>
+          </div>
+          {paymentsTabQ.isLoading ? (
+            <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+          ) : paymentsTabQ.isError ? (
+            <p className="text-xs text-destructive">Ro‘yxatni yuklab bo‘lmadi (huquq yoki tarmoq).</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[520px] border-collapse text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-left text-muted-foreground">
+                    <th className="px-2 py-2 font-medium">Sana</th>
+                    <th className="px-2 py-2 font-medium">Tur</th>
+                    <th className="px-2 py-2 font-medium text-right">Summa</th>
+                    <th className="px-2 py-2 font-medium">Zakaz</th>
+                    <th className="px-2 py-2 font-medium">Izoh</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(paymentsTabQ.data ?? []).map((p) => (
+                    <tr key={p.id} className="border-b last:border-0">
+                      <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">
+                        {new Date(p.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-2 py-2">{p.payment_type}</td>
+                      <td className="px-2 py-2 text-right font-mono tabular-nums">{p.amount}</td>
+                      <td className="px-2 py-2 font-mono">
+                        {p.order_id != null && p.order_number ? (
+                          <Link
+                            className="text-primary underline-offset-2 hover:underline"
+                            href={`/orders/${p.order_id}`}
+                          >
+                            {p.order_number}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-2 py-2 max-w-[200px] truncate">{p.note ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {(paymentsTabQ.data ?? []).length === 0 ? (
+                <p className="p-4 text-center text-xs text-muted-foreground">Hozircha yozuv yo‘q.</p>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
 

@@ -1,5 +1,18 @@
 import { isAxiosError } from "axios";
 
+/** Brauzerda server o‘chiq / noto‘g‘ri port — odatda `response` bo‘lmaydi */
+export function isApiUnreachable(error: unknown): boolean {
+  if (!isAxiosError(error)) return false;
+  if (error.response != null) return false;
+  const code = error.code;
+  if (code === "ERR_NETWORK" || code === "ECONNABORTED") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  if (msg.includes("network error")) return true;
+  if (msg.includes("econnrefused")) return true;
+  if (msg.includes("failed to fetch")) return true;
+  return false;
+}
+
 export function getUserFacingError(error: unknown, fallback = "Xatolik yuz berdi"): string {
   if (isAxiosError(error)) {
     const status = error.response?.status;

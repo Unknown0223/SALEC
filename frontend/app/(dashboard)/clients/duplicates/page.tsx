@@ -134,7 +134,7 @@ export default function ClientDuplicatesPage() {
           <Link className="text-primary underline-offset-4 hover:underline" href="/dashboard">
             Dashboard
           </Link>
-          <Link className="text-primary underline-offset-4 hover:underline" href="/bonus-rules/active">
+          <Link className="text-primary underline-offset-4 hover:underline" href="/settings/bonus-rules/active">
             Bonus qoidalari
           </Link>
           <Link className="text-primary underline-offset-4 hover:underline" href="/products">

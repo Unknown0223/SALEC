@@ -2,18 +2,23 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api, apiBaseURL } from "@/lib/api";
 import { readPersistedAuth } from "@/lib/persisted-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LayoutGrid, ListFilter, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type StockRow = {
   id: number;
@@ -31,6 +36,38 @@ type ProductOption = { id: number; sku: string; name: string };
 /** useQuery `data` undefined bo‘lganda `= []` har renderda yangi referens — useEffect cheksiz aylanadi. */
 const EMPTY_PRODUCTS: ProductOption[] = [];
 
+const STOCK_TABLE_ID = "stock.kirim_qoldiq.v1";
+const STOCK_COLS = [
+  { id: "warehouse_name", label: "Ombor" },
+  { id: "sku", label: "SKU" },
+  { id: "product_name", label: "Mahsulot" },
+  { id: "qty", label: "Miqdor" },
+  { id: "reserved_qty", label: "Rezerv" }
+] as const;
+const STOCK_DEFAULT_ORDER = STOCK_COLS.map((c) => c.id);
+const STOCK_NUMERIC = new Set<string>(["qty", "reserved_qty"]);
+
+function colLabelStock(id: string): string {
+  return STOCK_COLS.find((c) => c.id === id)?.label ?? id;
+}
+
+function renderStockCell(row: StockRow, colId: string): ReactNode {
+  switch (colId) {
+    case "warehouse_name":
+      return row.warehouse_name;
+    case "sku":
+      return <span className="font-mono text-xs">{row.sku}</span>;
+    case "product_name":
+      return row.product_name;
+    case "qty":
+      return <span className="tabular-nums">{row.qty}</span>;
+    case "reserved_qty":
+      return <span className="tabular-nums">{row.reserved_qty}</span>;
+    default:
+      return "—";
+  }
+}
+
 function StockPageContent() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const role = useEffectiveRole();
@@ -44,6 +81,21 @@ function StockPageContent() {
   const [importSummary, setImportSummary] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [importWarehouseId, setImportWarehouseId] = useState<string>("");
+
+  const stockTablePrefs = useUserTablePrefs({
+    tenantSlug,
+    tableId: STOCK_TABLE_ID,
+    defaultColumnOrder: STOCK_DEFAULT_ORDER,
+    defaultPageSize: 100,
+    allowedPageSizes: [50, 100, 200, 500]
+  });
+  const visibleStockCols = stockTablePrefs.visibleColumnOrder;
+
+  const resetStockFilters = useCallback(() => {
+    setFilterWarehouseId("");
+  }, []);
 
   const { data: warehouses = [] } = useQuery({
     queryKey: ["warehouses", tenantSlug],
@@ -88,7 +140,7 @@ function StockPageContent() {
     setLines(products.map((p) => ({ product_id: String(p.id), qty: "" })));
   }, [receiptWarehouseId, products]);
 
-  const { data: stock = [], isLoading } = useQuery({
+  const { data: stock = [], isLoading, isFetching, refetch: refetchStock } = useQuery({
     queryKey: ["stock", tenantSlug, filterWarehouseId],
     queryFn: async () => {
       const qs = filterWarehouseId
@@ -123,9 +175,11 @@ function StockPageContent() {
   });
 
   const importMutation = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async ({ file, warehouseId }: { file: File; warehouseId: string }) => {
       const fd = new FormData();
       fd.append("file", file);
+      const w = warehouseId.trim();
+      if (w) fd.append("warehouse_id", w);
       const { data } = await api.post<{
         applied: number;
         errors: string[];
@@ -148,11 +202,12 @@ function StockPageContent() {
     }
   });
 
-  async function downloadTemplate() {
+  async function downloadTemplate(kind: "classic" | "postupleniya2") {
     if (!tenantSlug) return;
     const accessToken = useAuthStore.getState().accessToken ?? readPersistedAuth().accessToken;
     if (!accessToken) return;
-    const res = await fetch(`${apiBaseURL}/api/${tenantSlug}/stock/import-template`, {
+    const qs = kind === "postupleniya2" ? "?kind=postupleniya2" : "";
+    const res = await fetch(`${apiBaseURL}/api/${tenantSlug}/stock/import-template${qs}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     if (!res.ok) {
@@ -164,7 +219,8 @@ function StockPageContent() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "ombor-kirim-shablon.xlsx";
+    a.download =
+      kind === "postupleniya2" ? "postupleniya-kirim-shablon.xlsx" : "ombor-kirim-shablon.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -199,64 +255,148 @@ function StockPageContent() {
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/warehouses">
           Omborlar boshqaruvi
         </Link>
+        <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/balances">
+          Остатки товаров
+        </Link>
+        <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/receipts">
+          Поступление
+        </Link>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="border-border/60 shadow-sm">
           <CardContent className="space-y-4 pt-6">
-            <div className="space-y-2">
-              <Label htmlFor="wh-filter">Filtr: ombor</Label>
-              <select
-                id="wh-filter"
-                className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full min-w-0 rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                value={filterWarehouseId}
-                onChange={(e) => setFilterWarehouseId(e.target.value)}
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[12rem] flex-1 space-y-2">
+                <Label htmlFor="wh-filter">Filtr: ombor</Label>
+                <select
+                  id="wh-filter"
+                  className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full min-w-0 rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                  value={filterWarehouseId}
+                  onChange={(e) => setFilterWarehouseId(e.target.value)}
+                >
+                  <option value="">Barcha omborlar</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={String(w.id)}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                title="Filtrlarni standart holatga"
+                onClick={() => resetStockFilters()}
               >
-                <option value="">Barcha omborlar</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={String(w.id)}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
+                <ListFilter className="size-4" />
+              </Button>
             </div>
 
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="p-2">Ombor</th>
-                    <th className="p-2">SKU</th>
-                    <th className="p-2">Mahsulot</th>
-                    <th className="p-2 text-right">Miqdor</th>
-                    <th className="p-2 text-right">Rezerv</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {isLoading ? (
+            <div className="flex flex-wrap items-center gap-2 border-b border-border/50 pb-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                title="Управление столбцами"
+                onClick={() => setColumnDialogOpen(true)}
+              >
+                <LayoutGrid className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                title="Yangilash"
+                onClick={() => void refetchStock()}
+              >
+                <RefreshCw className={cn("size-4", isFetching && "animate-spin")} />
+              </Button>
+            </div>
+
+            <TableColumnSettingsDialog
+              open={columnDialogOpen}
+              onOpenChange={setColumnDialogOpen}
+              title="Управление столбцами"
+              description="Видимые столбцы и порядок сохраняются для вашей учётной записи."
+              columns={[...STOCK_COLS]}
+              columnOrder={stockTablePrefs.columnOrder}
+              hiddenColumnIds={stockTablePrefs.hiddenColumnIds}
+              saving={stockTablePrefs.saving}
+              onSave={(next) => stockTablePrefs.saveColumnLayout(next)}
+              onReset={() => stockTablePrefs.resetColumnLayout()}
+            />
+
+            <div className="overflow-x-auto rounded-lg border border-border/60 bg-card shadow-sm">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                {visibleStockCols.length === 0 ? (
+                  <tbody>
                     <tr>
-                      <td colSpan={5} className="text-muted-foreground p-4">
-                        Yuklanmoqda…
+                      <td className="text-muted-foreground p-8 text-center">
+                        Ustunlar yashirilgan. «Управление столбцами» (panjara tugmasi) orqali yoqing.
                       </td>
                     </tr>
-                  ) : stock.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-muted-foreground p-4">
-                        Qoldiq yo‘q yoki filtr qattiq.
-                      </td>
-                    </tr>
-                  ) : (
-                    stock.map((row) => (
-                      <tr key={row.id} className="border-t">
-                        <td className="p-2">{row.warehouse_name}</td>
-                        <td className="p-2 font-mono text-xs">{row.sku}</td>
-                        <td className="p-2">{row.product_name}</td>
-                        <td className="p-2 text-right tabular-nums">{row.qty}</td>
-                        <td className="p-2 text-right tabular-nums">{row.reserved_qty}</td>
+                  </tbody>
+                ) : (
+                  <>
+                    <thead className="bg-muted/50 text-xs font-medium text-muted-foreground">
+                      <tr>
+                        {visibleStockCols.map((colId) => (
+                          <th
+                            key={colId}
+                            className={cn(
+                              "whitespace-nowrap px-3 py-2.5",
+                              STOCK_NUMERIC.has(colId) && "text-right"
+                            )}
+                          >
+                            {colLabelStock(colId)}
+                          </th>
+                        ))}
                       </tr>
-                    ))
-                  )}
-                </tbody>
+                    </thead>
+                    <tbody>
+                      {isLoading ? (
+                        <tr>
+                          <td
+                            colSpan={visibleStockCols.length}
+                            className="text-muted-foreground p-6 text-center"
+                          >
+                            Yuklanmoqda…
+                          </td>
+                        </tr>
+                      ) : stock.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={visibleStockCols.length}
+                            className="text-muted-foreground p-6 text-center"
+                          >
+                            Qoldiq yo‘q yoki filtr qattiq.
+                          </td>
+                        </tr>
+                      ) : (
+                        stock.map((row) => (
+                          <tr key={row.id} className="border-t border-border/60">
+                            {visibleStockCols.map((colId) => (
+                              <td
+                                key={colId}
+                                className={cn(
+                                  "px-3 py-2",
+                                  STOCK_NUMERIC.has(colId) && "text-right"
+                                )}
+                              >
+                                {renderStockCell(row, colId)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </>
+                )}
               </table>
             </div>
           </CardContent>
@@ -264,18 +404,47 @@ function StockPageContent() {
 
         {role === "admin" && (
           <div className="flex flex-col gap-6">
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardContent className="space-y-4 pt-6">
                 <h3 className="text-sm font-medium">Excel orqali kirim</h3>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  Avval shablonni yuklab oling: ustunlarda ombor, <strong>tovar smart kodi (SKU)</strong>,{" "}
-                  <strong>shtrix kod</strong>, <strong>tovar nomi</strong> (tekshiruv),{" "}
-                  <strong>miqdor</strong>, <strong>qoʻshilish sanasi</strong>. Importda mahsulot avvalo SKU
-                  bo‘yicha, keyin shtrix kod bo‘yicha topiladi va ostatkaga qo‘shiladi.
+                  <strong>Klassik</strong> shablon: ombor, SKU / shtrix kod, tovar nomi (tekshiruv), miqdor, sana.
+                  <strong className="ms-1">«Поступление» (2)</strong> shablon: №, Kod tovar, Kategoriya, Mahsulot,
+                  Narx, Miqdor prihod, Miqdor blokda — umumiy dona = prihod × blok (blok bo‘sh yoki 1 bo‘lsa faqat
+                  prihod). Agar faylda «Склад» ustuni bo‘lmasa, pastdagi omborni tanlang.
                 </p>
+                <div className="space-y-2">
+                  <Label htmlFor="import-wh">Import: ombor (postupleniya fayli uchun, ixtiyoriy)</Label>
+                  <select
+                    id="import-wh"
+                    className="border-input bg-background flex h-10 w-full max-w-md rounded-md border px-3 py-2 text-sm"
+                    value={importWarehouseId}
+                    onChange={(e) => setImportWarehouseId(e.target.value)}
+                  >
+                    <option value="">— fayldagi «Склад» ishlatiladi —</option>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={String(w.id)}>
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => void downloadTemplate()}>
-                    Shablonni yuklab olish (.xlsx)
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void downloadTemplate("classic")}
+                  >
+                    Shablon (klassik)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void downloadTemplate("postupleniya2")}
+                  >
+                    Shablon «Поступление»
                   </Button>
                   <input
                     ref={excelRef}
@@ -285,7 +454,7 @@ function StockPageContent() {
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       e.target.value = "";
-                      if (f) importMutation.mutate(f);
+                      if (f) importMutation.mutate({ file: f, warehouseId: importWarehouseId });
                     }}
                   />
                   <Button
@@ -327,7 +496,7 @@ function StockPageContent() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-border/60 shadow-sm">
               <CardContent className="space-y-4 pt-6">
                 <h3 className="text-sm font-medium">Qo‘lda prihod (kirim)</h3>
                 <div className="space-y-2">
