@@ -27,10 +27,15 @@ Har bir band alohida epik / PR sifatida rejalashtiriladi: migratsiya (agar kerak
 - Mavjud: `CashDesk`, `CashDeskShift`, foydalanuvchi biriktirish.
 - Kerak: to‘lov qabul, qaytim, chek chop etish, kunlik yopish (Z-report).
 
+## 5a. To‘lovlar va zakazga taqsimlash (allocation)
+
+- Mavjud: `client_payments` CRUD, mijoz balansiga increment, **`payment_allocations`**, FIFO `GET/POST .../payments/:id/allocations|allocate`, panel **To‘lovlar** → «Zakazlarga».
+- Kerak: qarzdorlik / akt-sverka / PDF; ixtiyoriy balans **materialized view** (FAZA 6 gate).
+
 ## 6. Ombor transferlari
 
-- Mavjud: `Stock`, `GoodsReceipt`, `StockTake`.
-- Kerak: `warehouse_id` o‘rtasida hujjat (draft/posted), partiya ixtiyoriy.
+- Mavjud: `Stock`, `GoodsReceipt`, `StockTake`, **omborlararo transfer** (draft → in_transit → received / cancel), API + `/stock/transfers` (`api-client`).
+- Kerak (keyingi): partiya / seriya bilan bog‘lash, FEFO bilan integratsiya.
 
 ## 7. Partiya / yaroqlilik muddati
 
@@ -47,7 +52,8 @@ Har bir band alohida epik / PR sifatida rejalashtiriladi: migratsiya (agar kerak
 
 ## 10. Byudjet / chiqimlar
 
-- Kerak: `Expense` yoki moliya moduli, hisobotlar.
+- Qisman: `Expense` moduli + `/expenses` sahifa.
+- Kerak: to‘liq tasdiq oqimi, byudjet hisobotlari, kassa/moliya bilan integratsiya.
 
 ## 11. Printer integratsiyasi
 
@@ -68,8 +74,8 @@ Har bir band alohida epik / PR sifatida rejalashtiriladi: migratsiya (agar kerak
 
 ## 15. Hisobotlar vizuallash
 
-- Mavjad: jadval + Excel.
-- Kerak: Recharts / Chart.js, dashboard boyitish.
+- Mavjud: `/reports` jadval + **xlsx** eksport; backendda qo‘shimcha `channels` / ABC / XYZ / churn endpointlari.
+- Kerak: shu endpointlar uchun UI tablari; Recharts / Chart.js, dashboard boyitish.
 
 ---
 

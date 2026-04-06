@@ -8,6 +8,7 @@ import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { PaymentAllocateDialog } from "@/components/payments/payment-allocate-dialog";
 import { useState } from "react";
 
 type PaymentRow = {
@@ -27,6 +28,7 @@ export default function PaymentsPage() {
   const hydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
+  const [allocatePaymentRow, setAllocatePaymentRow] = useState<PaymentRow | null>(null);
 
   const listQ = useQuery({
     queryKey: ["payments", tenantSlug],
@@ -90,6 +92,7 @@ export default function PaymentsPage() {
                 <th className="px-3 py-2">Tur</th>
                 <th className="px-3 py-2 text-right">Summa</th>
                 <th className="px-3 py-2">Izoh</th>
+                <th className="px-3 py-2">Taqsimot</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -121,6 +124,15 @@ export default function PaymentsPage() {
                   <td className="px-3 py-2">
                     <button
                       type="button"
+                      className="text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                      onClick={() => setAllocatePaymentRow(r)}
+                    >
+                      Zakazlarga
+                    </button>
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
                       className="text-xs text-destructive underline underline-offset-2 hover:text-destructive/80"
                       onClick={() => {
                         if (confirm(`To'lov #${r.id} (${r.amount} so'm) o'chirish? Balans qaytariladi.`)) {
@@ -145,6 +157,24 @@ export default function PaymentsPage() {
       {deleteFeedback ? (
         <p className="mt-sm text-sm text-muted-foreground">{deleteFeedback}</p>
       ) : null}
+
+      <PaymentAllocateDialog
+        open={allocatePaymentRow != null}
+        onOpenChange={(o) => {
+          if (!o) setAllocatePaymentRow(null);
+        }}
+        tenantSlug={tenantSlug ?? ""}
+        payment={
+          allocatePaymentRow
+            ? {
+                id: allocatePaymentRow.id,
+                client_id: allocatePaymentRow.client_id,
+                client_name: allocatePaymentRow.client_name,
+                amount: allocatePaymentRow.amount
+              }
+            : null
+        }
+      />
     </PageShell>
   );
 }

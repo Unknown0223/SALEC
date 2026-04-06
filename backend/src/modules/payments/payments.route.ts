@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { prisma } from "../../config/database";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import { createPayment, deletePayment, listPayments, listPaymentsForClient, listPaymentsForOrder } from "./payments.service";
+import { allocatePayment, getPaymentAllocations } from "./payment-allocations.service";
 
 const catalogRoles = ["admin", "operator"] as const;
 
@@ -82,6 +84,51 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         if (msg === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
         if (msg === "BAD_AMOUNT") return reply.status(400).send({ error: "BadAmount" });
         if (msg === "BAD_PAYMENT_TYPE") return reply.status(400).send({ error: "BadPaymentType" });
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/payments/:id/allocations",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenantId = request.tenant!.id;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const one = await prisma.payment.findFirst({ where: { id, tenant_id: tenantId }, select: { id: true } });
+      if (!one) return reply.status(404).send({ error: "NotFound" });
+      const data = await getPaymentAllocations(tenantId, id);
+      return reply.send({ data });
+    }
+  );
+
+  app.post(
+    "/api/:slug/payments/:id/allocate",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenantId = request.tenant!.id;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const viewer = getAccessUser(request);
+      const uid = Number.parseInt(viewer.sub, 10);
+      try {
+        const data = await allocatePayment(
+          tenantId,
+          id,
+          Number.isFinite(uid) && uid > 0 ? uid : null
+        );
+        return reply.send({ data });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "PAYMENT_NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "TENANT_NOT_FOUND") return reply.status(404).send({ error: "TenantNotFound" });
         throw e;
       }
     }

@@ -127,7 +127,9 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 | Metod | Yo‘l |
 |-------|------|
 | GET, POST | `/payments` |
-| GET | `/payments/:id` |
+| GET | `/payments/:id/allocations` — taqsimot qatorlari |
+| POST | `/payments/:id/allocate` — FIFO bo‘yicha zakazlarga taqsimlash |
+| DELETE | `/payments/:id` |
 | GET | `/orders/:id/payments`, `/clients/:id/payments` |
 
 ---

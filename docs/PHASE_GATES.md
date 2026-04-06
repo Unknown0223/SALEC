@@ -4,7 +4,7 @@ This checklist is the release gate for each phase. A phase is complete only when
 
 > **Jarayon foizi, qisman bajarilgan bandlar va keyingi qadam:** [`PHASE_PROGRESS.md`](./PHASE_PROGRESS.md)
 
-**Eslatma (2026-04):** FAZA **0–4** MVP yopilgan. **FAZA 5–10** kodda qisman bajarilgan; pastdagi katakchalar **joriy kod** bilan yangilangan — to‘liq `[x]` bo‘lishi uchun qolgan bandlar `PHASE_PROGRESS.md` da ketma-ket olinadi.
+**Eslatma (2026-04):** FAZA **0–4** MVP yopilgan. **FAZA 5–10** kodda qisman bajarilgan; **2026-04-05** kod bazasi audit (Excel nakladnoy, transfer `api-client`, hisobotlar MVP, `field`/`visits`, mijozlar xaritasi) + **to‘lov FIFO taqsimlash** REST va panel («Zakazlarga»). Qolgan `[ ]` bandlar `PHASE_PROGRESS.md` da navbat bilan.
 
 ## Platforma (doimiy)
 
@@ -76,27 +76,30 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 - [x] **SKU jamlanma:** `GET .../stock/picking-aggregate` — barcha picking zakazlaridan mahsulot bo‘yicha SUM(qty), zakazlar soni
 - [x] **Picking chuqurligi (MVP):** skaner maydoni (Enter → SKU/shtrix filtri), chop etish (`window.print` + sidebar yashirish)
 - [x] **Korrektirovka:** panel `/stock/correction` — jurnal, kategoriya workspace, `POST .../stock/corrections/bulk`, audit (`warehouse-correction`). *(Eski «inventarsiz tezkor» alohida endpoint — ixtiyoriy keyingi iteratsiya.)*
-- [ ] PDF 518 / 210 / ko‘chirish (Puppeteer yoki worker)
+- [x] **Nakladnoy (Excel, kodda bor):** `POST .../orders/bulk/nakladnoy` + `order-nakladnoy-xlsx.ts`; shablonlar 5.1.8 / 2.1.0; zakazlar paneli: yuklab olish tugmalari + sozlamalar (`frontend/lib/order-nakladnoy.ts`, `nakladnoy-export-settings-dialog`).
+- [ ] **PDF** rasmiy blankalar 518 / 210 / ko‘chirish (Puppeteer yoki worker) — Excel nakladnoydan **alohida** vazifa.
 - [x] Ombor Web UI: qoldiqlar jadvalida holat bo‘yicha qator foni (0 / manfiy dostup / to‘liq rezerv)
-- [ ] Ombor Web UI: nakladnoy tugmalari, transfer sahifasini `api-client` + middleware bilan yaxshilash
+- [x] **Transfer UI:** `/stock/transfers` — `apiFetch` + `useTenant` (`frontend/lib/api-client.ts`); marshrut `middleware` orqali `/stock` himoyasida.
 
 ## FAZA 6 - Moliya (reja: hafta 13)
 
 - [x] To‘lovlar API: yaratish, ro‘yxat, mijoz va zakaz bo‘yicha (`payments`)
-- [ ] To‘lovni zakazlarga taqsimlash: `payment_allocations` → HTTP oqimi bilan ulanish
+- [x] To‘lovni zakazlarga taqsimlash: `GET/POST .../payments/:id/allocations|allocate` + panel **To‘lovlar** → «Zakazlarga» (FIFO, `payment_allocations`)
 - [ ] Balans materialized view + refresh strategiyasi (agar kerak)
 - [ ] Qarzdorlik + akt-sverka + PDF
 
 ## FAZA 7 - GPS (reja: hafta 14)
 
-- [ ] GPS va tashrif API (live, trek, visits) — `field` moduli qisman; to‘liq gate keyinroq
-- [ ] Web xarita (Leaflet) + tashrif jadvali + Excel eksport
+- [x] **Qisman:** `field` moduli API: agent-visits, route days, tenant tasks (`field.route.ts`); Web **`/visits`** — ro‘yxat va CRUD (MVP).
+- [x] **Qisman:** Mijozlar **xarita** `/clients/map` — koordinatalar bo‘yicha scatter (to‘g‘ridan-to‘g‘ri **Leaflet/OSM emas**).
+- [ ] Live GPS trek, **Leaflet** xarita, tashriflar **Excel eksport**, agent mobil sinxron — to‘liq gate.
 
 ## FAZA 8 - Hisobotlar + dashboard (reja: hafta 15)
 
 - [x] Dashboard API: `GET .../dashboard/stats` (+ Redis cache invalidate)
-- [ ] 5 ta hisobot + Excel eksport (`exceljs`) — kengaytirish
-- [ ] UI: dashboard grafiklari (Recharts va hokazo) + hisobotlar boyitish
+- [x] **Hisobotlar MVP (kod bilan):** backend `reports.route.ts` — sales, order-trends, products, clients, agent-kpi, status-distribution, **qo‘shimcha** `channels`, `abc-analysis`, `xyz-analysis`, `client-churn`; frontend `/reports` — asosiy 6 ta oqim + **Excel eksport** (npm `xlsx` / SheetJS; `exceljs` emas).
+- [ ] Hisobotlar UI: `channels` / ABC / XYZ / churn tablari va kengaytirilgan eksport (reja).
+- [ ] UI: dashboard va hisobotlarda **grafiklar** (Recharts yoki Chart.js).
 
 ## FAZA 9 - Flutter (reja: hafta 16-18)
 

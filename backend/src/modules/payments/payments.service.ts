@@ -38,6 +38,9 @@ export async function deletePayment(
       });
     }
 
+    await tx.paymentAllocation.deleteMany({
+      where: { tenant_id: tenantId, payment_id: paymentId }
+    });
     await tx.payment.delete({ where: { id: paymentId } });
   });
 
