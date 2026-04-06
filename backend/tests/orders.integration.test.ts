@@ -50,7 +50,7 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
     expect(create.status).toBe(201);
     expect(create.body.items).toHaveLength(1);
     expect(create.body.total_sum).toBe("50000");
-    expect(create.body.number).toMatch(/^O-/);
+    expect(create.body.number).toBe(String(create.body.id));
     expect(create.body.allowed_next_statuses).toContain("confirmed");
     expect(create.body.allowed_next_statuses).toContain("cancelled");
 

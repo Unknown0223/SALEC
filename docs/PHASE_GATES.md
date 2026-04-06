@@ -4,7 +4,7 @@ This checklist is the release gate for each phase. A phase is complete only when
 
 > **Jarayon foizi, qisman bajarilgan bandlar va keyingi qadam:** [`PHASE_PROGRESS.md`](./PHASE_PROGRESS.md)
 
-**Eslatma (2026-03-29):** FAZA **0–4** checklist MVP sifatida yopilgan. **FAZA 5+** (chuqur ombor, moliya, GPS, Flutter, E2E/deploy) alohida iteratsiyalar. **Super-admin / ko‘p diler** boshqaruvi va **Redis** orqali SSE ko‘p instans — keyingi ishlar.
+**Eslatma (2026-04):** FAZA **0–4** MVP yopilgan. **FAZA 5–10** kodda qisman bajarilgan; pastdagi katakchalar **joriy kod** bilan yangilangan — to‘liq `[x]` bo‘lishi uchun qolgan bandlar `PHASE_PROGRESS.md` da ketma-ket olinadi.
 
 ## Platforma (doimiy)
 
@@ -67,26 +67,36 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 
 ## FAZA 5 - Ombor + nakladnoy (reja: hafta 10-12)
 
-- [ ] Stock, prixod, picking, korrektirovka, filial transfer API
+- [x] Stock API: ro‘yxat, qoldiqlar, filtrlash, eksport (`GET .../stock`, balances)
+- [x] Kirim: `POST .../stock/receipts` + `goods-receipts` hujjatlari
+- [x] Inventarizatsiya: `stock-takes` (qatorlar, post → qoldiq tuzatish)
+- [x] Omborlararo ko‘chirish: `transfers` (draft → start → receive / cancel)
+- [x] Zakaz bilan rezerv: `stock.reserved_qty` (zakaz yaratish/tahrir — `orders.service`)
+- [x] **Picking UI (MVP):** `/stock/picking` — `picking` zakazlar, ombor filtri, qidiruv, zakazga havola
+- [x] **SKU jamlanma:** `GET .../stock/picking-aggregate` — barcha picking zakazlaridan mahsulot bo‘yicha SUM(qty), zakazlar soni
+- [x] **Picking chuqurligi (MVP):** skaner maydoni (Enter → SKU/shtrix filtri), chop etish (`window.print` + sidebar yashirish)
+- [x] **Korrektirovka:** panel `/stock/correction` — jurnal, kategoriya workspace, `POST .../stock/corrections/bulk`, audit (`warehouse-correction`). *(Eski «inventarsiz tezkor» alohida endpoint — ixtiyoriy keyingi iteratsiya.)*
 - [ ] PDF 518 / 210 / ko‘chirish (Puppeteer yoki worker)
-- [ ] Ombor Web UI (qoldiq ranglari, picking, nakladnoy tugmalari)
+- [x] Ombor Web UI: qoldiqlar jadvalida holat bo‘yicha qator foni (0 / manfiy dostup / to‘liq rezerv)
+- [ ] Ombor Web UI: nakladnoy tugmalari, transfer sahifasini `api-client` + middleware bilan yaxshilash
 
 ## FAZA 6 - Moliya (reja: hafta 13)
 
-- [ ] To‘lovlar API (naqd/karta, confirm, avans)
-- [ ] Balans materialized view + refresh strategiyasi
+- [x] To‘lovlar API: yaratish, ro‘yxat, mijoz va zakaz bo‘yicha (`payments`)
+- [ ] To‘lovni zakazlarga taqsimlash: `payment_allocations` → HTTP oqimi bilan ulanish
+- [ ] Balans materialized view + refresh strategiyasi (agar kerak)
 - [ ] Qarzdorlik + akt-sverka + PDF
 
 ## FAZA 7 - GPS (reja: hafta 14)
 
-- [ ] GPS va tashrif API (live, trek, visits)
+- [ ] GPS va tashrif API (live, trek, visits) — `field` moduli qisman; to‘liq gate keyinroq
 - [ ] Web xarita (Leaflet) + tashrif jadvali + Excel eksport
 
 ## FAZA 8 - Hisobotlar + dashboard (reja: hafta 15)
 
-- [ ] Dashboard API (KPI, cache)
-- [ ] 5 ta hisobot + Excel eksport (`exceljs`)
-- [ ] UI: dashboard grafiklari + hisobotlar sahifasi
+- [x] Dashboard API: `GET .../dashboard/stats` (+ Redis cache invalidate)
+- [ ] 5 ta hisobot + Excel eksport (`exceljs`) — kengaytirish
+- [ ] UI: dashboard grafiklari (Recharts va hokazo) + hisobotlar boyitish
 
 ## FAZA 9 - Flutter (reja: hafta 16-18)
 

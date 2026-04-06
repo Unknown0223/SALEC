@@ -20,7 +20,10 @@ export function emptyNode(name = ""): TerritoryNode {
 }
 
 function cloneNode(n: TerritoryNode): TerritoryNode {
-  return { id: n.id, name: n.name, children: n.children.map(cloneNode) };
+  return {
+    ...n,
+    children: n.children.map(cloneNode)
+  };
 }
 
 export function cloneForest(nodes: TerritoryNode[]): TerritoryNode[] {

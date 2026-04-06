@@ -57,6 +57,7 @@ model Tenant {
   expenses                       Expense[]
   payment_allocations            PaymentAllocation[]
   territories                    Territory[]
+  warehouse_corrections          WarehouseCorrection[]
 
   @@map("tenants")
 }
@@ -141,6 +142,7 @@ model User {
   expenses_created           Expense[]               @relation("ExpenseCreator")
   expenses_approved          Expense[]               @relation("ExpenseApprover")
   territory_assignments      TerritoryUserLink[]     @relation("TerritoryAssigner")
+  warehouse_corrections_created WarehouseCorrection[] @relation("WarehouseCorrectionCreator")
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -235,6 +237,7 @@ model Product {
   stock                 Stock[]
   stock_take_lines      StockTakeLine[]
   price_matrix          PriceMatrix[]
+  warehouse_correction_lines WarehouseCorrectionLine[]
 
   @@unique([tenant_id, sku])
   @@index([tenant_id, name])
@@ -390,9 +393,10 @@ model Client {
   license_until         DateTime?
   working_hours         String?
   /// Manzil bo‘laklari + GPS matni + tashrif sanasi + izoh
+  /// `region` — viloyat / область / «территория» (hudud daraxti qatlami); `city` — shahar kodi yoki nomi; `district` — tuman / район; `zone` — kompaniya zonasi.
   region                String?
   district              String?
-  /// Shahar / город (viloyat va tuman o‘rtasida yoki alohida spravochnik)
+  /// Shahar / город (spravochnik yoki territory_nodes shahar qatlami, odatda kod)
   city                  String?
   neighborhood          String?
   street                String?
@@ -427,7 +431,7 @@ model Client {
   /// Xarita (Yandex / GPS)
   latitude              Decimal?                @db.Decimal(11, 8)
   longitude             Decimal?                @db.Decimal(11, 8)
-  /// Zona (Lalaku jadvalidagi «Зона»)
+  /// Zona (kompaniya bo‘linmasi / «Зона»)
   zone                  String?
   agent_visits          AgentVisit[]
   agent_assignments     ClientAgentAssignment[]
@@ -558,6 +562,7 @@ model Warehouse {
   sales_returns  SalesReturn[]
   stock          Stock[]
   stock_takes    StockTake[]
+  warehouse_corrections WarehouseCorrection[]
   users_return   User[]              @relation("UserReturnWarehouse")
   users_default  User[]              @relation("UserWarehouse")
   links          WarehouseUserLink[]
@@ -600,6 +605,51 @@ model Stock {
   @@unique([tenant_id, warehouse_id, product_id])
   @@index([tenant_id])
   @@map("stock")
+}
+
+/// Ombor korrektirovkasi / inventarizatsiya hujjati (jurnal qatori + pozitsiyalar).
+model WarehouseCorrection {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  warehouse_id       Int
+  created_by_user_id Int?
+  /// correction — delta kiritish; inventory_count — haqiqiy qoldiqdan hisoblangan delta
+  kind               String    @db.VarChar(32)
+  price_type         String?   @db.VarChar(128)
+  occurred_at        DateTime  @default(now())
+  comment            String?   @db.VarChar(2000)
+  total_qty_delta    Decimal   @db.Decimal(15, 3)
+  total_volume_m3    Decimal   @default(0) @db.Decimal(14, 6)
+  total_amount       Decimal   @default(0) @db.Decimal(15, 2)
+  currency           String    @default("UZS") @db.VarChar(8)
+  line_count         Int       @default(0)
+  created_at         DateTime  @default(now())
+  tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  warehouse          Warehouse @relation(fields: [warehouse_id], references: [id], onDelete: Cascade)
+  created_by         User?     @relation("WarehouseCorrectionCreator", fields: [created_by_user_id], references: [id])
+  lines              WarehouseCorrectionLine[]
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, warehouse_id])
+  @@index([tenant_id, kind])
+  @@map("warehouse_corrections")
+}
+
+model WarehouseCorrectionLine {
+  id          Int                 @id @default(autoincrement())
+  document_id Int
+  product_id  Int
+  qty_before  Decimal             @db.Decimal(15, 3)
+  qty_delta   Decimal             @db.Decimal(15, 3)
+  price_unit  Decimal?            @db.Decimal(15, 2)
+  line_amount Decimal?            @db.Decimal(15, 2)
+  volume_m3   Decimal?            @db.Decimal(14, 6)
+  document    WarehouseCorrection @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  product     Product             @relation(fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@index([document_id])
+  @@index([product_id])
+  @@map("warehouse_correction_lines")
 }
 
 /// Ta’minotchilar (поступление)

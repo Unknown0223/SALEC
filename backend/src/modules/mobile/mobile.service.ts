@@ -282,8 +282,6 @@ export async function syncOrders(tenantId: number, userId: number) {
   // ✅ TRANSACTION bilan barcha offline zakazlarni bir martada yangilash (N+1 fix)
   await prisma.$transaction(async (tx) => {
     for (const order of offlineOrders) {
-      const serverNumber = `ORD-${Date.now()}-${results.length}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-
       let totalSum = 0;
       const itemIds: number[] = [];
 
@@ -301,6 +299,7 @@ export async function syncOrders(tenantId: number, userId: number) {
         }
       }
 
+      const serverNumber = String(order.id);
       await tx.order.update({
         where: { id: order.id },
         data: { number: serverNumber, status: "new", total_sum: totalSum, updated_at: new Date() },

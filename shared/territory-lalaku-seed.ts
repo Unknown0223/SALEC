@@ -41,6 +41,85 @@ export function normKey(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+/**
+ * Viloyat/shahar nomlarini solishtirish: `FARG'ONA` ≈ `FARGONA`, `QO‘QON` ≈ `QOQON`.
+ * `slugId` / zona kalitlari uchun `normKey` ishlatiladi; geografik moslash uchun shu funksiya.
+ */
+export function normKeyTerritoryMatch(s: string): string {
+  return normKey(s.trim().replace(/[''`ʼʻ`]/g, ""));
+}
+
+function sanitizeTerritoryCode(raw: string): string | null {
+  const up = raw.trim().toUpperCase();
+  if (!up || !/^[A-Z0-9_]+$/.test(up)) return null;
+  return up.slice(0, 20);
+}
+
+/** Ildiz-zona (`territory_nodes` 0-qavat) uchun standart kod. */
+export function defaultZoneTerritoryCode(zoneDisplayName: string): string | null {
+  const key = normKey(zoneDisplayName);
+  const map: Record<string, string> = {
+    [normKey("FV")]: "FV",
+    [normKey("SOUTH-WEST")]: "SW",
+    [normKey("TASH OBL")]: "TASH_OBL",
+    [normKey("TASHKENT")]: "TASHKENT"
+  };
+  const c = map[key];
+  return c ? sanitizeTerritoryCode(c) : null;
+}
+
+/** Viloyat / shahar darajasidagi viloyat tuguni uchun standart kod. */
+export function defaultRegionTerritoryCode(regionDisplayName: string): string | null {
+  const map: Record<string, string> = {
+    [normKey("ANDIJON VILOYATI")]: "ANDIJON_VIL",
+    [normKey("BUXORO VILOYATI")]: "BUXORO_VIL",
+    [normKey("FARGONA VILOYATI")]: "FARGONA_VIL",
+    [normKey("JIZZAX VILOYATI")]: "JIZZAX_VIL",
+    [normKey("NAMANGAN VILOYATI")]: "NAMANGAN_VIL",
+    [normKey("NAVOIY VILOYATI")]: "NAVOIY_VIL",
+    [normKey("QASHQADARYO VILOYATI")]: "QASHQADARYO_VIL",
+    [normKey("QORAQALPOQISTON")]: "QORAQALPOQ",
+    [normKey("SAMARQAND VILOYATI")]: "SAMARQAND_VIL",
+    [normKey("SIRDARYO VILOYATI")]: "SIRDARYO_VIL",
+    [normKey("SURXANDARYO VILOYATI")]: "SURXANDARYO_VIL",
+    [normKey("XORAZM VILOYATI")]: "XORAZM_VIL",
+    [normKey("TOSHKENT VILOYATI")]: "TOSHKENT_VIL",
+    [normKey("TOSHKENT SHAHAR")]: "TOSHKENT_SHA",
+    [normKey("QOQON")]: "QOQON"
+  };
+  const c = map[normKeyTerritoryMatch(regionDisplayName)];
+  return c ? sanitizeTerritoryCode(c) : null;
+}
+
+/**
+ * Viloyat filtri `*_VIL` kodi yoki standart nom bilan kelganda `clients.region` dagi
+ * kod / to‘liq nom / apostrof variantlari bilan moslash uchun barcha ehtimoliy qiymatlar.
+ */
+export function lalakuExpandRegionFilterTokens(token: string): string[] {
+  const raw = token.trim();
+  if (!raw) return [];
+  const out = new Set<string>([raw]);
+  const upper = raw.toUpperCase();
+  const rawNorm = normKeyTerritoryMatch(raw);
+
+  for (const row of REGION_ZONE_ROWS) {
+    const code = defaultRegionTerritoryCode(row.region);
+    const rowNorm = normKeyTerritoryMatch(row.region);
+    const byCode = code != null && code === upper;
+    const byName = rowNorm === rawNorm;
+    if (byCode || byName) {
+      out.add(row.region);
+      if (code) out.add(code);
+      if (code === "FARGONA_VIL" || rowNorm === normKeyTerritoryMatch("FARGONA VILOYATI")) {
+        out.add("FARG'ONA VILOYATI");
+        out.add("FARG`ONA VILOYATI");
+      }
+    }
+  }
+
+  return [...out].filter((s) => s.length > 0);
+}
+
 function slugId(prefix: string, key: string): string {
   const k = normKey(key).replace(/\s+/g, "-").replace(/[^A-Z0-9-]/gi, "");
   return `${prefix}-${k.slice(0, 48)}`;
@@ -75,7 +154,7 @@ export function mergeTerritoryBundle(existing: LalakuTerritoryNode[]): LalakuTer
       z = {
         id: slugId("z", key),
         name: canonicalZoneName(displayName),
-        code: null,
+        code: defaultZoneTerritoryCode(displayName),
         comment: null,
         sort_order: null,
         active: true,
@@ -83,6 +162,9 @@ export function mergeTerritoryBundle(existing: LalakuTerritoryNode[]): LalakuTer
       };
       topByKey.set(key, z);
       forest.push(z);
+    } else if (!z.code) {
+      const dc = defaultZoneTerritoryCode(z.name);
+      if (dc) z.code = dc;
     }
     return z;
   };
@@ -94,17 +176,20 @@ export function mergeTerritoryBundle(existing: LalakuTerritoryNode[]): LalakuTer
   for (const row of REGION_ZONE_ROWS) {
     const zoneNode = ensureZone(row.zone);
     const rKey = normKey(row.region);
-    const exists = zoneNode.children.some((c) => normKey(c.name) === rKey);
-    if (!exists) {
+    const existing = zoneNode.children.find((c) => normKey(c.name) === rKey);
+    if (!existing) {
       zoneNode.children.push({
-        id: slugId("r", `${normKey(row.zone)}-${rKey}`),
+        id: slugId("r", `${normKey(row.zone)}-${normKey(row.region)}`),
         name: row.region,
-        code: null,
+        code: defaultRegionTerritoryCode(row.region),
         comment: null,
         sort_order: null,
         active: true,
         children: []
       });
+    } else if (!existing.code) {
+      const dc = defaultRegionTerritoryCode(existing.name);
+      if (dc) existing.code = dc;
     }
   }
 

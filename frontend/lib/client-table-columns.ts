@@ -21,6 +21,7 @@ for (let i = 1; i <= 10; i++) {
 /** Klientlar jadvali — siz bergan ustunlar tartibi */
 export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "name", label: "Наименование" },
+  { id: "client_ref", label: "Ид клиента" },
   { id: "legal_name", label: "Юридическое название" },
   { id: "address", label: "Адрес" },
   { id: "phone", label: "Телефон" },
@@ -32,10 +33,10 @@ export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "client_category_code", label: "Категория клиента (код)" },
   { id: "client_type_code", label: "Тип клиента (код)" },
   { id: "format_code", label: "Формат (код)" },
-  { id: "client_region", label: "Область" },
-  { id: "client_district", label: "Город / туман" },
+  { id: "client_region", label: "Территория (область)" },
+  { id: "client_district", label: "Район" },
   { id: "client_zone", label: "Зона" },
-  { id: "city_code", label: "Город (код)" },
+  { id: "city_code", label: "Город (код в БД)" },
   { id: "latitude", label: "Широта" },
   { id: "longitude", label: "Долгота" },
   ...agentCols,
@@ -58,6 +59,7 @@ export function getDefaultColumnVisibility(): Record<string, boolean> {
   for (const c of CLIENT_TABLE_COLUMNS) {
     m[c.id] = [
       "name",
+      "client_ref",
       "legal_name",
       "address",
       "phone",
@@ -66,6 +68,7 @@ export function getDefaultColumnVisibility(): Record<string, boolean> {
       "client_region",
       "client_district",
       "client_zone",
+      "city_code",
       "landmark",
       "inn",
       "agent_1",

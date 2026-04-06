@@ -71,6 +71,8 @@ export default function ClientsMapPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
   const [allClients, setAllClients] = useState<ClientRow[]>([]);
+  /** API `total` — GPS bor klientlar soni (has_coords=1) */
+  const [gpsClientsTotal, setGpsClientsTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [hasLocationOnly, setHasLocationOnly] = useState(true);
@@ -80,9 +82,10 @@ export default function ClientsMapPage() {
     setLoading(true);
     try {
       const { data: body } = await api.get<{ data: ClientRow[]; total: number }>(
-        `/api/${tenantSlug}/clients?page=1&limit=500`
+        `/api/${tenantSlug}/clients?page=1&limit=3500&map=1&has_coords=1&sort=name&order=asc`
       );
       setAllClients(body.data ?? []);
+      setGpsClientsTotal(typeof body.total === "number" ? body.total : null);
     } catch (e) {
       console.error("Failed to fetch clients for map", e);
       setAllClients([]);
@@ -129,7 +132,11 @@ export default function ClientsMapPage() {
     <PageShell>
       <PageHeader
         title="Klientlar xaritasi"
-        description={`Klientlarning GPS koordinatalari asosida joylashuv xaritasi${tenantSlug ? ` (${totalWithCoords} ta koordinatali)` : ""}`}
+        description={
+          tenantSlug
+            ? `Import qilingan latitude/longitude shu sahifada nuqta sifatida. Mijoz kartochkasi / tahrirlash — alohida xarita. GPS-li klientlar (server bo‘yicha): ${gpsClientsTotal ?? totalWithCoords}.`
+            : "GPS koordinatali klientlar"
+        }
         actions={
           <>
             <Link
@@ -184,8 +191,13 @@ export default function ClientsMapPage() {
             </div>
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            Ko'rsatilmoqda: {mapClients.length} / {allClients.length}
-            {" | "}Koordinatali: {clientsWithCoords.length}
+            Ko‘rsatilmoqda: {mapClients.length} / {allClients.length}
+            {" | "}Nuqtalar: {clientsWithCoords.length}
+            {gpsClientsTotal != null && allClients.length < gpsClientsTotal ? (
+              <span className="ms-2 text-amber-600 dark:text-amber-400">
+                (GPS-li jami {gpsClientsTotal} ta; bir so‘rovda max 3500 yuklanadi)
+              </span>
+            ) : null}
           </div>
         </CardContent>
       </Card>

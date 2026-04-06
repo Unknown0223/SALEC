@@ -68,9 +68,11 @@ export default function TransfersPage() {
         ...(statusFilter !== "all" ? { status: statusFilter } : {}),
         ...(search ? { search } : {}),
       });
-      const data = await apiFetch(`/api/${tenant}/transfers?${params}`);
-      setTransfers(data.data || []);
-      setTotal(data.total || 0);
+      const data = await apiFetch<{ data?: Transfer[]; total?: number }>(
+        `/api/${tenant}/transfers?${params}`
+      );
+      setTransfers(data.data ?? []);
+      setTotal(data.total ?? 0);
     } catch (err) {
       console.error("Failed to fetch transfers:", err);
     } finally {
@@ -97,7 +99,13 @@ export default function TransfersPage() {
           <CardTitle>Filtrlash</CardTitle>
         </CardHeader>
         <CardContent className="flex gap-3 flex-wrap">
-          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+          <Select
+            value={statusFilter}
+            onValueChange={(v: string) => {
+              setStatusFilter(v);
+              setPage(1);
+            }}
+          >
             <SelectTrigger className="w-48">
               <SelectValue placeholder="Holat" />
             </SelectTrigger>

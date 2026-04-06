@@ -109,3 +109,27 @@
 .dark .app-main-canvas {
   background: linear-gradient(165deg, oklch(0.16 0.02 255) 0%, oklch(0.18 0.025 250) 100%);
 }
+
+/* Komplektatsiya sahifasida chop etish: sidebar va yordamchi tugmalar yashirin */
+@media print {
+  html[data-print-picking="1"] aside {
+    display: none !important;
+  }
+  html[data-print-picking="1"] header.md\:hidden {
+    display: none !important;
+  }
+  html[data-print-picking="1"] .no-print-picking {
+    display: none !important;
+  }
+  html[data-print-picking="1"] .flex.h-dvh {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  html[data-print-picking="1"] .app-main-canvas,
+  html[data-print-picking="1"] .app-main-canvas > div {
+    overflow: visible !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+}

@@ -258,6 +258,14 @@ function StockPageContent() {
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/balances">
           Остатки товаров
         </Link>
+        <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/picking">
+          Комплектация
+        </Link>
+        {role === "admin" ? (
+          <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/correction">
+            Корректировка склада
+          </Link>
+        ) : null}
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/receipts">
           Поступление
         </Link>

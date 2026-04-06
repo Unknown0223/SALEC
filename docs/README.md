@@ -9,5 +9,7 @@
 | [ROADMAP.md](./ROADMAP.md) | Katta funksiyalar (20.2) epiklari |
 | [MODULES.md](./MODULES.md) | Modul ↔ route fayl xaritasi |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Qisqa eslatma + root `ARCHITECTURE.md` havolasi |
+| [SETTINGS_STRUCTURE_PLAN.md](./SETTINGS_STRUCTURE_PLAN.md) | Sozlamalar katalogi: kod bilan tahlil, prioritet holati, ochiq ishlar |
+| [PHASE_PROGRESS.md](./PHASE_PROGRESS.md) | Faza bo‘yicha bajarilgan / qolgan ishlar jadvali |
 
-Boshqa mavjud reja/hujjatlar: `SLO_AND_OBSERVABILITY.md`, `RUNBOOK.md`, `TESTING.md`, va hokazo.
+Boshqa mavjud reja/hujjatlar: `CLIENTS_ONE_PAGE_PLAN.md`, `BACKGROUND_JOBS_PLAN.md`, `SLO_AND_OBSERVABILITY.md`, `RUNBOOK.md`, `TESTING.md`, va hokazo.

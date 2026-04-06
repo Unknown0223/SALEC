@@ -56,7 +56,10 @@ export function displayCityCode(row: ClientRow): string | null {
 export function parseGpsText(gps: string | null): { lat: string | null; lng: string | null } {
   const s = nonEmpty(gps);
   if (!s) return { lat: null, lng: null };
-  const m = s.match(/(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
+  const compact = s.replace(/\u00a0/g, " ").trim();
+  const m =
+    compact.match(/(-?\d{1,3}(?:\.\d+)?)\s*[,;\s|/]+\s*(-?\d{1,3}(?:\.\d+)?)/) ??
+    compact.match(/(-?\d{1,3}(?:\.\d+)?)\s+(-?\d{1,3}(?:\.\d+)?)/);
   if (m) return { lat: m[1], lng: m[2] };
   return { lat: null, lng: null };
 }

@@ -3,6 +3,8 @@ export type SettingsItem = {
   slug: string;
   href: string;
   status: "available" | "planned";
+  /** Bo‘sh bo‘lmasa — faqat ushbu rollar katalogda punktni ko‘radi (`RBAC.md` bilan sinxron). */
+  requiredRoles?: readonly string[];
   /** Pastga ochiladigan pastki punktlar (masalan «Пользователи» → Агент, Экспедиторы…) */
   children?: SettingsItem[];
 };
@@ -23,14 +25,21 @@ function toSlug(value: string): string {
   return "item";
 }
 
-function makeItem(sectionSlug: string, title: string, status: "available" | "planned", index: number): SettingsItem {
+function makeItem(
+  sectionSlug: string,
+  title: string,
+  status: "available" | "planned",
+  index: number,
+  requiredRoles?: readonly string[]
+): SettingsItem {
   const baseSlug = toSlug(title);
   const slug = `${baseSlug}-${index + 1}`;
   return {
     title,
     slug,
     href: `/settings/catalog/${sectionSlug}/${slug}`,
-    status
+    status,
+    ...(requiredRoles?.length ? { requiredRoles } : {})
   };
 }
 
@@ -47,7 +56,8 @@ export const settingsSections: SettingsSection[] = [
         title: "Должности",
         slug: "dolzhnosti-osnovnye",
         href: "/settings/catalog/osnovnye-nastroiki/dolzhnosti-osnovnye",
-        status: "available"
+        status: "available",
+        requiredRoles: ["admin"] as const
       }
     ]
   },
@@ -180,13 +190,13 @@ export const settingsSections: SettingsSection[] = [
     items: [
       makeItem("spravochniki-personal", "Справочники", "available", 0),
       makeItem("spravochniki-personal", "Компания", "available", 1),
-      makeItem("spravochniki-personal", "Должности веб-сотрудников", "available", 2)
+      makeItem("spravochniki-personal", "Должности веб-сотрудников", "available", 2, ["admin"] as const)
     ]
   },
   {
     title: "Система",
     slug: "sistema",
-    items: [makeItem("sistema", "Аудит", "available", 0)]
+    items: [makeItem("sistema", "Аудит", "available", 0, ["admin"] as const)]
   }
 ];
 
@@ -253,6 +263,35 @@ const existingHrefByItemTitle: Record<string, string> = {
 
 export function resolveSettingsItemHref(item: SettingsItem): string {
   return existingHrefByItemTitle[item.title.toLowerCase()] ?? item.href;
+}
+
+function filterSettingsItemByRole(item: SettingsItem, role: string | null): SettingsItem | null {
+  if (item.requiredRoles?.length) {
+    if (!role || !item.requiredRoles.includes(role)) return null;
+  }
+  if (item.children?.length) {
+    const kids = item.children.filter(
+      (c) => !c.requiredRoles?.length || (role != null && c.requiredRoles.includes(role))
+    );
+    if (!kids.length) return null;
+    return { ...item, children: kids };
+  }
+  return item;
+}
+
+/** Katalog yon paneli: `requiredRoles` bo‘yicha (null rol — admin-only punktlar yashirin). */
+export function filterSettingsSectionsByRole(
+  sections: SettingsSection[],
+  role: string | null
+): SettingsSection[] {
+  const out: SettingsSection[] = [];
+  for (const section of sections) {
+    const items = section.items
+      .map((item) => filterSettingsItemByRole(item, role))
+      .filter((item): item is SettingsItem => item != null);
+    if (items.length) out.push({ ...section, items });
+  }
+  return out;
 }
 
 export function findSettingsItem(sectionSlug: string, itemSlug: string): SettingsItem | null {

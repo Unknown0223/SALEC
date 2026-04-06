@@ -33,8 +33,8 @@ export default function TerritoriesPage() {
         page: "1", limit: "100",
         ...(activeFilter !== "all" ? { is_active: activeFilter === "active" ? "true" : "false" } : {})
       });
-      const data = await apiFetch(`/api/${tenant}/territories?${params}`);
-      setItems(data.data || []);
+      const data = await apiFetch<{ data?: Territory[] }>(`/api/${tenant}/territories?${params}`);
+      setItems(data.data ?? []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }

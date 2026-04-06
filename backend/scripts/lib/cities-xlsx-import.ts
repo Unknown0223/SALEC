@@ -9,8 +9,11 @@ import type { PrismaClient } from "@prisma/client";
 import * as XLSX from "xlsx";
 import {
   buildTerritoryForestWithCitiesFromRows,
+  buildTerritoryForestWithRegionAndCityRows,
   type CityXlsxRow,
-  type MergeCitiesIntoTerritoryStats
+  type MergeCitiesIntoTerritoryStats,
+  type MergeRegionsIntoTerritoryStats,
+  type RegionXlsxRow
 } from "./lalaku-reference-import";
 import { territoryRegionPickerNames } from "../../src/modules/tenant-settings/tenant-settings.service";
 
@@ -67,6 +70,54 @@ export function parseCityRowsFromXlsx(filePath: string): CityXlsxRow[] {
   return out;
 }
 
+/** Excel «Данные Регион»: #, Имя (viloyat), Имя зоны */
+export function parseRegionRowsFromXlsx(filePath: string): RegionXlsxRow[] {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Fayl topilmadi: ${filePath}`);
+  }
+  const wb = XLSX.readFile(filePath);
+  const sn = wb.SheetNames[0];
+  if (!sn) throw new Error("Varaq topilmadi");
+  const sh = wb.Sheets[sn];
+  const matrix = XLSX.utils.sheet_to_json<(string | number)[]>(sh, { header: 1, defval: "" });
+  const out: RegionXlsxRow[] = [];
+  for (let i = 0; i < matrix.length; i++) {
+    const row = matrix[i];
+    if (!Array.isArray(row) || row.length < 3) continue;
+
+    const h0 = String(row[0] ?? "").trim().toLowerCase();
+    const h1 = String(row[1] ?? "").trim().toLowerCase();
+    if (h0 === "#" && (h1 === "имя" || h1 === "ism" || h1 === "name")) continue;
+
+    const numRaw = row[0];
+    const order_num =
+      typeof numRaw === "number" && Number.isInteger(numRaw)
+        ? numRaw
+        : typeof numRaw === "string" && /^\d+$/.test(numRaw.trim())
+          ? parseInt(numRaw.trim(), 10)
+          : null;
+
+    const region = String(row[1] ?? "").trim();
+    const zone = String(row[2] ?? "").trim();
+
+    if (!region || !zone) continue;
+
+    const c0 = row[0];
+    if (
+      typeof c0 === "string" &&
+      c0.trim() !== "" &&
+      h0 !== "#" &&
+      !/^\d+$/.test(c0.trim()) &&
+      order_num == null
+    ) {
+      continue;
+    }
+
+    out.push({ order_num, region, zone });
+  }
+  return out;
+}
+
 export type ResolveCityXlsxResult =
   | { ok: true; path: string }
   | { ok: false; reason: "missing_env_file" | "not_found"; detail?: string };
@@ -89,6 +140,28 @@ export function resolveCityXlsxPath(cwdBackend: string): ResolveCityXlsxResult {
     path.join(cwdBackend, "scripts", "data", "gorod.xlsx"),
     path.join(process.env.USERPROFILE || "", "Downloads", "Данные Город (1).xlsx"),
     path.join(process.env.USERPROFILE || "", "Downloads", "Данные Город.xlsx")
+  ];
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return { ok: true, path: p };
+  }
+  return { ok: false, reason: "not_found" };
+}
+
+export type ResolveRegionXlsxResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: "missing_env_file" | "not_found"; detail?: string };
+
+export function resolveRegionXlsxPath(cwdBackend: string): ResolveRegionXlsxResult {
+  const env = (process.env.REGION_XLSX_PATH || "").trim();
+  if (env) {
+    const abs = path.isAbsolute(env) ? env : path.join(cwdBackend, env);
+    if (fs.existsSync(abs)) return { ok: true, path: abs };
+    return { ok: false, reason: "missing_env_file", detail: abs };
+  }
+
+  const candidates = [
+    path.join(cwdBackend, "scripts", "data", "Данные Регион.xlsx"),
+    path.join(process.env.USERPROFILE || "", "Downloads", "Данные Регион.xlsx")
   ];
   for (const p of candidates) {
     if (p && fs.existsSync(p)) return { ok: true, path: p };
@@ -162,4 +235,103 @@ export async function runCitiesXlsxImport(opts: RunCitiesXlsxImportOpts): Promis
   });
   console.log("  → ✓ territory_nodes + regions yangilandi.");
   return { stats, rowCount: cityRows.length, written: true };
+}
+
+export type RunTerritoryRegionCityImportOpts = {
+  prisma: PrismaClient;
+  tenantId: number;
+  tenantSlug: string;
+  regionXlsxPath: string;
+  cityXlsxPath: string;
+  dry: boolean;
+  allowProdWrite: boolean;
+};
+
+export type RunTerritoryRegionCityImportResult = {
+  regionStats: MergeRegionsIntoTerritoryStats;
+  cityStats: MergeCitiesIntoTerritoryStats;
+  regionRowCount: number;
+  cityRowCount: number;
+  written: boolean;
+};
+
+/**
+ * «Данные Регион» + «Данные Город» — bitta tenant uchun `territory_nodes` + `references.regions`.
+ */
+export async function runTerritoryRegionCityImport(
+  opts: RunTerritoryRegionCityImportOpts
+): Promise<RunTerritoryRegionCityImportResult> {
+  const { prisma, tenantId, tenantSlug, regionXlsxPath, cityXlsxPath, dry, allowProdWrite } = opts;
+
+  if (process.env.NODE_ENV === "production" && !dry && !allowProdWrite) {
+    throw new Error(
+      "Productionda yozish: ALLOW_PROD_TERRITORY_EXCEL=true yoki ALLOW_PROD_CITIES_IMPORT=true yoki ALLOW_PROD_REF_IMPORT=true"
+    );
+  }
+
+  const regionRows = parseRegionRowsFromXlsx(regionXlsxPath);
+  const cityRows = parseCityRowsFromXlsx(cityXlsxPath);
+  if (regionRows.length === 0) {
+    throw new Error("Регион Excel dan yaroqli qator yo‘q (Имя + Имя зоны majburiy).");
+  }
+  if (cityRows.length === 0) {
+    throw new Error("Город Excel dan yaroqli qator yo‘q (Имя + Название региона majburiy).");
+  }
+
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const st = asRecord(row?.settings);
+  const ref = asRecord(st.references);
+
+  const { forest, regionStats, cityStats } = buildTerritoryForestWithRegionAndCityRows(
+    ref.territory_nodes,
+    regionRows,
+    cityRows
+  );
+
+  const regions = territoryRegionPickerNames({
+    ...ref,
+    territory_nodes: forest as unknown
+  } as Record<string, unknown>);
+
+  console.log(`  → Tenant: ${tenantSlug} (id=${tenantId})`);
+  console.log(`  → Регион fayl: ${regionXlsxPath} (${regionRows.length} qator)`);
+  console.log(
+    `  → Viloyatlar: +${regionStats.added_regions} yangi | yangi zona: ${regionStats.added_zones} | takror: ${regionStats.skipped_duplicate_region} | boshqa zona ostida: ${regionStats.skipped_region_exists_elsewhere} | yaroqsiz: ${regionStats.skipped_bad_row}`
+  );
+  console.log(`  → Город fayl: ${cityXlsxPath} (${cityRows.length} qator)`);
+  console.log(
+    `  → Shaharlar: +${cityStats.added} yangi | takror: ${cityStats.skipped_duplicate} | skip: ${cityStats.skipped_bad_row}`
+  );
+  if (cityStats.missing_regions.length) {
+    console.warn("  → Viloyat topilmadi (shahar qatorlari):", cityStats.missing_regions.join(", "));
+  }
+
+  if (dry) {
+    console.log("  → [dry] DB ga yozilmadi.");
+    return {
+      regionStats,
+      cityStats,
+      regionRowCount: regionRows.length,
+      cityRowCount: cityRows.length,
+      written: false
+    };
+  }
+
+  const nextRef = { ...ref, territory_nodes: forest, regions };
+  const nextSettings = { ...st, references: nextRef };
+  await prisma.tenant.update({
+    where: { id: tenantId },
+    data: { settings: nextSettings as Prisma.InputJsonValue }
+  });
+  console.log("  → ✓ territory_nodes + regions yangilandi.");
+  return {
+    regionStats,
+    cityStats,
+    regionRowCount: regionRows.length,
+    cityRowCount: cityRows.length,
+    written: true
+  };
 }

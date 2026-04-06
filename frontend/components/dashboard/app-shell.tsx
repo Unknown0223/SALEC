@@ -10,6 +10,7 @@ import {
   type NavItem
 } from "@/components/dashboard/nav-config";
 import { Button } from "@/components/ui/button";
+import { ClientLucideIcon } from "@/components/ui/client-lucide-icon";
 import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -152,7 +153,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="hidden w-[15.5rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[2px_0_12px_rgba(0,0,0,0.06)] md:flex md:min-h-0">
         <div className="border-b border-sidebar-border/80 px-3 py-4">
           <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-primary/25 text-sidebar-primary-foreground">
-            <Package className="size-5 opacity-90" aria-hidden />
+            <ClientLucideIcon icon={Package} className="size-5 opacity-90" />
           </div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sidebar-foreground/60">
             SALESDOC
@@ -178,7 +179,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       : "text-sidebar-foreground/90 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
                   )}
                 >
-                  <Icon className="size-[18px] shrink-0 opacity-90" aria-hidden />
+                  <ClientLucideIcon icon={Icon} className="size-[18px] shrink-0 opacity-90" />
                   {label}
                 </Link>
               );
@@ -199,11 +200,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     aria-expanded={ordersOpen}
                   >
                     {ordersOpen ? (
-                      <ChevronDown className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronDown} className="size-4 shrink-0 opacity-80" />
                     ) : (
-                      <ChevronRight className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronRight} className="size-4 shrink-0 opacity-80" />
                     )}
-                    <ShoppingCart className="size-[18px] shrink-0 opacity-90" aria-hidden />
+                    <ClientLucideIcon icon={ShoppingCart} className="size-[18px] shrink-0 opacity-90" />
                     <span>{dashboardOrdersNav.sectionTitle}</span>
                   </button>
                   {ordersOpen && (
@@ -258,11 +259,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     aria-expanded={stockOpen}
                   >
                     {stockOpen ? (
-                      <ChevronDown className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronDown} className="size-4 shrink-0 opacity-80" />
                     ) : (
-                      <ChevronRight className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronRight} className="size-4 shrink-0 opacity-80" />
                     )}
-                    <Package className="size-[18px] shrink-0 opacity-90" aria-hidden />
+                    <ClientLucideIcon icon={Package} className="size-[18px] shrink-0 opacity-90" />
                     <span>{dashboardStockNav.sectionTitle}</span>
                   </button>
                   {stockOpen && (
@@ -306,11 +307,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     aria-expanded={usersOpen}
                   >
                     {usersOpen ? (
-                      <ChevronDown className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronDown} className="size-4 shrink-0 opacity-80" />
                     ) : (
-                      <ChevronRight className="size-4 shrink-0 opacity-80" aria-hidden />
+                      <ClientLucideIcon icon={ChevronRight} className="size-4 shrink-0 opacity-80" />
                     )}
-                    <UserSquare2 className="size-[18px] shrink-0 opacity-90" aria-hidden />
+                    <ClientLucideIcon icon={UserSquare2} className="size-[18px] shrink-0 opacity-90" />
                     <span>{dashboardUsersNav.sectionTitle}</span>
                   </button>
                   {usersOpen && (

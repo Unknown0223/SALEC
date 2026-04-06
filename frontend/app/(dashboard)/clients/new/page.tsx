@@ -10,7 +10,9 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { pickCityTerritoryHint } from "@/lib/city-territory-hint";
 import { mergeRefOptions } from "@/lib/merge-ref-options";
+import { mergeRefSelectOptions } from "@/lib/ref-select-options";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -29,6 +31,23 @@ type ClientReferencesResponse = {
   sales_channels: string[];
   product_category_refs: string[];
   logistics_services: string[];
+  category_options?: { value: string; label: string }[];
+  client_type_options?: { value: string; label: string }[];
+  client_format_options?: { value: string; label: string }[];
+  sales_channel_options?: { value: string; label: string }[];
+  city_options?: { value: string; label: string }[];
+  region_options?: { value: string; label: string }[];
+  city_territory_hints?: Record<
+    string,
+    {
+      region_stored: string | null;
+      region_label: string | null;
+      zone_stored: string | null;
+      zone_label: string | null;
+      district_stored: string | null;
+      district_label: string | null;
+    }
+  >;
 };
 
 function RefAdminLink({ href, children }: { href: string; children: ReactNode }) {
@@ -75,27 +94,72 @@ export default function NewClientPage() {
     }
   });
 
-  const catOpts = useMemo(() => mergeRefOptions(category, refsQ.data?.categories), [category, refsQ.data?.categories]);
-  const typeOpts = useMemo(
-    () => mergeRefOptions(clientTypeCode, refsQ.data?.client_type_codes),
-    [clientTypeCode, refsQ.data?.client_type_codes]
-  );
-  const terrOpts = useMemo(() => mergeRefOptions(region, refsQ.data?.regions), [region, refsQ.data?.regions]);
-  const cityOpts = useMemo(() => mergeRefOptions(city, refsQ.data?.cities), [city, refsQ.data?.cities]);
+  const catOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.category_options?.length) {
+      return mergeRefSelectOptions(category, d.category_options, d.categories);
+    }
+    return mergeRefOptions(category, d.categories).map((v) => ({ value: v, label: v }));
+  }, [category, refsQ.data]);
+  const typeOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.client_type_options?.length) {
+      return mergeRefSelectOptions(clientTypeCode, d.client_type_options, d.client_type_codes);
+    }
+    return mergeRefOptions(clientTypeCode, d.client_type_codes).map((v) => ({ value: v, label: v }));
+  }, [clientTypeCode, refsQ.data]);
+  const terrOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.region_options?.length) {
+      return mergeRefSelectOptions(region, d.region_options, d.regions);
+    }
+    return mergeRefOptions(region, d.regions).map((v) => ({ value: v, label: v }));
+  }, [region, refsQ.data]);
+  const cityOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.city_options?.length) {
+      return mergeRefSelectOptions(city, d.city_options, d.cities);
+    }
+    return mergeRefOptions(city, d.cities).map((v) => ({ value: v, label: v }));
+  }, [city, refsQ.data]);
   const distOpts = useMemo(() => mergeRefOptions(district, refsQ.data?.districts), [district, refsQ.data?.districts]);
   const neiOpts = useMemo(
     () => mergeRefOptions(neighborhood, refsQ.data?.neighborhoods),
     [neighborhood, refsQ.data?.neighborhoods]
   );
   const zoneOpts = useMemo(() => mergeRefOptions(zone, refsQ.data?.zones), [zone, refsQ.data?.zones]);
-  const formatOpts = useMemo(
-    () => mergeRefOptions(clientFormat, refsQ.data?.client_formats),
-    [clientFormat, refsQ.data?.client_formats]
+  const cityHint = useMemo(
+    () => pickCityTerritoryHint(refsQ.data?.city_territory_hints, city),
+    [refsQ.data?.city_territory_hints, city]
   );
-  const salesOpts = useMemo(
-    () => mergeRefOptions(salesChannel, refsQ.data?.sales_channels),
-    [salesChannel, refsQ.data?.sales_channels]
-  );
+  const onCitySelect = (next: string) => {
+    setCity(next);
+    const h = pickCityTerritoryHint(refsQ.data?.city_territory_hints, next);
+    if (!h) return;
+    if (h.region_stored) setRegion(h.region_stored);
+    if (h.zone_stored) setZone(h.zone_stored);
+    if (h.district_stored) setDistrict(h.district_stored);
+  };
+  const formatOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.client_format_options?.length) {
+      return mergeRefSelectOptions(clientFormat, d.client_format_options, d.client_formats);
+    }
+    return mergeRefOptions(clientFormat, d.client_formats).map((v) => ({ value: v, label: v }));
+  }, [clientFormat, refsQ.data]);
+  const salesOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.sales_channel_options?.length) {
+      return mergeRefSelectOptions(salesChannel, d.sales_channel_options, d.sales_channels);
+    }
+    return mergeRefOptions(salesChannel, d.sales_channels).map((v) => ({ value: v, label: v }));
+  }, [salesChannel, refsQ.data]);
   const prodCatOpts = useMemo(
     () => mergeRefOptions(productCategoryRef, refsQ.data?.product_category_refs),
     [productCategoryRef, refsQ.data?.product_category_refs]
@@ -194,126 +258,126 @@ export default function NewClientPage() {
 
         <div className="space-y-3 border-t border-border pt-4">
           <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-            Spravochnikdan tanlanadi (ixtiyoriy)
+            Справочники (необязательно)
           </p>
           <p className="text-xs text-muted-foreground">
-            Qiymatlar:{" "}
-            <RefAdminLink href="/settings/spravochnik/client-lists">mijoz spravochniklari</RefAdminLink>,{" "}
-            <RefAdminLink href="/settings/territories">viloyatlar</RefAdminLink>.
+            Значения:{" "}
+            <RefAdminLink href="/settings/spravochnik/client-lists">справочники клиента</RefAdminLink>,{" "}
+            <RefAdminLink href="/settings/territories">дерево территорий</RefAdminLink>. При выборе города подставляются область и зона из дерева.
           </p>
           {refsQ.isLoading ? (
-            <p className="text-xs text-muted-foreground">Ro‘yxatlar yuklanmoqda…</p>
+            <p className="text-xs text-muted-foreground">Загрузка списков…</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Toifa</Label>
+                  <Label className="mb-0 text-xs">Категория</Label>
                   <RefAdminLink href="/settings/client-categories">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Toifa"
-                  aria-label="Toifa"
+                  emptyLabel="Категория"
+                  aria-label="Категория"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {catOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {catOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Tur (kod)</Label>
+                  <Label className="mb-0 text-xs">Тип</Label>
                   <RefAdminLink href="/settings/client-types">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Tur (kod)"
-                  aria-label="Tur (kod)"
+                  emptyLabel="Тип"
+                  aria-label="Тип"
                   value={clientTypeCode}
                   onChange={(e) => setClientTypeCode(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {typeOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {typeOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Viloyat / territoriya</Label>
+                  <Label className="mb-0 text-xs">Область</Label>
                   <RefAdminLink href="/settings/territories">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Viloyat / territoriya"
-                  aria-label="Viloyat / territoriya"
+                  emptyLabel="Область"
+                  aria-label="Область"
                   value={region}
                   onChange={(e) => setRegion(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {terrOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {terrOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Mijoz formati</Label>
+                  <Label className="mb-0 text-xs">Формат клиента</Label>
                   <RefAdminLink href="/settings/client-formats">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Mijoz formati"
-                  aria-label="Mijoz formati"
+                  emptyLabel="Формат клиента"
+                  aria-label="Формат клиента"
                   value={clientFormat}
                   onChange={(e) => setClientFormat(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {formatOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {formatOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Savdo kanali</Label>
+                  <Label className="mb-0 text-xs">Канал продаж</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-sales">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Savdo kanali"
-                  aria-label="Savdo kanali"
+                  emptyLabel="Канал продаж"
+                  aria-label="Канал продаж"
                   value={salesChannel}
                   onChange={(e) => setSalesChannel(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {salesOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {salesOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Mahsulot toifasi</Label>
+                  <Label className="mb-0 text-xs">Категория товара</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Mahsulot toifasi"
-                  aria-label="Mahsulot toifasi"
+                  emptyLabel="Категория товара"
+                  aria-label="Категория товара"
                   value={productCategoryRef}
                   onChange={(e) => setProductCategoryRef(e.target.value)}
                   disabled={mut.isPending}
@@ -327,33 +391,47 @@ export default function NewClientPage() {
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Shahar (gorod)</Label>
+                  <Label className="mb-0 text-xs">Город (код в БД)</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-city">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Shahar"
-                  aria-label="Shahar"
+                  emptyLabel="Город"
+                  aria-label="Город"
                   value={city}
-                  onChange={(e) => setCity(e.target.value)}
+                  onChange={(e) => onCitySelect(e.target.value)}
                   disabled={mut.isPending}
                 >
-                  {cityOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {cityOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>
+                {cityHint ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    По дереву территорий: <span className="font-medium text-foreground">область</span> —{" "}
+                    {cityHint.region_label ?? cityHint.region_stored ?? "—"};{" "}
+                    {(cityHint.district_label ?? cityHint.district_stored)?.trim() ? (
+                      <>
+                        <span className="font-medium text-foreground">район</span> —{" "}
+                        {cityHint.district_label ?? cityHint.district_stored};{" "}
+                      </>
+                    ) : null}
+                    <span className="font-medium text-foreground">зона</span> —{" "}
+                    {cityHint.zone_label ?? cityHint.zone_stored ?? "—"}
+                  </p>
+                ) : null}
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Tuman</Label>
+                  <Label className="mb-0 text-xs">Район</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-district">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Tuman"
-                  aria-label="Tuman"
+                  emptyLabel="Район"
+                  aria-label="Район"
                   value={district}
                   onChange={(e) => setDistrict(e.target.value)}
                   disabled={mut.isPending}
@@ -367,13 +445,13 @@ export default function NewClientPage() {
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Mahalla</Label>
+                  <Label className="mb-0 text-xs">Махалля</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Mahalla"
-                  aria-label="Mahalla"
+                  emptyLabel="Махалля"
+                  aria-label="Махалля"
                   value={neighborhood}
                   onChange={(e) => setNeighborhood(e.target.value)}
                   disabled={mut.isPending}
@@ -387,13 +465,13 @@ export default function NewClientPage() {
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Zona</Label>
+                  <Label className="mb-0 text-xs">Зона</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-zone">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Zona"
-                  aria-label="Zona"
+                  emptyLabel="Зона"
+                  aria-label="Зона"
                   value={zone}
                   onChange={(e) => setZone(e.target.value)}
                   disabled={mut.isPending}
@@ -407,13 +485,13 @@ export default function NewClientPage() {
               </div>
               <div className="grid gap-1.5 sm:col-span-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Logistika xizmati</Label>
+                  <Label className="mb-0 text-xs">Логистика</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-logistics">+</RefAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Logistika xizmati"
-                  aria-label="Logistika xizmati"
+                  emptyLabel="Логистика"
+                  aria-label="Логистика"
                   value={logisticsService}
                   onChange={(e) => setLogisticsService(e.target.value)}
                   disabled={mut.isPending}

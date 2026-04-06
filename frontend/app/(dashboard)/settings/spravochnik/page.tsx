@@ -66,6 +66,19 @@ export default function SpravochnikPage() {
         </Link>
       </div>
 
+      <section className="rounded-lg border border-primary/25 bg-primary/5 p-4">
+        <h2 className="text-sm font-semibold">Yagona sozlamalar katalogi</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Barcha bo‘limlar chap paneldagi katalog orqali: territoriya, filiallar, narxlar, uskunalar va boshqalar.
+        </p>
+        <Link
+          className={cn(buttonVariants({ variant: "default", size: "sm" }), "mt-3 inline-flex")}
+          href="/settings"
+        >
+          Sozlamalar katalogiga o‘tish
+        </Link>
+      </section>
+
       {!hydrated || !tenantSlug ? (
         <p className="text-sm text-muted-foreground">…</p>
       ) : (

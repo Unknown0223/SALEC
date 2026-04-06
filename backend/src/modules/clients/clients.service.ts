@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import * as XLSX from "xlsx";
@@ -6,10 +8,18 @@ import { appendTenantAuditEvent } from "../../lib/tenant-audit";
 import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 import {
   activeValuesFromClientRefEntries,
+  buildCityTerritoryHints,
   clientRefEntriesFromUnknown,
-  territoryRegionPickerNames
+  expandRegionFilterSynonyms,
+  territoryCityStoredPairs,
+  territoryRegionPickerNames,
+  territoryRegionStoredPairs,
+  type CityTerritoryHintDto,
+  type ClientRefEntryDto
 } from "../tenant-settings/tenant-settings.service";
-import { listActiveSalesChannelLabels } from "../sales-directions/sales-directions.service";
+import { salesRefStoredValue } from "../sales-directions/sales-directions.service";
+import { ClientImportRefResolver } from "./client-import-ref-resolve";
+import { normKeyTerritoryMatch } from "../../../../shared/territory-lalaku-seed";
 
 /** Telefonni solishtirish uchun faqat raqamlar (masalan +998 90 → 99890). */
 export function normalizePhoneDigits(phone: string | null | undefined): string | null {
@@ -108,6 +118,8 @@ export type ListClientsQuery = {
   district?: string;
   neighborhood?: string;
   zone?: string;
+  /** Shahar (kod yoki nom) — aniq moslik */
+  city?: string;
   client_type_code?: string;
   client_format?: string;
   sales_channel?: string;
@@ -127,11 +139,37 @@ export type ListClientsQuery = {
   created_to?: string;
   /** Asosiy agent yoki jamoa qatoridagi agentning `supervisor_user_id` */
   supervisor_user_id?: number;
-  sort?: "name" | "phone" | "id" | "created_at" | "region";
+  sort?:
+    | "name"
+    | "phone"
+    | "id"
+    | "created_at"
+    | "region"
+    | "legal_name"
+    | "address"
+    | "responsible_person"
+    | "landmark"
+    | "inn"
+    | "client_pinfl"
+    | "sales_channel"
+    | "category"
+    | "client_type_code"
+    | "client_format"
+    | "district"
+    | "neighborhood"
+    | "zone"
+    | "city"
+    | "client_code"
+    | "latitude"
+    | "longitude";
   order?: "asc" | "desc";
+  /** Faqat kenglik/uzunligi bor yozuvlar (xarita) */
+  has_coords?: boolean;
 };
 
 const CONTACT_SLOTS = 10;
+
+export type ClientRefOptionDto = { value: string; label: string };
 
 export type ClientReferences = {
   categories: string[];
@@ -145,7 +183,91 @@ export type ClientReferences = {
   sales_channels: string[];
   product_category_refs: string[];
   logistics_services: string[];
+  /** UI: `label` — nom, `value` — DB / filtrda saqlanadigan qiymat (odatda kod). */
+  category_options: ClientRefOptionDto[];
+  client_type_options: ClientRefOptionDto[];
+  client_format_options: ClientRefOptionDto[];
+  sales_channel_options: ClientRefOptionDto[];
+  city_options: ClientRefOptionDto[];
+  /** Hudud daraxti: kod/saqlangan qiymat → ko‘rinadigan nom */
+  region_options: ClientRefOptionDto[];
+  /** Shahar qiymati (kod yoki nom) → daraxtdan viloyat va zona */
+  city_territory_hints: Record<string, CityTerritoryHintDto>;
 };
+
+function mergeClientRefSelectOpts(
+  entries: ClientRefEntryDto[],
+  legacyStrings: string[],
+  extraFromDb: (string | null | undefined)[]
+): ClientRefOptionDto[] {
+  const map = new Map<string, string>();
+  for (const e of entries) {
+    if (e.active === false) continue;
+    const code = e.code?.trim();
+    const name = e.name.trim();
+    const value = code && code !== "" ? code : name;
+    /** Ro‘yxatda nom ko‘rinadi; saqlanadigan qiymat — kod (yoki nom). */
+    const label = name !== "" ? name : value;
+    if (value) map.set(value, label);
+  }
+  for (const s of legacyStrings) {
+    const t = s.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  for (const x of extraFromDb) {
+    const t = x?.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+}
+
+function mergeSalesChannelSelectOpts(
+  rows: { code: string | null; name: string }[],
+  legacyStrings: string[],
+  extraFromDb: (string | null | undefined)[]
+): ClientRefOptionDto[] {
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    const value = salesRefStoredValue(r);
+    const label = r.name.trim() || value;
+    if (value) map.set(value, label);
+  }
+  for (const s of legacyStrings) {
+    const t = s.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  for (const x of extraFromDb) {
+    const t = x?.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+}
+
+function mergeCitySelectOpts(
+  pairs: { stored: string; name: string }[],
+  legacyStrings: string[],
+  extraFromDb: (string | null | undefined)[]
+): ClientRefOptionDto[] {
+  const map = new Map<string, string>();
+  for (const { stored, name } of pairs) {
+    if (stored && !map.has(stored)) map.set(stored, name);
+  }
+  for (const s of legacyStrings) {
+    const t = s.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  for (const x of extraFromDb) {
+    const t = x?.trim();
+    if (t && !map.has(t)) map.set(t, t);
+  }
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+}
 
 function parseContactPersonsJson(raw: unknown): ContactPersonSlot[] {
   const slots: ContactPersonSlot[] = Array.from({ length: CONTACT_SLOTS }, () => ({
@@ -418,7 +540,7 @@ async function syncAssignmentSlotOneWithClientRow(
 }
 
 export async function getClientReferences(tenantId: number): Promise<ClientReferences> {
-  const [clientRows, tenant, dbSalesLabels] = await Promise.all([
+  const [clientRows, tenant, salesChannelRows] = await Promise.all([
     prisma.client.findMany({
       where: { tenant_id: tenantId, merged_into_client_id: null },
       select: {
@@ -439,7 +561,10 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
       where: { id: tenantId },
       select: { settings: true }
     }),
-    listActiveSalesChannelLabels(tenantId)
+    prisma.salesChannelRef.findMany({
+      where: { tenant_id: tenantId, is_active: true },
+      select: { code: true, name: true }
+    })
   ]);
 
   const settingsRef = (tenant?.settings as { references?: Record<string, unknown> } | null)?.references;
@@ -466,6 +591,14 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
   const setZonesRef = strArr("client_zones");
   const setLogistics = strArr("client_logistics_services");
 
+  const dbSalesLabels = salesChannelRows
+    .map((r) => salesRefStoredValue(r))
+    .filter((x): x is string => Boolean(x));
+
+  const cityPairs = territoryCityStoredPairs(settingsRef as Record<string, unknown> | undefined);
+  const regionPairs = territoryRegionStoredPairs(settingsRef as Record<string, unknown> | undefined);
+  const cityTerritoryHints = buildCityTerritoryHints(settingsRef as Record<string, unknown> | undefined);
+
   return {
     categories: normalizeDistinct([...setCat, ...clientRows.map((r) => r.category)]),
     client_type_codes: normalizeDistinct([...setTypes, ...clientRows.map((r) => r.client_type_code)]),
@@ -481,7 +614,30 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
       ...clientRows.map((r) => r.sales_channel)
     ]),
     product_category_refs: normalizeDistinct([...setProdCat, ...clientRows.map((r) => r.product_category_ref)]),
-    logistics_services: normalizeDistinct([...setLogistics, ...clientRows.map((r) => r.logistics_service)])
+    logistics_services: normalizeDistinct([...setLogistics, ...clientRows.map((r) => r.logistics_service)]),
+    category_options: mergeClientRefSelectOpts(
+      catParsed,
+      strArr("client_categories"),
+      clientRows.map((r) => r.category)
+    ),
+    client_type_options: mergeClientRefSelectOpts(
+      typesParsed,
+      strArr("client_type_codes"),
+      clientRows.map((r) => r.client_type_code)
+    ),
+    client_format_options: mergeClientRefSelectOpts(
+      fmtParsed,
+      strArr("client_formats"),
+      clientRows.map((r) => r.client_format)
+    ),
+    sales_channel_options: mergeSalesChannelSelectOpts(
+      salesChannelRows,
+      setSales,
+      clientRows.map((r) => r.sales_channel)
+    ),
+    city_options: mergeCitySelectOpts(cityPairs, setCities, clientRows.map((r) => r.city)),
+    region_options: mergeCitySelectOpts(regionPairs, strArr("regions"), clientRows.map((r) => r.region)),
+    city_territory_hints: cityTerritoryHints
   };
 }
 
@@ -497,6 +653,73 @@ async function clientIdsWithVisitWeekday(tenantId: number, day: number): Promise
   return rows.map((r) => r.client_id);
 }
 
+async function loadTenantReferencesForClientTerritoryFilters(tenantId: number): Promise<{
+  hints: Record<string, CityTerritoryHintDto>;
+  ref: Record<string, unknown> | undefined;
+}> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const ref = (row?.settings as { references?: Record<string, unknown> } | null)?.references as
+    | Record<string, unknown>
+    | undefined;
+  return {
+    hints: buildCityTerritoryHints(ref),
+    ref
+  };
+}
+
+function cityKeysMatchingRegionInHints(
+  hints: Record<string, CityTerritoryHintDto>,
+  regionFilter: string
+): string[] {
+  const rf = regionFilter.trim();
+  if (!rf) return [];
+  const rfNorm = normKeyTerritoryMatch(rf);
+  const uniq = new Set<string>();
+  for (const [cityKey, hint] of Object.entries(hints)) {
+    const rs = (hint.region_stored ?? "").trim();
+    const rl = (hint.region_label ?? "").trim();
+    if (!rs && !rl) continue;
+    const match =
+      rs === rf ||
+      rl === rf ||
+      normKeyTerritoryMatch(rs) === rfNorm ||
+      normKeyTerritoryMatch(rl) === rfNorm;
+    if (match) {
+      const k = cityKey.trim();
+      if (k) uniq.add(k);
+    }
+  }
+  return [...uniq];
+}
+
+function cityKeysMatchingZoneInHints(
+  hints: Record<string, CityTerritoryHintDto>,
+  zoneFilter: string
+): string[] {
+  const zf = zoneFilter.trim();
+  if (!zf) return [];
+  const zfNorm = normKeyTerritoryMatch(zf);
+  const uniq = new Set<string>();
+  for (const [cityKey, hint] of Object.entries(hints)) {
+    const zs = (hint.zone_stored ?? "").trim();
+    const zl = (hint.zone_label ?? "").trim();
+    if (!zs && !zl) continue;
+    const match =
+      zs === zf ||
+      zl === zf ||
+      normKeyTerritoryMatch(zs) === zfNorm ||
+      normKeyTerritoryMatch(zl) === zfNorm;
+    if (match) {
+      const k = cityKey.trim();
+      if (k) uniq.add(k);
+    }
+  }
+  return [...uniq];
+}
+
 /** Ro‘yxat, eksport va count uchun umumiy WHERE. `null` — hech qachon mos kelmas (masalan hafta kuni bo‘yicha bo‘sh). */
 export async function buildClientListWhereInput(
   tenantId: number,
@@ -504,18 +727,41 @@ export async function buildClientListWhereInput(
 ): Promise<Prisma.ClientWhereInput | null> {
   const andList: Prisma.ClientWhereInput[] = [{ tenant_id: tenantId, merged_into_client_id: null }];
 
+  const regionQ = q.region?.trim();
+  const zoneQ = q.zone?.trim();
+  const territoryBundle =
+    regionQ || zoneQ
+      ? await loadTenantReferencesForClientTerritoryFilters(tenantId)
+      : { hints: {} as Record<string, CityTerritoryHintDto>, ref: undefined as Record<string, unknown> | undefined };
+
   if (q.is_active === true) andList.push({ is_active: true });
   if (q.is_active === false) andList.push({ is_active: false });
   const cat = q.category?.trim();
   if (cat) andList.push({ category: cat });
-  const region = q.region?.trim();
-  if (region) andList.push({ region });
+  if (regionQ) {
+    const cityKeys = cityKeysMatchingRegionInHints(territoryBundle.hints, regionQ);
+    const regionSynonyms = expandRegionFilterSynonyms(territoryBundle.ref, regionQ);
+    const orRegion: Prisma.ClientWhereInput[] = regionSynonyms.map((v) => ({
+      region: { equals: v, mode: "insensitive" }
+    }));
+    if (cityKeys.length > 0) orRegion.push({ city: { in: cityKeys } });
+    andList.push({ OR: orRegion });
+  }
   const district = q.district?.trim();
   if (district) andList.push({ district });
   const neighborhood = q.neighborhood?.trim();
   if (neighborhood) andList.push({ neighborhood });
-  const zone = q.zone?.trim();
-  if (zone) andList.push({ zone });
+  if (zoneQ) {
+    const cityKeys = cityKeysMatchingZoneInHints(territoryBundle.hints, zoneQ);
+    const orZone: Prisma.ClientWhereInput[] = [
+      { zone: zoneQ },
+      { zone: { equals: zoneQ, mode: "insensitive" } }
+    ];
+    if (cityKeys.length > 0) orZone.push({ city: { in: cityKeys } });
+    andList.push({ OR: orZone });
+  }
+  const city = q.city?.trim();
+  if (city) andList.push({ city });
   const ctc = q.client_type_code?.trim();
   if (ctc) andList.push({ client_type_code: ctc });
   const cf = q.client_format?.trim();
@@ -595,6 +841,13 @@ export async function buildClientListWhereInput(
         { notes: { contains: search, mode: "insensitive" } },
         { street: { contains: search, mode: "insensitive" } }
       ]
+    });
+  }
+
+  if (q.has_coords === true) {
+    andList.push({
+      latitude: { not: null },
+      longitude: { not: null }
     });
   }
 
@@ -731,6 +984,59 @@ export async function bulkSetClientsActive(
   return { updated: ok.length };
 }
 
+function clientListOrderBy(
+  sortField: NonNullable<ListClientsQuery["sort"]>,
+  ord: Prisma.SortOrder
+): Prisma.ClientOrderByWithRelationInput {
+  switch (sortField) {
+    case "phone":
+      return { phone: ord };
+    case "id":
+      return { id: ord };
+    case "created_at":
+      return { created_at: ord };
+    case "region":
+      return { region: ord };
+    case "legal_name":
+      return { legal_name: ord };
+    case "address":
+      return { address: ord };
+    case "responsible_person":
+      return { responsible_person: ord };
+    case "landmark":
+      return { landmark: ord };
+    case "inn":
+      return { inn: ord };
+    case "client_pinfl":
+      return { client_pinfl: ord };
+    case "sales_channel":
+      return { sales_channel: ord };
+    case "category":
+      return { category: ord };
+    case "client_type_code":
+      return { client_type_code: ord };
+    case "client_format":
+      return { client_format: ord };
+    case "district":
+      return { district: ord };
+    case "neighborhood":
+      return { neighborhood: ord };
+    case "zone":
+      return { zone: ord };
+    case "city":
+      return { city: ord };
+    case "client_code":
+      return { client_code: ord };
+    case "latitude":
+      return { latitude: ord };
+    case "longitude":
+      return { longitude: ord };
+    case "name":
+    default:
+      return { name: ord };
+  }
+}
+
 export async function listClientsForTenantPaged(
   tenantId: number,
   q: ListClientsQuery
@@ -743,16 +1049,7 @@ export async function listClientsForTenantPaged(
 
   const sortField = q.sort ?? "name";
   const ord: Prisma.SortOrder = q.order === "desc" ? "desc" : "asc";
-  const orderBy: Prisma.ClientOrderByWithRelationInput =
-    sortField === "phone"
-      ? { phone: ord }
-      : sortField === "id"
-        ? { id: ord }
-        : sortField === "created_at"
-          ? { created_at: ord }
-          : sortField === "region"
-            ? { region: ord }
-            : { name: ord };
+  const orderBy = clientListOrderBy(sortField, ord);
 
   const [total, clients] = await Promise.all([
     prisma.client.count({ where }),
@@ -1700,9 +1997,13 @@ export async function mergeClientsIntoOne(
 /** Shablon va import uchun ruxsat etilgan ustun kalitlari (1-varaq, 1-qator sarlavha). */
 export const CLIENT_IMPORT_COLUMN_KEYS = [
   "name",
+  "legal_name",
   "phone",
   "address",
+  "client_code",
+  "client_pinfl",
   "category",
+  "client_type_code",
   "credit_limit",
   "is_active",
   "responsible_person",
@@ -1715,15 +2016,19 @@ export const CLIENT_IMPORT_COLUMN_KEYS = [
   "region",
   "district",
   "city",
+  "city_code",
   "neighborhood",
+  "zone",
   "street",
   "house_number",
   "apartment",
   "gps_text",
-  "visit_date",
+  "latitude",
+  "longitude",
   "notes",
   "client_format",
-  "agent_id",
+  "sales_channel",
+  "product_category_ref",
   "contact1_firstName",
   "contact1_lastName",
   "contact1_phone",
@@ -1765,11 +2070,10 @@ const HEADER_ALIASES: Record<string, string> = {
   uy: "house_number",
   xonadon: "apartment",
   gps: "gps_text",
-  tashrif: "visit_date",
   izoh: "notes",
   format: "client_format",
-  agent: "agent_id",
-  agent_id: "agent_id",
+  legal_name: "legal_name",
+  yuridik_nomi: "legal_name",
   // Ruscha sarlavhalar (Excel / 1C / CRM eksport)
   имя: "name",
   название: "name",
@@ -1786,20 +2090,50 @@ const HEADER_ALIASES: Record<string, string> = {
   адрес: "address",
   категория: "category",
   категория_клиента: "category",
+  категория_клиента_код: "category",
   кредит: "credit_limit",
   кредитный_лимит: "credit_limit",
   активен: "is_active",
   ответственный: "responsible_person",
   ориентир: "landmark",
   инн: "inn",
+  юридическое_название: "legal_name",
+  юр_название: "legal_name",
+  полное_наименование: "legal_name",
   регион: "region",
   область: "region",
   район: "district",
+  зона: "zone",
+  город_туман: "city",
+  тип_клиента_код: "client_type_code",
+  код_типа_клиента: "client_type_code",
+  формат_код: "client_format",
+  формат_клиента: "client_format",
+  торговый_канал: "sales_channel",
+  торговый_канал_код: "sales_channel",
+  канал_продаж: "sales_channel",
+  канал_продаж_код: "sales_channel",
+  savdo_kanali: "sales_channel",
+  sales_channel: "sales_channel",
   улица: "street",
   дом: "house_number",
   квартира: "apartment",
   примечание: "notes",
-  комментарий: "notes"
+  комментарий: "notes",
+  контактное_лицо: "responsible_person",
+  контакт: "responsible_person",
+  ид_клиента: "client_code",
+  id_клиента: "client_code",
+  ид: "client_code",
+  код_клиента: "client_code",
+  клиент_код: "client_code",
+  код: "client_code",
+  пинфл: "client_pinfl",
+  широта: "latitude",
+  долгота: "longitude",
+  город_код: "city_code",
+  категория_продукции: "product_category_ref",
+  категория_товара: "product_category_ref"
 };
 
 const VALID_IMPORT_KEYS = new Set<string>(CLIENT_IMPORT_COLUMN_KEYS);
@@ -1810,13 +2144,18 @@ function normalizeHeaderLabel(h: string): string {
     .trim()
     .replace(/\u00a0/g, " ")
     .toLowerCase()
+    .replace(/[()]/g, "")
+    .replace(/\s*[/\\]+\s*/g, "_")
     .replace(/\s+/g, "_")
     .replace(/[''`«»]/g, "");
 }
 
 function headerToClientImportKey(h: string): string | null {
   const n = normalizeHeaderLabel(h);
-  if (HEADER_ALIASES[n]) return HEADER_ALIASES[n];
+  if (HEADER_ALIASES[n]) {
+    const k = HEADER_ALIASES[n];
+    if (VALID_IMPORT_KEYS.has(k)) return k;
+  }
   if (VALID_IMPORT_KEYS.has(n)) return n;
   return null;
 }
@@ -1857,6 +2196,25 @@ function parseCreditLimit(raw: string | null): Prisma.Decimal {
   return new Prisma.Decimal(n);
 }
 
+function parseOptionalLatLng(raw: string | null): Prisma.Decimal | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const n = Number.parseFloat(String(raw).trim().replace(",", "."));
+  if (!Number.isFinite(n)) return null;
+  return new Prisma.Decimal(n);
+}
+
+function trimImportClientCode(raw: string | null): string | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const t = raw.trim().slice(0, 32);
+  return t || null;
+}
+
+function trimImportPinfl(raw: string | null): string | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const t = raw.trim().slice(0, 20);
+  return t || null;
+}
+
 /** SheetJS (`xlsx`) qatori — ExcelJS `readCellText` o‘rnini bosadi. */
 function xlsxCellToString(cell: unknown): string | null {
   if (cell == null || cell === "") return null;
@@ -1876,7 +2234,12 @@ function headerLabelFromCell(cell: unknown): string {
   return String(cell).trim();
 }
 
+const CLIENT_IMPORT_TEMPLATE_FILE = join(__dirname, "../../../assets/client-import-template.xlsx");
+
 export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
+  if (existsSync(CLIENT_IMPORT_TEMPLATE_FILE)) {
+    return readFileSync(CLIENT_IMPORT_TEMPLATE_FILE);
+  }
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Mijozlar", {
     views: [{ state: "frozen", ySplit: 1 }]
@@ -1894,6 +2257,7 @@ export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
   });
   const example: string[] = headers.map((key) => {
     if (key === "name") return "Misol MCHJ yoki FIO";
+    if (key === "client_code") return "l0_2471";
     if (key === "phone") return "+998901112233";
     if (key === "credit_limit") return "0";
     if (key === "is_active") return "ha";
@@ -1984,9 +2348,22 @@ function findImportTableInWorkbook(wb: XLSX.WorkBook): {
   };
 }
 
-export async function importClientsFromXlsx(
+export type ClientXlsxImportOptions = {
+  /** Varaq nomi (bo‘sh bo‘lsa — birinchi varaq). */
+  sheetName?: string;
+  /** Sarlavha qatori, 0-indeks (Excelda 1-qator = 0). */
+  headerRowIndex?: number;
+  /** Tizim maydoni → fayldagi ustun indeksi (0 dan). */
+  columnMap?: Record<string, number>;
+};
+
+async function importClientDataRows(
   tenantId: number,
-  buffer: Buffer | Uint8Array
+  rows: unknown[][],
+  headerRowIdx: number,
+  colIndexByKey: Record<string, number>,
+  sheetLabel: string,
+  refResolver: ClientImportRefResolver
 ): Promise<{ created: number; errors: string[] }> {
   const errors: string[] = [];
   let totalRowErrors = 0;
@@ -1994,62 +2371,6 @@ export async function importClientsFromXlsx(
     totalRowErrors += 1;
     if (errors.length < IMPORT_MAX_ERRORS_RETURNED) errors.push(msg);
   };
-
-  const raw = Buffer.from(buffer);
-  if (raw.length < 4) {
-    return { created: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
-  }
-  // Haqiqiy .xlsx — zip (PK\x03\x04). Eski .xls yoki boshqa tur boshqacha bo‘ladi.
-  if (raw[0] !== 0x50 || raw[1] !== 0x4b) {
-    return {
-      created: 0,
-      errors: [
-        "Bu fayl standart .xlsx (zip) ko‘rinishida emas. Ehtimol .xls yoki boshqa dastur eksporti. Excelda «Fayl → Saqlash tur» dan .xlsx tanlang."
-      ]
-    };
-  }
-
-  let wb: XLSX.WorkBook;
-  try {
-    wb = XLSX.read(raw, { type: "buffer", cellDates: true, dense: false });
-  } catch (e) {
-    const hint = e instanceof Error ? e.message : String(e);
-    return {
-      created: 0,
-      errors: [
-        "Fayl o‘qilmadi. Buzilgan .xlsx yoki noto‘g‘ri format. Excelda qayta saqlang (.xlsx) yoki loyiha shablonidan foydalaning.",
-        `Texnik: ${hint.slice(0, 200)}`
-      ]
-    };
-  }
-
-  if (!wb.SheetNames.length) {
-    return { created: 0, errors: ["Jadvalda varaq yo‘q."] };
-  }
-
-  const table = findImportTableInWorkbook(wb);
-  if (!table) {
-    const first = wb.SheetNames[0];
-    const ws0 = first ? wb.Sheets[first] : undefined;
-    const rows0 = ws0 ? sheetToRowsMatrix(ws0) : [];
-    const headerTry = rows0[0];
-    const sample = (Array.isArray(headerTry) ? headerTry : [])
-      .map((c) => headerLabelFromCell(c))
-      .filter(Boolean)
-      .slice(0, 12);
-    const preview = sample.join(" | ");
-    return {
-      created: 0,
-      errors: [
-        `Hech bir varaqning dastlabki ${IMPORT_HEADER_SCAN_ROWS} qatorida majburiy ustun (name / наименование va hokazo) topilmadi.`,
-        preview
-          ? `Birinchi varaq, 1-qator (namuna): ${preview}`
-          : "Birinchi varaq bo‘sh yoki o‘qilmadi."
-      ]
-    };
-  }
-
-  const { rows, headerRowIdx, colIndexByKey } = table;
 
   let created = 0;
   let skippedEmpty = 0;
@@ -2061,7 +2382,7 @@ export async function importClientsFromXlsx(
     return {
       created: 0,
       errors: [
-        `Sarlavha ${headerRowIdx + 1}-qatorda topildi («${table.sheetName}»), lekin undan keyin ma’lumot qatori yo‘q.`
+        `Sarlavha ${headerRowIdx + 1}-qatorda («${sheetLabel}»), lekin undan keyin ma’lumot qatori yo‘q.`
       ]
     };
   }
@@ -2079,9 +2400,15 @@ export async function importClientsFromXlsx(
       continue;
     }
 
+    const legal_name = readArrayCell(row, colIndexByKey.legal_name);
     const phone = readArrayCell(row, colIndexByKey.phone);
     const address = readArrayCell(row, colIndexByKey.address);
-    const category = readArrayCell(row, colIndexByKey.category);
+    const client_code = trimImportClientCode(readArrayCell(row, colIndexByKey.client_code));
+    const client_pinfl = trimImportPinfl(readArrayCell(row, colIndexByKey.client_pinfl));
+    const category = refResolver.resolveCategory(readArrayCell(row, colIndexByKey.category));
+    const client_type_code = refResolver.resolveClientType(
+      readArrayCell(row, colIndexByKey.client_type_code)
+    );
     const credit_limit = parseCreditLimit(readArrayCell(row, colIndexByKey.credit_limit));
     const is_active = parseIsActive(readArrayCell(row, colIndexByKey.is_active));
     const responsible_person = readArrayCell(row, colIndexByKey.responsible_person);
@@ -2093,27 +2420,29 @@ export async function importClientsFromXlsx(
     const working_hours = readArrayCell(row, colIndexByKey.working_hours);
     const region = readArrayCell(row, colIndexByKey.region);
     const district = readArrayCell(row, colIndexByKey.district);
-    const city = readArrayCell(row, colIndexByKey.city);
+    const cityRaw =
+      readArrayCell(row, colIndexByKey.city_code) ?? readArrayCell(row, colIndexByKey.city);
+    const city = refResolver.resolveCity(cityRaw);
     const neighborhood = readArrayCell(row, colIndexByKey.neighborhood);
+    const zone = readArrayCell(row, colIndexByKey.zone);
     const street = readArrayCell(row, colIndexByKey.street);
     const house_number = readArrayCell(row, colIndexByKey.house_number);
     const apartment = readArrayCell(row, colIndexByKey.apartment);
     const gps_text = readArrayCell(row, colIndexByKey.gps_text);
-    const visit_date = parseOptionalDate(readArrayCell(row, colIndexByKey.visit_date));
+    const latitude = parseOptionalLatLng(readArrayCell(row, colIndexByKey.latitude));
+    const longitude = parseOptionalLatLng(readArrayCell(row, colIndexByKey.longitude));
     const notes = readArrayCell(row, colIndexByKey.notes);
-    const client_format = readArrayCell(row, colIndexByKey.client_format);
-
-    let agent_id: number | null = null;
-    const agentStr = readArrayCell(row, colIndexByKey.agent_id);
-    if (agentStr != null) {
-      const aid = Number.parseInt(agentStr, 10);
-      if (Number.isFinite(aid) && aid > 0) {
-        const u = await prisma.user.findFirst({
-          where: { id: aid, tenant_id: tenantId, is_active: true }
-        });
-        if (u) agent_id = aid;
-      }
-    }
+    const client_format = refResolver.resolveClientFormat(
+      readArrayCell(row, colIndexByKey.client_format)
+    );
+    const sales_channel = refResolver.resolveSalesChannel(
+      readArrayCell(row, colIndexByKey.sales_channel)
+    );
+    const product_category_refRaw = readArrayCell(row, colIndexByKey.product_category_ref);
+    const product_category_ref =
+      product_category_refRaw != null && !isPlaceholderCell(product_category_refRaw)
+        ? product_category_refRaw.trim() || null
+        : null;
 
     const slots: ContactPersonSlot[] = Array.from({ length: CONTACT_SLOTS }, () => ({
       firstName: null,
@@ -2133,10 +2462,14 @@ export async function importClientsFromXlsx(
         data: {
           tenant_id: tenantId,
           name: nameRaw.trim(),
+          legal_name,
           phone,
           phone_normalized: normalizePhoneDigits(phone),
           address,
+          client_code,
+          client_pinfl,
           category,
+          client_type_code,
           credit_limit,
           is_active,
           responsible_person,
@@ -2150,14 +2483,17 @@ export async function importClientsFromXlsx(
           district,
           city,
           neighborhood,
+          zone,
           street,
           house_number,
           apartment,
           gps_text,
-          visit_date,
+          latitude,
+          longitude,
           notes,
           client_format,
-          agent_id,
+          sales_channel,
+          product_category_ref,
           contact_persons: contactPersonsToJson(slots)
         }
       });
@@ -2186,5 +2522,113 @@ export async function importClientsFromXlsx(
     );
   }
 
+  for (const line of refResolver.summarizeMisses()) {
+    out.push(line);
+  }
+
   return { created, errors: out };
+}
+
+function buildManualColumnMap(raw: Record<string, number> | undefined): Record<string, number> | null {
+  if (raw == null) return null;
+  const colIndexByKey: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!VALID_IMPORT_KEYS.has(k)) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v) || v < 0) continue;
+    colIndexByKey[k] = v;
+  }
+  return Object.prototype.hasOwnProperty.call(colIndexByKey, "name") ? colIndexByKey : null;
+}
+
+export async function importClientsFromXlsx(
+  tenantId: number,
+  buffer: Buffer | Uint8Array,
+  opts?: ClientXlsxImportOptions
+): Promise<{ created: number; errors: string[] }> {
+  const raw = Buffer.from(buffer);
+  if (raw.length < 4) {
+    return { created: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
+  }
+  if (raw[0] !== 0x50 || raw[1] !== 0x4b) {
+    return {
+      created: 0,
+      errors: [
+        "Bu fayl standart .xlsx (zip) ko‘rinishida emas. Ehtimol .xls yoki boshqa dastur eksporti. Excelda «Fayl → Saqlash tur» dan .xlsx tanlang."
+      ]
+    };
+  }
+
+  let wb: XLSX.WorkBook;
+  try {
+    wb = XLSX.read(raw, { type: "buffer", cellDates: true, dense: false });
+  } catch (e) {
+    const hint = e instanceof Error ? e.message : String(e);
+    return {
+      created: 0,
+      errors: [
+        "Fayl o‘qilmadi. Buzilgan .xlsx yoki noto‘g‘ri format. Excelda qayta saqlang (.xlsx) yoki loyiha shablonidan foydalaning.",
+        `Texnik: ${hint.slice(0, 200)}`
+      ]
+    };
+  }
+
+  if (!wb.SheetNames.length) {
+    return { created: 0, errors: ["Jadvalda varaq yo‘q."] };
+  }
+
+  const refResolver = await ClientImportRefResolver.load(tenantId);
+
+  const manualMap = buildManualColumnMap(opts?.columnMap);
+  if (manualMap != null) {
+    const wantSheet = opts?.sheetName?.trim();
+    const sheetName =
+      wantSheet && wb.SheetNames.includes(wantSheet) ? wantSheet : wb.SheetNames[0];
+    if (wantSheet && !wb.SheetNames.includes(wantSheet)) {
+      return {
+        created: 0,
+        errors: [`Varaq topilmadi: «${wantSheet}». Mavjud: ${wb.SheetNames.join(", ")}.`]
+      };
+    }
+    const ws = sheetName ? wb.Sheets[sheetName] : undefined;
+    if (!ws) {
+      return { created: 0, errors: ["Varaq o‘qilmadi."] };
+    }
+    const rows = sheetToRowsMatrix(ws);
+    let headerRowIdx =
+      typeof opts?.headerRowIndex === "number" && Number.isFinite(opts.headerRowIndex)
+        ? Math.floor(opts.headerRowIndex)
+        : 0;
+    if (headerRowIdx < 0 || headerRowIdx >= rows.length) {
+      return {
+        created: 0,
+        errors: [`Sarlavha qatori noto‘g‘ri (0…${Math.max(0, rows.length - 1)}).`]
+      };
+    }
+    return importClientDataRows(tenantId, rows, headerRowIdx, manualMap, sheetName ?? "", refResolver);
+  }
+
+  const table = findImportTableInWorkbook(wb);
+  if (!table) {
+    const first = wb.SheetNames[0];
+    const ws0 = first ? wb.Sheets[first] : undefined;
+    const rows0 = ws0 ? sheetToRowsMatrix(ws0) : [];
+    const headerTry = rows0[0];
+    const sample = (Array.isArray(headerTry) ? headerTry : [])
+      .map((c) => headerLabelFromCell(c))
+      .filter(Boolean)
+      .slice(0, 12);
+    const preview = sample.join(" | ");
+    return {
+      created: 0,
+      errors: [
+        `Hech bir varaqning dastlabki ${IMPORT_HEADER_SCAN_ROWS} qatorida majburiy ustun (name / наименование va hokazo) topilmadi.`,
+        preview
+          ? `Birinchi varaq, 1-qator (namuna): ${preview}`
+          : "Birinchi varaq bo‘sh yoki o‘qilmadi."
+      ]
+    };
+  }
+
+  const { rows, headerRowIdx, colIndexByKey } = table;
+  return importClientDataRows(tenantId, rows, headerRowIdx, colIndexByKey, table.sheetName, refResolver);
 }

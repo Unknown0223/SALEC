@@ -1,6 +1,6 @@
 # Loyiha rejasi — jarayon hisoboti
 
-**Oxirgi yangilanish:** 2026-03-29 — FAZA **0–4** `PHASE_GATES.md` bo‘yicha MVP yopildi: `client_audit_logs`, kredit+**balans** headroom, spravochniklar sahifasi, kategoriya **CRUD**, kompaniya **profile** + `references`/`feature_flags`, klient **Tarix** tab, dublikat **filtr**, bonus **unit test**, `NON_FUNCTIONAL.md` kengaytmasi. Migratsiya: `20260329300000_client_audit_logs`.  
+**Oxirgi yangilanish:** 2026-04-02 — FAZA 5: `PHASE_GATES` korrektirovka + qoldiqlar vizuali yangilandi; keyingi navbat: PDF, nakladnoy/transfer UI.  
 **Manba checklist:** [`PHASE_GATES.md`](./PHASE_GATES.md)
 
 ---
@@ -15,18 +15,21 @@
 | FAZA 2 | **100%** | Panel, mahsulot/narx/bonus, spravochniklar UI+API, kompaniya sozlamalari |
 | FAZA 3 | **100%** | Klientlar, balans, kartochka tablari, audit, dublikatlar, kredit progress |
 | FAZA 4 | **100%** | Zakaz, bonus, status, SSE, UI, bonus unit test |
-| FAZA 5–10 | **0–5%** | Rejada — ombor chuqurligi, moliya, GPS, Flutter, E2E |
+| FAZA 5 | **~60%** | Stock, receipts, transfers, picking, korrektirovka, qoldiqlar rangli qatorlar; qolgani: PDF, transfer/nakladnoy UI |
+| FAZA 6 | **~35%** | Payments API bor; qolgani: allocation ulanishi, akt-sverka, qarzdorlik PDF |
+| FAZA 7–10 | **0–15%** | GPS, hisobotlar grafiklari, Flutter, E2E — rejada |
 
-**Butun loyiha (0–4 oralig‘i):** **100%** (MVP gate). **FAZA 5+** alohida.
+**Butun loyiha (0–4 oralig‘i):** **100%** (MVP gate). **FAZA 5+** iteratsiya.
 
 ---
 
-## Keyingi qadam (FAZA 5+)
+## Keyingi qadam — FAZA 5 (ustuvor)
 
-1. **Ombor:** ~~prixod (API + panel),~~ picking, FOR UPDATE / stok rezervi zakaz bilan bog‘lash, korrektirovka.  
-2. **SSE:** ~~Redis `order-events` kanali (ko‘p instans); Redis yo‘q bo‘lsa in-process.~~  
-3. **Super-admin** dilerlar paneli.  
-4. **E2E** (Playwright), load smoke, deploy runbook.
+1. **Picking:** ~~`/stock/picking` + aggregate + skaner maydoni + chop etish~~ (2026-04-02); yangilash tugmasi yuklanishda bloklanadi.  
+2. **Platforma:** ~~`api-client` / `middleware`~~ (2026-04-02).  
+3. **Korrektirovka:** ~~`/stock/correction` + bulk + audit~~ — `PHASE_GATES` da belgilandi.  
+4. **Qoldiqlar UI:** jadval qatorlari holat bo‘yicha rang.  
+5. **Keyingi navbat:** **PDF** nakladnoy; nakladnoy tugmalari + transfer sahifasi polish.
 
 **2026-03-30:** `GET /api/:slug/stock`, `POST /api/:slug/stock/receipts` (admin), panel `/stock`; zakazlar SSE Redis orqali sinxron (ioredis).
 

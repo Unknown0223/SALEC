@@ -29,9 +29,9 @@ import {
 } from "@/lib/orders-list-columns";
 import {
   DEFAULT_NAKLADNOY_EXPORT_PREFS,
+  downloadOrdersNakladnoyXlsx,
   loadNakladnoyExportPrefs,
   NAKLADNOY_TEMPLATE_OPTIONS,
-  nakladnoyPrefsToApiBody,
   type NakladnoyExportPrefs,
   type NakladnoyTemplateId
 } from "@/lib/order-nakladnoy";
@@ -161,17 +161,6 @@ function buildPaymentPrefillFromSelection(
     href: `/payments/new?${p.toString()}`,
     note: sel.length > 1 ? `${sel.length} ta zakaz yig‘indisi (summa maydonga qo‘yilgan).` : null
   };
-}
-
-function parseFilenameFromContentDisposition(cd: string | undefined): string | null {
-  if (!cd) return null;
-  const m = /filename="([^"]+)"/.exec(cd) ?? /filename=([^;\s]+)/.exec(cd);
-  if (!m?.[1]) return null;
-  try {
-    return decodeURIComponent(m[1].replace(/"/g, ""));
-  } catch {
-    return m[1].replace(/"/g, "");
-  }
 }
 
 function rowStatusPatchError(err: unknown): string {
@@ -437,59 +426,14 @@ function OrdersPageContent() {
 
   const nakladnoyMut = useMutation({
     mutationFn: async (payload: { template: NakladnoyTemplateId; prefs: NakladnoyExportPrefs }) => {
-      try {
-        const res = await api.post<Blob>(
-          `/api/${tenantSlug}/orders/bulk/nakladnoy`,
-          {
-            order_ids: Array.from(selectedOrderIds),
-            template: payload.template,
-            ...nakladnoyPrefsToApiBody(payload.prefs)
-          },
-          { responseType: "blob" }
-        );
-        const ct = (res.headers["content-type"] ?? "").toLowerCase();
-        if (ct.includes("application/json")) {
-          const text = await (res.data as Blob).text();
-          let msg = "Xato";
-          try {
-            const j = JSON.parse(text) as { error?: string; message?: string };
-            msg = j.message ?? j.error ?? msg;
-          } catch {
-            msg = text.slice(0, 200) || msg;
-          }
-          throw new Error(msg);
-        }
-        return {
-          blob: res.data as Blob,
-          filename: parseFilenameFromContentDisposition(res.headers["content-disposition"])
-        };
-      } catch (e: unknown) {
-        if (axios.isAxiosError(e) && e.response?.data instanceof Blob) {
-          const text = await e.response.data.text();
-          let j: { error?: string };
-          try {
-            j = JSON.parse(text) as { error?: string };
-          } catch {
-            throw new Error(text.slice(0, 160) || "So‘rov xatosi");
-          }
-          if (j.error === "OrdersNotFound") throw new Error("Ba’zi zakazlar topilmadi.");
-          if (j.error) throw new Error(String(j.error));
-          throw new Error(text.slice(0, 160) || "So‘rov xatosi");
-        }
-        throw e;
-      }
+      await downloadOrdersNakladnoyXlsx({
+        tenantSlug: tenantSlug!,
+        orderIds: Array.from(selectedOrderIds),
+        template: payload.template,
+        prefs: payload.prefs
+      });
     },
-    onSuccess: ({ blob, filename }) => {
-      const name = filename ?? `nakladnoy_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+    onSuccess: () => {
       setNakladnoyFeedback("Excel fayl yuklab olindi.");
     },
     onError: (err: unknown) => {

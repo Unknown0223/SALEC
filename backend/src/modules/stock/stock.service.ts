@@ -737,6 +737,108 @@ export async function applyStockReceipt(
   }
 }
 
+export type StockAdjustmentInput = {
+  warehouse_id: number;
+  product_id: number;
+  delta: number;
+  note?: string | null;
+};
+
+/**
+ * Bir tranzaksiya ichida qoldiqni o‘zgartirish (hujjat + bir nechta qator uchun).
+ * Manfiy jami yoki rezervdan past qoldiq taqiqlanadi.
+ */
+export async function applyStockAdjustmentInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: number,
+  input: StockAdjustmentInput
+): Promise<{ qty_before: string; qty_after: string }> {
+  if (!Number.isFinite(input.delta) || input.delta === 0) {
+    throw new Error("BAD_DELTA");
+  }
+  const delta = new Prisma.Decimal(input.delta);
+
+  const wh = await tx.warehouse.findFirst({
+    where: { id: input.warehouse_id, tenant_id: tenantId }
+  });
+  if (!wh) throw new Error("BAD_WAREHOUSE");
+  const p = await tx.product.findFirst({
+    where: { id: input.product_id, tenant_id: tenantId }
+  });
+  if (!p) throw new Error("BAD_PRODUCT");
+
+  const row = await tx.stock.findUnique({
+    where: {
+      tenant_id_warehouse_id_product_id: {
+        tenant_id: tenantId,
+        warehouse_id: input.warehouse_id,
+        product_id: input.product_id
+      }
+    }
+  });
+  const before = row?.qty ?? new Prisma.Decimal(0);
+  const reserved = row?.reserved_qty ?? new Prisma.Decimal(0);
+  const after = before.add(delta);
+  if (after.lt(0)) throw new Error("NEGATIVE_QTY");
+  if (after.lt(reserved)) throw new Error("BELOW_RESERVED");
+
+  await tx.stock.upsert({
+    where: {
+      tenant_id_warehouse_id_product_id: {
+        tenant_id: tenantId,
+        warehouse_id: input.warehouse_id,
+        product_id: input.product_id
+      }
+    },
+    create: {
+      tenant_id: tenantId,
+      warehouse_id: input.warehouse_id,
+      product_id: input.product_id,
+      qty: after,
+      reserved_qty: new Prisma.Decimal(0)
+    },
+    update: { qty: after }
+  });
+
+  return { qty_before: before.toString(), qty_after: after.toString() };
+}
+
+/**
+ * Inventarsiz qoldiq tuzatish: `qty += delta`. Manfiy jami yoki rezervdan past qoldiq taqiqlanadi.
+ */
+export async function applyStockAdjustment(
+  tenantId: number,
+  input: StockAdjustmentInput,
+  actorUserId: number | null = null
+): Promise<{ qty_before: string; qty_after: string }> {
+  if (!Number.isFinite(input.delta) || input.delta === 0) {
+    throw new Error("BAD_DELTA");
+  }
+  const delta = new Prisma.Decimal(input.delta);
+
+  const { qty_before, qty_after } = await prisma.$transaction(async (tx) =>
+    applyStockAdjustmentInTx(tx, tenantId, input)
+  );
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.stock,
+    entityId: `${input.warehouse_id}:${input.product_id}`,
+    action: "adjustment",
+    payload: {
+      warehouse_id: input.warehouse_id,
+      product_id: input.product_id,
+      delta: delta.toString(),
+      qty_before,
+      qty_after,
+      note: input.note ?? null
+    }
+  });
+
+  return { qty_before, qty_after };
+}
+
 /** Shablon: birinchi qator — sarlavhalar, ikkinchi — namuna */
 export async function buildStockImportTemplateBuffer(): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -1255,4 +1357,69 @@ export async function importStockReceiptFromXlsx(
   }
 
   return { applied, errors, warnings };
+}
+
+/** `picking` holatidagi barcha zakazlardan bonus qatorlarsiz mahsulot miqdorlari (SKU bo‘yicha). */
+export type PickingAggregateRow = {
+  product_id: number;
+  sku: string;
+  name: string;
+  unit: string | null;
+  barcode: string | null;
+  total_qty: string;
+  order_count: number;
+};
+
+export async function listPickingAggregateByProduct(
+  tenantId: number,
+  opts: { warehouse_id?: number; q?: string }
+): Promise<PickingAggregateRow[]> {
+  const whFrag =
+    opts.warehouse_id != null && opts.warehouse_id > 0
+      ? Prisma.sql`AND o.warehouse_id = ${opts.warehouse_id}`
+      : Prisma.empty;
+  const rawQ = opts.q?.trim().slice(0, 120) ?? "";
+  const searchFrag =
+    rawQ.length > 0
+      ? Prisma.sql`AND (p.sku ILIKE ${`%${rawQ}%`} OR p.name ILIKE ${`%${rawQ}%`} OR p.barcode ILIKE ${`%${rawQ}%`})`
+      : Prisma.empty;
+
+  const rows = await prisma.$queryRaw<
+    {
+      product_id: number;
+      sku: string;
+      name: string;
+      unit: string | null;
+      barcode: string | null;
+      total_qty: Prisma.Decimal;
+      order_count: number;
+    }[]
+  >`
+    SELECT oi.product_id,
+           p.sku,
+           p.name,
+           p.unit,
+           p.barcode,
+           SUM(oi.qty) AS total_qty,
+           COUNT(DISTINCT oi.order_id)::int AS order_count
+    FROM order_items oi
+    INNER JOIN orders o ON o.id = oi.order_id AND o.tenant_id = ${tenantId}
+    INNER JOIN products p ON p.id = oi.product_id AND p.tenant_id = ${tenantId}
+    WHERE o.status = 'picking'
+      AND oi.is_bonus = false
+      ${whFrag}
+      ${searchFrag}
+    GROUP BY oi.product_id, p.sku, p.name, p.unit, p.barcode
+    ORDER BY p.sku ASC
+  `;
+
+  return rows.map((r) => ({
+    product_id: r.product_id,
+    sku: r.sku,
+    name: r.name,
+    unit: r.unit,
+    barcode: r.barcode,
+    total_qty: r.total_qty.toString(),
+    order_count: r.order_count
+  }));
 }

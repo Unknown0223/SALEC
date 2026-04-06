@@ -10,7 +10,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { pickCityTerritoryHint } from "@/lib/city-territory-hint";
 import { mergeRefOptions } from "@/lib/merge-ref-options";
+import { mergeRefSelectOptions } from "@/lib/ref-select-options";
 import { cn } from "@/lib/utils";
 import { FilterSelect } from "@/components/ui/filter-select";
 
@@ -261,33 +263,80 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         sales_channels: string[];
         product_category_refs: string[];
         logistics_services: string[];
+        category_options?: { value: string; label: string }[];
+        client_type_options?: { value: string; label: string }[];
+        client_format_options?: { value: string; label: string }[];
+        sales_channel_options?: { value: string; label: string }[];
+        city_options?: { value: string; label: string }[];
+        region_options?: { value: string; label: string }[];
+        city_territory_hints?: Record<
+          string,
+          {
+            region_stored: string | null;
+            region_label: string | null;
+            zone_stored: string | null;
+            zone_label: string | null;
+            district_stored: string | null;
+            district_label: string | null;
+          }
+        >;
       }>(`/api/${tenantSlug}/clients/references`);
       return data;
     }
   });
 
-  const catOpts = useMemo(
-    () => mergeRefOptions(category, refsQ.data?.categories),
-    [category, refsQ.data?.categories]
-  );
-  const typeOpts = useMemo(
-    () => mergeRefOptions(clientTypeCode, refsQ.data?.client_type_codes),
-    [clientTypeCode, refsQ.data?.client_type_codes]
-  );
-  const terrOpts = useMemo(() => mergeRefOptions(region, refsQ.data?.regions), [region, refsQ.data?.regions]);
-  const formatOpts = useMemo(
-    () => mergeRefOptions(clientFormat, refsQ.data?.client_formats),
-    [clientFormat, refsQ.data?.client_formats]
-  );
-  const salesOpts = useMemo(
-    () => mergeRefOptions(salesChannel, refsQ.data?.sales_channels),
-    [salesChannel, refsQ.data?.sales_channels]
-  );
+  const catOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.category_options?.length) {
+      return mergeRefSelectOptions(category, d.category_options, d.categories);
+    }
+    return mergeRefOptions(category, d.categories).map((v) => ({ value: v, label: v }));
+  }, [category, refsQ.data]);
+  const typeOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.client_type_options?.length) {
+      return mergeRefSelectOptions(clientTypeCode, d.client_type_options, d.client_type_codes);
+    }
+    return mergeRefOptions(clientTypeCode, d.client_type_codes).map((v) => ({ value: v, label: v }));
+  }, [clientTypeCode, refsQ.data]);
+  const terrOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.region_options?.length) {
+      return mergeRefSelectOptions(region, d.region_options, d.regions);
+    }
+    return mergeRefOptions(region, d.regions).map((v) => ({ value: v, label: v }));
+  }, [region, refsQ.data]);
+  const formatOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.client_format_options?.length) {
+      return mergeRefSelectOptions(clientFormat, d.client_format_options, d.client_formats);
+    }
+    return mergeRefOptions(clientFormat, d.client_formats).map((v) => ({ value: v, label: v }));
+  }, [clientFormat, refsQ.data]);
+  const salesOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.sales_channel_options?.length) {
+      return mergeRefSelectOptions(salesChannel, d.sales_channel_options, d.sales_channels);
+    }
+    return mergeRefOptions(salesChannel, d.sales_channels).map((v) => ({ value: v, label: v }));
+  }, [salesChannel, refsQ.data]);
   const prodCatOpts = useMemo(
     () => mergeRefOptions(productCategoryRef, refsQ.data?.product_category_refs),
     [productCategoryRef, refsQ.data?.product_category_refs]
   );
-  const cityOpts = useMemo(() => mergeRefOptions(city, refsQ.data?.cities), [city, refsQ.data?.cities]);
+  const cityOpts = useMemo(() => {
+    const d = refsQ.data;
+    if (!d) return [];
+    if (d.city_options?.length) {
+      return mergeRefSelectOptions(city, d.city_options, d.cities);
+    }
+    return mergeRefOptions(city, d.cities).map((v) => ({ value: v, label: v }));
+  }, [city, refsQ.data]);
   const distOpts = useMemo(() => mergeRefOptions(district, refsQ.data?.districts), [district, refsQ.data?.districts]);
   const neiOpts = useMemo(
     () => mergeRefOptions(neighborhood, refsQ.data?.neighborhoods),
@@ -298,6 +347,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     () => mergeRefOptions(logisticsService, refsQ.data?.logistics_services),
     [logisticsService, refsQ.data?.logistics_services]
   );
+
+  const cityHint = useMemo(
+    () => pickCityTerritoryHint(refsQ.data?.city_territory_hints, city),
+    [refsQ.data?.city_territory_hints, city]
+  );
+
+  const onCitySelect = (next: string) => {
+    setCity(next);
+    const h = pickCityTerritoryHint(refsQ.data?.city_territory_hints, next);
+    if (!h) return;
+    if (h.region_stored) setRegion(h.region_stored);
+    if (h.zone_stored) setZone(h.zone_stored);
+    if (h.district_stored) setDistrict(h.district_stored);
+  };
 
   useEffect(() => {
     const client = clientQ.data;
@@ -343,6 +406,19 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     setZone(client.zone ?? "");
     setAgentSlots(buildAgentSlots(client));
   }, [clientQ.data]);
+
+  useEffect(() => {
+    const client = clientQ.data;
+    const hints = refsQ.data?.city_territory_hints;
+    if (!client || !hints) return;
+    const c = client.city?.trim();
+    if (!c) return;
+    const h = pickCityTerritoryHint(hints, c);
+    if (!h) return;
+    if (h.region_stored) setRegion(h.region_stored);
+    if (h.zone_stored) setZone(h.zone_stored);
+    if (h.district_stored) setDistrict(h.district_stored);
+  }, [clientQ.data?.id, refsQ.data?.city_territory_hints]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -622,91 +698,90 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
             </section>
 
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
-              <Caption variant="pick">Spravochnikdan tanlanadi</Caption>
+              <Caption variant="pick">Справочники</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Ro‘yxatlarni administrator{" "}
-                <SpravochnikAdminLink href="/settings/spravochnik/client-lists">mijoz spravochniklari</SpravochnikAdminLink>{" "}
-                (toifa, tuman, mahalla, zona, logistika va boshqalar) va{" "}
-                <SpravochnikAdminLink href="/settings/territories">kompaniya hududlari</SpravochnikAdminLink>{" "}
-                bo‘limlarida to‘ldiradi.
+                Списки заполняет администратор в{" "}
+                <SpravochnikAdminLink href="/settings/spravochnik/client-lists">справочниках клиента</SpravochnikAdminLink>{" "}
+                (категория, район, махалля, зона, логистика и др.) и в{" "}
+                <SpravochnikAdminLink href="/settings/territories">территориях компании</SpravochnikAdminLink>.
               </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Toifa</Label>
-                    <SpravochnikAdminLink href="/settings/client-categories">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Категория</Label>
+                    <SpravochnikAdminLink href="/settings/client-categories">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Toifa"
-                    aria-label="Toifa"
+                    emptyLabel="Категория"
+                    aria-label="Категория"
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    {catOpts.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    {catOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Tur (kod)</Label>
-                    <SpravochnikAdminLink href="/settings/client-types">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Тип</Label>
+                    <SpravochnikAdminLink href="/settings/client-types">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Tur (kod)"
-                    aria-label="Tur (kod)"
+                    emptyLabel="Тип"
+                    aria-label="Тип"
                     value={clientTypeCode}
                     onChange={(e) => setClientTypeCode(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    {typeOpts.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    {typeOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Teritoriya</Label>
-                    <SpravochnikAdminLink href="/settings/territories">Hududlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Область</Label>
+                    <SpravochnikAdminLink href="/settings/territories">Территории</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Teritoriya"
-                    aria-label="Teritoriya"
+                    emptyLabel="Область"
+                    aria-label="Область"
                     value={region}
                     onChange={(e) => setRegion(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    {terrOpts.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    {terrOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Mijoz formati</Label>
-                    <SpravochnikAdminLink href="/settings/client-formats">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Формат клиента</Label>
+                    <SpravochnikAdminLink href="/settings/client-formats">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Mijoz formati"
-                    aria-label="Mijoz formati"
+                    emptyLabel="Формат клиента"
+                    aria-label="Формат клиента"
                     value={clientFormat}
                     onChange={(e) => setClientFormat(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    {formatOpts.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    {formatOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
@@ -715,42 +790,57 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
             </section>
 
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
-              <Caption>Manzil (batafsil, ixtiyoriy)</Caption>
+              <Caption>Адрес (детально, необязательно)</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Oldindan ro‘yxat:{" "}
-                <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">mijoz spravochniklari</SpravochnikAdminLink>
-                . Mavjud mijozlardagi qiymatlar ham tanlovga qo‘shiladi.
+                Список задаётся в{" "}
+                <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">справочниках клиента</SpravochnikAdminLink>
+                ; значения из существующих клиентов тоже попадают в список. При выборе города область и зона подставляются из дерева
+                территорий (если оно настроено).
               </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Shahar (gorod)</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Город (код в БД)</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Shahar"
-                    aria-label="Shahar"
+                    emptyLabel="Город"
+                    aria-label="Город"
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
+                    onChange={(e) => onCitySelect(e.target.value)}
                     disabled={mutation.isPending}
                   >
-                    {cityOpts.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
+                    {cityOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
+                  {cityHint ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      По дереву территорий: <span className="font-medium text-foreground">область</span> —{" "}
+                      {cityHint.region_label ?? cityHint.region_stored ?? "—"};{" "}
+                      {(cityHint.district_label ?? cityHint.district_stored)?.trim() ? (
+                        <>
+                          <span className="font-medium text-foreground">район</span> —{" "}
+                          {cityHint.district_label ?? cityHint.district_stored};{" "}
+                        </>
+                      ) : null}
+                      <span className="font-medium text-foreground">зона</span> —{" "}
+                      {cityHint.zone_label ?? cityHint.zone_stored ?? "—"}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Tuman</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Район</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-district">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Tuman"
-                    aria-label="Tuman"
+                    emptyLabel="Район"
+                    aria-label="Район"
                     value={district}
                     onChange={(e) => setDistrict(e.target.value)}
                     disabled={mutation.isPending}
@@ -764,13 +854,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Mahalla</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Махалля</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-neighborhood">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Mahalla"
-                    aria-label="Mahalla"
+                    emptyLabel="Махалля"
+                    aria-label="Махалля"
                     value={neighborhood}
                     onChange={(e) => setNeighborhood(e.target.value)}
                     disabled={mutation.isPending}
@@ -784,13 +874,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Zona</Label>
-                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-zone">Qiymatlar</SpravochnikAdminLink>
+                    <Label className="mb-0">Зона</Label>
+                    <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-zone">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect
                     className={cn(selectCls, "min-w-0 max-w-none")}
-                    emptyLabel="Zona"
-                    aria-label="Zona"
+                    emptyLabel="Зона"
+                    aria-label="Зона"
                     value={zone}
                     onChange={(e) => setZone(e.target.value)}
                     disabled={mutation.isPending}
@@ -803,11 +893,11 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   </FilterSelect>
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label htmlFor="ce-str">Ko‘cha</Label>
+                  <Label htmlFor="ce-str">Улица</Label>
                   <Input id="ce-str" value={street} onChange={(e) => setStreet(e.target.value)} disabled={mutation.isPending} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-house">Uy</Label>
+                  <Label htmlFor="ce-house">Дом</Label>
                   <Input
                     id="ce-house"
                     value={houseNumber}
@@ -816,7 +906,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-apt">Xonadon</Label>
+                  <Label htmlFor="ce-apt">Квартира</Label>
                   <Input
                     id="ce-apt"
                     value={apartment}
@@ -825,7 +915,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label htmlFor="ce-gps">GPS matn</Label>
+                  <Label htmlFor="ce-gps">Текст GPS</Label>
                   <Input id="ce-gps" value={gpsText} onChange={(e) => setGpsText(e.target.value)} disabled={mutation.isPending} />
                 </div>
               </div>
@@ -834,15 +924,14 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
 
           <div className="flex flex-col gap-6">
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
-              <Caption variant="write">Xarita</Caption>
+              <Caption variant="write">Карта</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Oldindan ko‘rinish — OpenStreetMap (brauzer konsoli toza). Aniq nuqta uchun kenglik/uzunlik kiriting.
-                Yandex — qidiruv va pastdagi havola.
+                Предпросмотр — OpenStreetMap. Для точки на карте укажите широту и долготу. Поиск по адресу — Yandex (поле и ссылка ниже).
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
                 <Input
                   className={cn(inputCls, "sm:flex-1")}
-                  placeholder="Manzil yoki obyekt (Yandex da qidirish)"
+                  placeholder="Адрес или объект (поиск в Yandex)"
                   value={mapSearchText}
                   onChange={(e) => setMapSearchText(e.target.value)}
                   disabled={mutation.isPending}
@@ -865,12 +954,12 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     window.open(`https://yandex.com/maps/?text=${encodeURIComponent(t)}`, "_blank", "noopener,noreferrer");
                   }}
                 >
-                  Qidirish
+                  Поиск
                 </Button>
               </div>
               <div className="relative mt-3 overflow-hidden rounded-lg border bg-muted/30">
                 <iframe
-                  title="Xarita — OpenStreetMap"
+                  title="Карта — OpenStreetMap"
                   src={mapEmbedUrl}
                   width="100%"
                   height={420}
@@ -880,13 +969,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 />
                 {!mapOk ? (
                   <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-background/95 px-2 py-1.5 text-center text-[11px] text-muted-foreground shadow-sm ring-1 ring-border/60">
-                    Aniq nuqta: pastdagi kenglik va uzunlikni kiriting
+                    Точка на карте: введите широту и долготу ниже
                   </div>
                 ) : null}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <div className="grid gap-1">
-                  <Label htmlFor="ce-lat">Kenglik</Label>
+                  <Label htmlFor="ce-lat">Широта</Label>
                   <Input
                     id="ce-lat"
                     inputMode="decimal"
@@ -896,7 +985,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   />
                 </div>
                 <div className="grid gap-1">
-                  <Label htmlFor="ce-lon">Uzunlik</Label>
+                  <Label htmlFor="ce-lon">Долгота</Label>
                   <Input
                     id="ce-lon"
                     inputMode="decimal"
@@ -917,7 +1006,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   }}
                   disabled={mutation.isPending}
                 >
-                  Koordinatalarni tozalash
+                  Очистить координаты
                 </Button>
                 <a
                   href={yandexMapsHref}
@@ -925,7 +1014,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   rel="noopener noreferrer"
                   className="inline-flex items-center text-sm text-primary underline-offset-4 hover:underline"
                 >
-                  {mapOk ? "To‘liq xaritada ochish" : "Yandex xaritasi (yangi oyna)"}
+                  {mapOk ? "Открыть на полной карте" : "Яндекс.Карты (новая вкладка)"}
                 </a>
               </div>
             </section>
@@ -1080,9 +1169,9 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   onChange={(e) => setSalesChannel(e.target.value)}
                   disabled={mutation.isPending}
                 >
-                  {salesOpts.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
+                  {salesOpts.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
                     </option>
                   ))}
                 </FilterSelect>

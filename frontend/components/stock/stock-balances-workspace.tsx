@@ -178,6 +178,28 @@ function formatMoney(s: string, currency: string): string {
   }
 }
 
+function parseBalanceQty(s: string): number {
+  const n = Number.parseFloat(s.replace(",", "."));
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+/** Jadval qatori: nol qoldiq, manfiy «доступно», barchasi rezervda — tez vizual ajratish. */
+function stockBalanceRowClass(row: { qty: string; available_qty: string }): string {
+  const q = parseBalanceQty(row.qty);
+  const a = parseBalanceQty(row.available_qty);
+  const base = "border-b border-border/70";
+  if (Number.isFinite(a) && a < 0) {
+    return cn(base, "bg-destructive/10 hover:bg-destructive/15");
+  }
+  if (Number.isFinite(q) && q <= 0 && (!Number.isFinite(a) || a <= 0)) {
+    return cn(base, "bg-muted/35 hover:bg-muted/45");
+  }
+  if (Number.isFinite(a) && a === 0 && Number.isFinite(q) && q > 0) {
+    return cn(base, "bg-amber-500/10 hover:bg-amber-500/18");
+  }
+  return cn(base, "hover:bg-muted/20");
+}
+
 type Props = { tenantSlug: string };
 
 type BalanceSort = "name_asc" | "name_desc" | "available_desc";
@@ -655,7 +677,7 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
     <PageShell>
       <PageHeader
         title="Остатки товаров"
-        description="Сводные остатки по выбранному типу складов. Доступно = факт − резерв."
+        description="Сводные остатки по выбранному типу складов. Доступно = факт − резерв. Подсветка строк: серый — нулевой остаток; янтарный — нет доступного при положительном факте (резерв); красный — отрицательное доступно."
         actions={
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             {PURPOSE_TABS.map((t) => (
@@ -1003,10 +1025,7 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               <>
                 {(balancesQ.data as Extract<StockBalancesPayload, { view: "summary" }>).data.map(
                   (row) => (
-                    <tr
-                      key={row.product_id}
-                      className="border-b border-border/70 hover:bg-muted/20"
-                    >
+                    <tr key={row.product_id} className={stockBalanceRowClass(row)}>
                       {visibleCols.map((colId) => (
                         <td
                           key={colId}
@@ -1061,10 +1080,7 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
                 {(
                   balancesQ.data as Extract<StockBalancesPayload, { view: "valuation" }>
                 ).data.map((row) => (
-                  <tr
-                    key={row.product_id}
-                    className="border-b border-border/70 hover:bg-muted/20"
-                  >
+                  <tr key={row.product_id} className={stockBalanceRowClass(row)}>
                     {visibleCols.map((colId) => (
                       <td
                         key={colId}
@@ -1118,10 +1134,7 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
                 {(
                   balancesQ.data as Extract<StockBalancesPayload, { view: "by_warehouse" }>
                 ).data.map((row) => (
-                  <tr
-                    key={`${row.warehouse_id}-${row.product_id}`}
-                    className="border-b border-border/70 hover:bg-muted/20"
-                  >
+                  <tr key={`${row.warehouse_id}-${row.product_id}`} className={stockBalanceRowClass(row)}>
                     {visibleCols.map((colId) => (
                       <td
                         key={colId}

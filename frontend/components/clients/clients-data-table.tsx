@@ -1,22 +1,23 @@
 "use client";
 
 import type { ClientRow } from "@/lib/client-types";
+import type { ClientRefDisplayMaps } from "@/lib/client-ref-display-maps";
+import { pickCityTerritoryHint } from "@/lib/city-territory-hint";
 import {
   displayAddress,
   displayAgentDay,
   displayAgentName,
-  displayCityCode,
-  displayClientCategory,
-  displayClientType,
   displayExpeditorPhone,
-  displayFormatCode,
   displayLegalName,
   displayPinfl,
-  displayTradeChannel,
   getClientSlotsWithDataInRows,
   getVisitWeekdaysForSlot,
   parseGpsText
 } from "@/lib/client-column-display";
+import {
+  CLIENT_COLUMN_TO_SORT,
+  type ClientSortField
+} from "@/lib/client-list-sort";
 import {
   CLIENT_TABLE_COLUMNS,
   getDefaultColumnVisibility,
@@ -26,7 +27,7 @@ import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
-import { Pencil, UserRound } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, UserRound } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef } from "react";
@@ -37,6 +38,8 @@ type Props = {
   visibility: Record<string, boolean>;
   /** `useUserTablePrefs.visibleColumnOrder` — Amallar ustuni avtomatik qo‘shiladi */
   orderedVisibleColumnIds?: string[];
+  /** Spravochnik kodlari o‘rniga nom chiqarish */
+  refDisplayMaps?: ClientRefDisplayMaps;
   onEdit: (row: ClientRow) => void;
   /** Guruh amallari: birinchi ustunda tanlash */
   bulkSelect?: boolean;
@@ -44,6 +47,10 @@ type Props = {
   onToggleRow?: (id: number, selected: boolean) => void;
   /** Joriy sahifadagi barcha qatorlarni tanlash / bekor qilish */
   onTogglePage?: (selectAll: boolean) => void;
+  /** Server tartiblash: ustun sarlavhasini bosish */
+  sortField?: ClientSortField;
+  sortOrder?: "asc" | "desc";
+  onSortByColumn?: (columnId: ClientColumnId) => void;
 };
 
 /** Bo‘sh qiymat — faqat chiziq (—) */
@@ -61,6 +68,18 @@ function TxtMono(v: string | null | undefined): ReactNode {
   const t = v?.trim();
   if (!t) return <Dash />;
   return <span className="font-mono text-xs">{t}</span>;
+}
+
+function displayMapped(raw: string | null | undefined, map?: Record<string, string>): string | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  return map?.[t] ?? t;
+}
+
+function territoryHintForRow(maps: ClientRefDisplayMaps | undefined, city: string | null | undefined) {
+  const hints = maps?.cityTerritoryHints;
+  if (!hints) return null;
+  return pickCityTerritoryHint(hints, city ?? "");
 }
 
 function agentSlotFromColumnId(colId: string): number | null {
@@ -95,13 +114,17 @@ function WeekdayTags({ days }: { days: number[] }) {
   );
 }
 
-function cellContent(row: ClientRow, colId: ClientColumnId): ReactNode {
+function cellContent(row: ClientRow, colId: ClientColumnId, maps?: ClientRefDisplayMaps): ReactNode {
   const dash = <Dash />;
 
   switch (colId) {
     case "name": {
       const t = row.name?.trim();
       return t ? <span className="font-medium">{t}</span> : dash;
+    }
+    case "client_ref": {
+      const ref = row.client_code?.trim();
+      return TxtMono(ref && ref.length > 0 ? ref : `#${row.id}`);
     }
     case "legal_name":
       return Txt(displayLegalName(row));
@@ -117,22 +140,37 @@ function cellContent(row: ClientRow, colId: ClientColumnId): ReactNode {
       return Txt(row.inn);
     case "pinfl":
       return Txt(displayPinfl(row));
-    case "trade_channel_code":
-      return Txt(displayTradeChannel(row));
+    case "trade_channel_code": {
+      const sc = row.sales_channel?.trim();
+      if (sc) return Txt(maps?.salesChannel?.[sc] ?? sc);
+      return Txt(row.logistics_service);
+    }
     case "client_category_code":
-      return Txt(displayClientCategory(row));
+      return Txt(displayMapped(row.category, maps?.category));
     case "client_type_code":
-      return Txt(displayClientType(row));
+      return Txt(displayMapped(row.client_type_code, maps?.clientType));
     case "format_code":
-      return Txt(displayFormatCode(row));
-    case "client_region":
-      return Txt(row.region);
-    case "client_district":
-      return Txt(row.district);
-    case "client_zone":
-      return Txt(row.zone);
+      return Txt(displayMapped(row.client_format, maps?.clientFormat));
+    case "client_region": {
+      const fromDb = displayMapped(row.region, maps?.region);
+      if (fromDb) return Txt(fromDb);
+      const h = territoryHintForRow(maps, row.city);
+      return Txt(h?.region_label ?? h?.region_stored ?? null);
+    }
+    case "client_district": {
+      const fromDb = displayMapped(row.district, maps?.district);
+      if (fromDb) return Txt(fromDb);
+      const h = territoryHintForRow(maps, row.city);
+      return Txt(h?.district_label ?? h?.district_stored ?? null);
+    }
+    case "client_zone": {
+      const fromDb = displayMapped(row.zone, maps?.zone);
+      if (fromDb) return Txt(fromDb);
+      const h = territoryHintForRow(maps, row.city);
+      return Txt(h?.zone_label ?? h?.zone_stored ?? null);
+    }
     case "city_code":
-      return Txt(displayCityCode(row));
+      return Txt(displayMapped(row.city, maps?.city));
     case "latitude": {
       const explicit =
         typeof row.latitude === "string" && row.latitude.trim() ? row.latitude.trim() : null;
@@ -168,11 +206,15 @@ export function ClientsDataTable({
   rows,
   visibility,
   orderedVisibleColumnIds,
+  refDisplayMaps,
   onEdit,
   bulkSelect = false,
   selectedIds,
   onToggleRow,
-  onTogglePage
+  onTogglePage,
+  sortField,
+  sortOrder,
+  onSortByColumn
 }: Props) {
   const headerCbRef = useRef<HTMLInputElement>(null);
 
@@ -220,8 +262,8 @@ export function ClientsDataTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1200px] border-separate border-spacing-0 text-left text-sm">
-        <thead className="border-b bg-muted/60">
+      <table className="w-max min-w-full max-w-none border-separate border-spacing-0 text-left text-sm table-auto">
+        <thead className="border-b-2 border-border bg-muted/70">
           <tr>
             {bulkSelect ? (
               <th className="w-10 whitespace-nowrap px-2 py-2">
@@ -235,11 +277,41 @@ export function ClientsDataTable({
                 />
               </th>
             ) : null}
-            {cols.map((c) => (
-              <th key={c.id} className="whitespace-nowrap px-2 py-2 font-medium">
-                {c.label}
-              </th>
-            ))}
+            {cols.map((c) => {
+              const sortKey = CLIENT_COLUMN_TO_SORT[c.id];
+              const interactive = Boolean(sortKey && onSortByColumn);
+              return (
+                <th
+                  key={c.id}
+                  className="whitespace-nowrap px-2 py-2.5 text-left align-bottom text-xs !font-bold leading-tight text-foreground"
+                >
+                  {interactive ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        "-mx-1 inline-flex max-w-none shrink-0 items-center gap-1 rounded px-1 py-0.5 text-left text-xs !font-bold hover:bg-muted/80",
+                        sortField === sortKey ? "text-foreground" : "text-muted-foreground"
+                      )}
+                      onClick={() => onSortByColumn!(c.id)}
+                      title="Tartiblash"
+                    >
+                      <span className="text-left">{c.label}</span>
+                      {sortField === sortKey ? (
+                        sortOrder === "asc" ? (
+                          <ArrowUp className="size-3.5 shrink-0 text-primary" strokeWidth={2.5} aria-hidden />
+                        ) : (
+                          <ArrowDown className="size-3.5 shrink-0 text-primary" strokeWidth={2.5} aria-hidden />
+                        )
+                      ) : (
+                        <ArrowUpDown className="size-3.5 shrink-0 opacity-40" aria-hidden />
+                      )}
+                    </button>
+                  ) : (
+                    c.label
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -298,7 +370,7 @@ export function ClientsDataTable({
                         </Link>
                       </TableRowActionGroup>
                     ) : (
-                      cellContent(row, c.id)
+                      cellContent(row, c.id, refDisplayMaps)
                     )}
                   </td>
                 ))}

@@ -18,11 +18,14 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "audit:retention": "tsx scripts/audit-retention.ts",
+    "audit:territory-codes": "tsx scripts/audit-territory-codes.ts",
     "import:refs": "tsx scripts/import-reference-bundle.ts",
     "import:staff-csv": "tsx scripts/import-staff-from-csv.ts",
     "ensure:demo-logins": "tsx scripts/ensure-demo-staff-login.ts",
     "import:once": "tsx scripts/import-once.ts",
-    "import:cities-xlsx": "tsx scripts/import-cities-xlsx.ts"
+    "import:cities-xlsx": "tsx scripts/import-cities-xlsx.ts",
+    "import:territory-excel": "tsx scripts/import-territory-excel.ts",
+    "territory:sync-codes": "tsx scripts/sync-territory-codes.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

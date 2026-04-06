@@ -45,3 +45,5 @@ Quyidagi jadval **eng ko‘p uchraydigan** naqshlarni beradi; aniq marshrut uchu
 ## Frontend
 
 Dashboard UI rollarni `useEffectiveRole` orqali filtrlashi mumkin; API baribir 403 qaytaradi.
+
+**Sozlamalar katalogi** (`frontend/lib/settings-structure.ts`): ixtiyoriy `requiredRoles` — `SettingsShell` yon panelida punktlarni yashirish uchun (masalan, faqat `admin`: Аудит, Должности, должности веб-сотрудников). `/settings` bosh sahifasidagi tezkor «Должности» havolasi ham admin uchun.

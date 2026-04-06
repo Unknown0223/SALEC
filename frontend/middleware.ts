@@ -43,6 +43,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/visits") ||
     pathname.startsWith("/tasks") ||
     pathname.startsWith("/routes") ||
+    pathname.startsWith("/territories") ||
+    pathname.startsWith("/expenses") ||
     pathname.startsWith("/settings");
 
   if (protectedPath && !hasFlag) {
@@ -84,6 +86,10 @@ export const config = {
     "/tasks/:path*",
     "/routes",
     "/routes/:path*",
+    "/territories",
+    "/territories/:path*",
+    "/expenses",
+    "/expenses/:path*",
     "/settings",
     "/settings/:path*",
     "/login",

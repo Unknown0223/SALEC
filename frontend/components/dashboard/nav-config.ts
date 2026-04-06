@@ -7,6 +7,8 @@ export const dashboardStockNav: { sectionTitle: string; items: NavItem[] } = {
   sectionTitle: "Склад",
   items: [
     { href: "/stock", label: "Приход и остаток" },
+    { href: "/stock/picking", label: "Комплектация" },
+    { href: "/stock/correction", label: "Корректировка склада", roles: ["admin"] },
     { href: "/stock/receipts", label: "Поступление" },
     { href: "/stock/warehouses", label: "Склад (список)" },
     { href: "/stock/balances", label: "Остатки товаров" },

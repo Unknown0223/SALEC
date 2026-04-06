@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { getErrorCode } from "../../lib/app-error";
 import { prisma } from "../../config/database";
@@ -428,7 +428,8 @@ export async function createOrder(
     orderedProductIds.add(it.product_id);
   }
 
-  const number = `O-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  /** Vaqtincha noyob raqam; tranzaksiya ichida `String(id)` ga almashtiriladi (qisqa, № bilan mos). */
+  const tempOrderNumber = `__${tenantId}_${Date.now()}_${randomBytes(5).toString("hex")}`;
 
   const tenantRow = await prisma.tenant.findUnique({
     where: { id: tenantId },
@@ -620,10 +621,10 @@ export async function createOrder(
     const orderType = normalizeOrderType(input.order_type);
     const statusForType = orderType === "order" ? "new" : "new";
 
-    return tx.order.create({
+    const created = await tx.order.create({
       data: {
         tenant_id: tenantId,
-        number,
+        number: tempOrderNumber,
         client_id: input.client_id,
         warehouse_id: input.warehouse_id,
         agent_id: input.agent_id ?? null,
@@ -648,6 +649,11 @@ export async function createOrder(
           ]
         }
       },
+      include: orderDetailInclude
+    });
+    return tx.order.update({
+      where: { id: created.id },
+      data: { number: String(created.id) },
       include: orderDetailInclude
     });
   });

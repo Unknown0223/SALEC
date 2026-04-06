@@ -125,9 +125,38 @@ const bulkActiveBodySchema = z.object({
   is_active: z.boolean()
 });
 
+const CLIENT_LIST_ALLOWED_SORT = new Set<string>([
+  "name",
+  "phone",
+  "id",
+  "created_at",
+  "region",
+  "legal_name",
+  "address",
+  "responsible_person",
+  "landmark",
+  "inn",
+  "client_pinfl",
+  "sales_channel",
+  "category",
+  "client_type_code",
+  "client_format",
+  "district",
+  "neighborhood",
+  "zone",
+  "city",
+  "client_code",
+  "latitude",
+  "longitude"
+]);
+
 function parseClientListQuery(q: Record<string, string | undefined>): ListClientsQuery {
   const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
-  const limitNum = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50));
+  const mapMode = q.map === "1" || q.map === "true";
+  const maxLimit = mapMode ? 4000 : 100;
+  const defaultLimit = mapMode ? 2500 : 50;
+  const parsedLimit = Number.parseInt(q.limit ?? String(defaultLimit), 10) || defaultLimit;
+  const limitNum = Math.min(maxLimit, Math.max(1, parsedLimit));
   const search = q.search?.trim() || undefined;
   let is_active: boolean | undefined;
   if (q.is_active === "true") is_active = true;
@@ -137,6 +166,7 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
   const district = q.district?.trim() || undefined;
   const neighborhood = q.neighborhood?.trim() || undefined;
   const zone = q.zone?.trim() || undefined;
+  const city = q.city?.trim() || undefined;
   const client_type_code = q.client_type_code?.trim() || undefined;
   const client_format = q.client_format?.trim() || undefined;
   const sales_channel = q.sales_channel?.trim() || undefined;
@@ -165,14 +195,12 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
     if (Number.isFinite(n) && n > 0) supervisor_user_id = n;
   }
   const sortRaw = q.sort?.trim();
-  const sort =
-    sortRaw === "phone" ||
-    sortRaw === "id" ||
-    sortRaw === "created_at" ||
-    sortRaw === "region"
-      ? sortRaw
+  const sort: NonNullable<ListClientsQuery["sort"]> =
+    sortRaw && CLIENT_LIST_ALLOWED_SORT.has(sortRaw)
+      ? (sortRaw as NonNullable<ListClientsQuery["sort"]>)
       : "name";
   const order = q.order === "desc" ? "desc" : "asc";
+  const has_coords = q.has_coords === "1" || q.has_coords === "true";
 
   return {
     page: pageNum,
@@ -184,6 +212,7 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
     district,
     neighborhood,
     ...(zone ? { zone } : {}),
+    ...(city ? { city } : {}),
     ...(client_type_code ? { client_type_code } : {}),
     ...(client_format ? { client_format } : {}),
     ...(sales_channel ? { sales_channel } : {}),
@@ -196,7 +225,8 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
     ...(created_to ? { created_to } : {}),
     ...(supervisor_user_id !== undefined ? { supervisor_user_id } : {}),
     sort,
-    order
+    order,
+    ...(has_coords ? { has_coords: true } : {})
   };
 }
 
@@ -277,15 +307,44 @@ export async function registerClientRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const file = await request.file();
-      if (!file) {
+      let buf: Buffer | null = null;
+      let sheetName: string | undefined;
+      let headerRowIndex: number | undefined;
+      let columnMap: Record<string, number> | undefined;
+
+      const parts = request.parts();
+      for await (const part of parts) {
+        if (part.type === "file") {
+          buf = await part.toBuffer();
+        } else if (part.type === "field") {
+          if (part.fieldname === "sheetName") {
+            const s = String(part.value ?? "").trim();
+            if (s) sheetName = s;
+          } else if (part.fieldname === "headerRowIndex") {
+            const n = Number.parseInt(String(part.value ?? ""), 10);
+            if (Number.isFinite(n) && n >= 0) headerRowIndex = n;
+          } else if (part.fieldname === "columnMap") {
+            try {
+              const parsed = JSON.parse(String(part.value ?? "{}")) as unknown;
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                columnMap = parsed as Record<string, number>;
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+
+      if (!buf || buf.length === 0) {
         return reply.status(400).send({ error: "NoFile" });
       }
-      const buf = await file.toBuffer();
-      if (buf.length === 0) {
-        return reply.status(400).send({ error: "EmptyFile" });
-      }
-      const result = await importClientsFromXlsx(request.tenant!.id, buf);
+
+      const result = await importClientsFromXlsx(request.tenant!.id, buf, {
+        sheetName,
+        headerRowIndex,
+        columnMap
+      });
       return reply.send(result);
     }
   );

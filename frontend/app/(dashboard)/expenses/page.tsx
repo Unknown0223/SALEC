@@ -51,11 +51,11 @@ export default function ExpensesPage() {
         ...(statusFilter !== "all" ? { status: statusFilter } : {}),
       });
       const [data, pnlData] = await Promise.all([
-        apiFetch(`/api/${tenant}/expenses?${params}`),
-        apiFetch(`/api/${tenant}/expenses/pnl`)
+        apiFetch<{ data?: Expense[]; total?: number }>(`/api/${tenant}/expenses?${params}`),
+        apiFetch<PnlReport>(`/api/${tenant}/expenses/pnl`)
       ]);
-      setExpenses(data.data || []);
-      setTotal(data.total || 0);
+      setExpenses(data.data ?? []);
+      setTotal(data.total ?? 0);
       setPnl(pnlData);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -87,7 +87,13 @@ export default function ExpensesPage() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle>Chiqimlar ro'yxati</CardTitle>
-            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <Select
+              value={statusFilter}
+              onValueChange={(v: string) => {
+                setStatusFilter(v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Barchasi</SelectItem>

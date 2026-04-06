@@ -1,7 +1,10 @@
 "use client";
 
 import { ClientsDataTable } from "@/components/clients/clients-data-table";
-import { ClientsTableToolbar } from "@/components/clients/clients-table-toolbar";
+import {
+  ClientsTableToolbar,
+  type ClientsToolbarFilterVisibility
+} from "@/components/clients/clients-table-toolbar";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
@@ -10,25 +13,38 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ClientRow } from "@/lib/client-types";
+import { CLIENT_COLUMN_TO_SORT, type ClientSortField } from "@/lib/client-list-sort";
 import {
   CLIENT_TABLE_COLUMNS,
   CLIENT_TABLE_PREF_COLUMN_IDS,
   getDefaultColumnVisibility,
   getDefaultHiddenClientColumnIds,
-  loadColumnVisibility
+  loadColumnVisibility,
+  type ClientColumnId
 } from "@/lib/client-table-columns";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { CLIENT_IMPORT_MAX_FILE_BYTES } from "@/lib/client-import-limits";
 import { downloadClientsCsvPage } from "@/lib/clients-csv-export";
+import { mergeRefOptions } from "@/lib/merge-ref-options";
+import {
+  dedupeRefSelectOptionsByTerritoryDisplayName,
+  mergeRefSelectOptions,
+  optionsToValueLabelMap
+} from "@/lib/ref-select-options";
 import { api } from "@/lib/api";
+import { clientsFilterDebugEnabled, logClientsFilters } from "@/lib/clients-filter-debug";
+import {
+  ClientImportMappingDialog,
+  type ClientImportMappingPayload
+} from "@/components/clients/client-import-mapping-dialog";
 import { QueryErrorState } from "@/components/common/query-error-state";
 import { getUserFacingError } from "@/lib/error-utils";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ClientsResponse = {
   data: ClientRow[];
@@ -37,10 +53,13 @@ type ClientsResponse = {
   limit: number;
 };
 
+type ClientRefOptionDto = { value: string; label: string };
+
 type ClientReferencesResponse = {
   categories: string[];
   client_type_codes: string[];
   regions: string[];
+  cities: string[];
   districts: string[];
   neighborhoods: string[];
   zones: string[];
@@ -48,6 +67,23 @@ type ClientReferencesResponse = {
   sales_channels: string[];
   product_category_refs: string[];
   logistics_services: string[];
+  category_options?: ClientRefOptionDto[];
+  client_type_options?: ClientRefOptionDto[];
+  client_format_options?: ClientRefOptionDto[];
+  sales_channel_options?: ClientRefOptionDto[];
+  city_options?: ClientRefOptionDto[];
+  region_options?: ClientRefOptionDto[];
+  city_territory_hints?: Record<
+    string,
+    {
+      region_stored: string | null;
+      region_label: string | null;
+      zone_stored: string | null;
+      zone_label: string | null;
+      district_stored: string | null;
+      district_label: string | null;
+    }
+  >;
 };
 
 type FilterBundle = {
@@ -55,21 +91,13 @@ type FilterBundle = {
   activeFilter: "all" | "true" | "false";
   categoryFilter: string;
   regionFilter: string;
-  districtFilter: string;
-  neighborhoodFilter: string;
-  zoneFilter: string;
+  cityFilter: string;
   clientTypeFilter: string;
   clientFormatFilter: string;
   salesChannelFilter: string;
   agentFilter: string;
   expeditorFilter: string;
-  supervisorFilter: string;
-  visitWeekdayFilter: string;
-  innFilter: string;
-  phoneFilter: string;
-  createdFromFilter: string;
-  createdToFilter: string;
-  sortField: "name" | "phone" | "id" | "created_at" | "region";
+  sortField: ClientSortField;
   sortOrder: "asc" | "desc";
 };
 
@@ -78,20 +106,12 @@ function appendClientsFilterParams(params: URLSearchParams, p: FilterBundle) {
   if (p.activeFilter !== "all") params.set("is_active", p.activeFilter);
   if (p.categoryFilter.trim()) params.set("category", p.categoryFilter.trim());
   if (p.regionFilter.trim()) params.set("region", p.regionFilter.trim());
-  if (p.districtFilter.trim()) params.set("district", p.districtFilter.trim());
-  if (p.neighborhoodFilter.trim()) params.set("neighborhood", p.neighborhoodFilter.trim());
-  if (p.zoneFilter.trim()) params.set("zone", p.zoneFilter.trim());
+  if (p.cityFilter.trim()) params.set("city", p.cityFilter.trim());
   if (p.clientTypeFilter.trim()) params.set("client_type_code", p.clientTypeFilter.trim());
   if (p.clientFormatFilter.trim()) params.set("client_format", p.clientFormatFilter.trim());
   if (p.salesChannelFilter.trim()) params.set("sales_channel", p.salesChannelFilter.trim());
   if (p.agentFilter.trim()) params.set("agent_id", p.agentFilter.trim());
   if (p.expeditorFilter.trim()) params.set("expeditor_user_id", p.expeditorFilter.trim());
-  if (p.supervisorFilter.trim()) params.set("supervisor_user_id", p.supervisorFilter.trim());
-  if (p.visitWeekdayFilter.trim()) params.set("visit_weekday", p.visitWeekdayFilter.trim());
-  if (p.innFilter.trim()) params.set("inn", p.innFilter.trim());
-  if (p.phoneFilter.trim()) params.set("phone", p.phoneFilter.trim());
-  if (p.createdFromFilter.trim()) params.set("created_from", p.createdFromFilter.trim());
-  if (p.createdToFilter.trim()) params.set("created_to", p.createdToFilter.trim());
   params.set("sort", p.sortField);
   params.set("order", p.sortOrder);
 }
@@ -109,31 +129,43 @@ export default function ClientsPage() {
   const qc = useQueryClient();
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importMapOpen, setImportMapOpen] = useState(false);
+  const [importStagingFile, setImportStagingFile] = useState<File | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [regionFilter, setRegionFilter] = useState("");
-  const [districtFilter, setDistrictFilter] = useState("");
-  const [neighborhoodFilter, setNeighborhoodFilter] = useState("");
-  const [zoneFilter, setZoneFilter] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [clientTypeFilter, setClientTypeFilter] = useState("");
   const [clientFormatFilter, setClientFormatFilter] = useState("");
   const [salesChannelFilter, setSalesChannelFilter] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
   const [expeditorFilter, setExpeditorFilter] = useState("");
-  const [supervisorFilter, setSupervisorFilter] = useState("");
-  const [visitWeekdayFilter, setVisitWeekdayFilter] = useState("");
-  const [innFilter, setInnFilter] = useState("");
-  const [phoneFilter, setPhoneFilter] = useState("");
-  const [createdFromFilter, setCreatedFromFilter] = useState("");
-  const [createdToFilter, setCreatedToFilter] = useState("");
-  const [sortField, setSortField] = useState<"name" | "phone" | "id" | "created_at" | "region">("name");
+  const [sortField, setSortField] = useState<ClientSortField>("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const clientsPrefsMigrated = useRef(false);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      logClientsFilters("diag", { mode: "development", message: "filtr loglari yoqilgan" });
+      return;
+    }
+    if (typeof window === "undefined") return;
+    try {
+      if (localStorage.getItem("salesdoc.clients.filterDebug") === "1") return;
+      if (sessionStorage.getItem("salesdoc.clients.filterHint") === "1") return;
+      sessionStorage.setItem("salesdoc.clients.filterHint", "1");
+    } catch {
+      /* ignore */
+    }
+    console.info(
+      '[clients/filters] Diagnostika: localStorage.setItem("salesdoc.clients.filterDebug","1") keyin sahifani yangilang — har bir so‘rov konsolga chiqadi.'
+    );
+  }, []);
 
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
@@ -186,20 +218,12 @@ export default function ClientsPage() {
     activeFilter,
     categoryFilter,
     regionFilter,
-    districtFilter,
-    neighborhoodFilter,
-    zoneFilter,
+    cityFilter,
     clientTypeFilter,
     clientFormatFilter,
     salesChannelFilter,
     agentFilter,
     expeditorFilter,
-    supervisorFilter,
-    visitWeekdayFilter,
-    innFilter,
-    phoneFilter,
-    createdFromFilter,
-    createdToFilter,
     sortField,
     sortOrder
   };
@@ -212,29 +236,24 @@ export default function ClientsPage() {
     activeFilter,
     categoryFilter,
     regionFilter,
-    districtFilter,
-    neighborhoodFilter,
-    zoneFilter,
+    cityFilter,
     clientTypeFilter,
     clientFormatFilter,
     salesChannelFilter,
     agentFilter,
     expeditorFilter,
-    supervisorFilter,
-    visitWeekdayFilter,
-    innFilter,
-    phoneFilter,
-    createdFromFilter,
-    createdToFilter,
     sortField,
     sortOrder,
     tablePrefs.pageSize
   ]);
 
   const importMut = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (payload: { file: File } & ClientImportMappingPayload) => {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", payload.file);
+      fd.append("columnMap", JSON.stringify(payload.columnMap));
+      fd.append("sheetName", payload.sheetName);
+      fd.append("headerRowIndex", String(payload.headerRowIndex));
       const { data } = await api.post<{ created: number; errors: string[] }>(
         `/api/${tenantSlug}/clients/import`,
         fd
@@ -250,6 +269,8 @@ export default function ClientsPage() {
       const errPart =
         data.errors.length > 0 ? ` Xatolar (${data.errors.length}): ${data.errors.slice(0, 5).join("; ")}` : "";
       setImportMsg(`Qo‘shildi: ${data.created}.${errPart}`);
+      setImportMapOpen(false);
+      setImportStagingFile(null);
       if (importFileRef.current) importFileRef.current.value = "";
     },
     onError: (e: unknown) => {
@@ -316,20 +337,12 @@ export default function ClientsPage() {
       activeFilter,
       categoryFilter,
       regionFilter,
-      districtFilter,
-      neighborhoodFilter,
-      zoneFilter,
+      cityFilter,
       clientTypeFilter,
       clientFormatFilter,
       salesChannelFilter,
       agentFilter,
       expeditorFilter,
-      supervisorFilter,
-      visitWeekdayFilter,
-      innFilter,
-      phoneFilter,
-      createdFromFilter,
-      createdToFilter,
       sortField,
       sortOrder,
       tablePrefs.pageSize
@@ -341,10 +354,29 @@ export default function ClientsPage() {
         limit: String(tablePrefs.pageSize)
       });
       appendClientsFilterParams(params, filterBundle);
-      const { data: body } = await api.get<ClientsResponse>(
-        `/api/${tenantSlug}/clients?${params.toString()}`
-      );
-      return body;
+      const qs = params.toString();
+      logClientsFilters("request", {
+        tenantSlug,
+        url: `/api/${tenantSlug}/clients?${qs}`,
+        queryParams: Object.fromEntries(params.entries()),
+        filters: { ...filterBundle }
+      });
+      try {
+        const { data: body } = await api.get<ClientsResponse>(`/api/${tenantSlug}/clients?${qs}`);
+        logClientsFilters("response", {
+          total: body.total,
+          returnedRows: body.data.length,
+          page: body.page,
+          limit: body.limit
+        });
+        return body;
+      } catch (e) {
+        logClientsFilters("request_failed", {
+          queryParams: Object.fromEntries(params.entries()),
+          error: e instanceof Error ? e.message : String(e)
+        });
+        throw e;
+      }
     }
   });
 
@@ -356,6 +388,115 @@ export default function ClientsPage() {
       return data;
     }
   });
+
+  const refData = refsQ.data;
+
+  useEffect(() => {
+    if (!refData || !clientsFilterDebugEnabled()) return;
+    logClientsFilters("references_loaded", {
+      category_options: refData.category_options?.length ?? 0,
+      client_type_options: refData.client_type_options?.length ?? 0,
+      client_format_options: refData.client_format_options?.length ?? 0,
+      sales_channel_options: refData.sales_channel_options?.length ?? 0,
+      region_options: refData.region_options?.length ?? 0,
+      city_options: refData.city_options?.length ?? 0,
+      city_territory_hint_keys: Object.keys(refData.city_territory_hints ?? {}).length,
+      legacy_lists: {
+        regions: refData.regions?.length ?? 0,
+        districts: refData.districts?.length ?? 0,
+        zones: refData.zones?.length ?? 0,
+        cities: refData.cities?.length ?? 0
+      }
+    });
+  }, [refData]);
+
+  const categorySelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.category_options?.length) {
+      return mergeRefSelectOptions(categoryFilter, refData.category_options, refData.categories);
+    }
+    return mergeRefOptions(categoryFilter, refData.categories).map((v) => ({ value: v, label: v }));
+  }, [refData, categoryFilter]);
+
+  const clientTypeSelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.client_type_options?.length) {
+      return mergeRefSelectOptions(
+        clientTypeFilter,
+        refData.client_type_options,
+        refData.client_type_codes
+      );
+    }
+    return mergeRefOptions(clientTypeFilter, refData.client_type_codes).map((v) => ({ value: v, label: v }));
+  }, [refData, clientTypeFilter]);
+
+  const clientFormatSelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.client_format_options?.length) {
+      return mergeRefSelectOptions(
+        clientFormatFilter,
+        refData.client_format_options,
+        refData.client_formats
+      );
+    }
+    return mergeRefOptions(clientFormatFilter, refData.client_formats).map((v) => ({ value: v, label: v }));
+  }, [refData, clientFormatFilter]);
+
+  const salesChannelSelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.sales_channel_options?.length) {
+      return mergeRefSelectOptions(
+        salesChannelFilter,
+        refData.sales_channel_options,
+        refData.sales_channels
+      );
+    }
+    return mergeRefOptions(salesChannelFilter, refData.sales_channels).map((v) => ({ value: v, label: v }));
+  }, [refData, salesChannelFilter]);
+
+  const regionSelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.region_options?.length) {
+      return dedupeRefSelectOptionsByTerritoryDisplayName(
+        mergeRefSelectOptions(regionFilter, refData.region_options, refData.regions)
+      );
+    }
+    return dedupeRefSelectOptionsByTerritoryDisplayName(
+      mergeRefOptions(regionFilter, refData.regions).map((v) => ({ value: v, label: v }))
+    );
+  }, [refData, regionFilter]);
+
+  const citySelectOptions = useMemo(() => {
+    if (!refData) return [];
+    if (refData.city_options?.length) {
+      return mergeRefSelectOptions(cityFilter, refData.city_options, refData.cities);
+    }
+    return mergeRefOptions(cityFilter, refData.cities).map((v) => ({ value: v, label: v }));
+  }, [refData, cityFilter]);
+
+  const refDisplayMaps = useMemo(() => {
+    if (!refData) return undefined;
+    const strListToMap = (arr: string[] | undefined): Record<string, string> | undefined => {
+      if (!arr?.length) return undefined;
+      const m: Record<string, string> = {};
+      for (const s of arr) {
+        const t = s.trim();
+        if (t) m[t] = t;
+      }
+      return Object.keys(m).length ? m : undefined;
+    };
+    return {
+      category: optionsToValueLabelMap(refData.category_options),
+      clientType: optionsToValueLabelMap(refData.client_type_options),
+      clientFormat: optionsToValueLabelMap(refData.client_format_options),
+      salesChannel: optionsToValueLabelMap(refData.sales_channel_options),
+      city: optionsToValueLabelMap(refData.city_options),
+      region: optionsToValueLabelMap(refData.region_options),
+      district: strListToMap(refData.districts),
+      zone: strListToMap(refData.zones),
+      cityTerritoryHints: refData.city_territory_hints
+    };
+  }, [refData]);
 
   const agentsFilterQ = useQuery({
     queryKey: ["agents", tenantSlug, "clients-toolbar"],
@@ -383,23 +524,67 @@ export default function ClientsPage() {
     }
   });
 
-  const supervisorsFilterQ = useQuery({
-    queryKey: ["supervisors", tenantSlug, "clients-toolbar"],
-    enabled: Boolean(tenantSlug),
-    queryFn: async () => {
-      const { data } = await api.get<{
-        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
-      }>(`/api/${tenantSlug}/supervisors`);
-      return data.data
-        .filter((s) => s.is_active)
-        .map((s) => ({ id: s.id, name: s.fio, login: s.login }));
-    }
-  });
+  const filterVisibility: ClientsToolbarFilterVisibility = useMemo(
+    () => ({
+      category: categorySelectOptions.length > 0,
+      region: regionSelectOptions.length > 0,
+      city: citySelectOptions.length > 0,
+      clientType: clientTypeSelectOptions.length > 0,
+      clientFormat: clientFormatSelectOptions.length > 0,
+      salesChannel: salesChannelSelectOptions.length > 0,
+      agent: (agentsFilterQ.data ?? []).length > 0,
+      expeditor: (expeditorsFilterQ.data ?? []).length > 0
+    }),
+    [
+      categorySelectOptions,
+      regionSelectOptions,
+      citySelectOptions,
+      clientTypeSelectOptions,
+      clientFormatSelectOptions,
+      salesChannelSelectOptions,
+      agentsFilterQ.data,
+      expeditorsFilterQ.data
+    ]
+  );
 
   const rows = data?.data ?? [];
 
+  const handleSortByColumn = (columnId: ClientColumnId) => {
+    const api = CLIENT_COLUMN_TO_SORT[columnId];
+    if (!api) {
+      logClientsFilters("sort_skip", { columnId, reason: "no backend sort field" });
+      return;
+    }
+    const nextOrder = sortField === api ? (sortOrder === "asc" ? "desc" : "asc") : "asc";
+    logClientsFilters("sort_change", { columnId, sortField: api, order: nextOrder });
+    if (sortField === api) {
+      setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(api);
+      setSortOrder("asc");
+    }
+    setPage(1);
+  };
+
   return (
     <PageShell>
+      <ClientImportMappingDialog
+        open={importMapOpen}
+        onOpenChange={(next) => {
+          setImportMapOpen(next);
+          if (!next) {
+            setImportStagingFile(null);
+            if (importFileRef.current) importFileRef.current.value = "";
+          }
+        }}
+        file={importStagingFile}
+        isSubmitting={importMut.isPending}
+        onConfirm={(mappingPayload) => {
+          if (!importStagingFile || !tenantSlug) return;
+          setImportMsg(null);
+          importMut.mutate({ file: importStagingFile, ...mappingPayload });
+        }}
+      />
       <PageHeader
         title="Klientlar"
         description={tenantSlug ? `Tenant: ${tenantSlug}` : "Ro‘yxat, filtr va ustunlar"}
@@ -482,6 +667,10 @@ export default function ClientsPage() {
             try {
               const params = new URLSearchParams({ page: "1", limit: "50" });
               appendClientsFilterParams(params, filterBundle);
+              logClientsFilters("export_csv_request", {
+                queryParams: Object.fromEntries(params.entries()),
+                note: "limit=50 — faqat eksport endpointi; filtr barcha mos yozuvlar bo‘yicha serverda"
+              });
               const res = await api.get<Blob>(`/api/${tenantSlug}/clients/export?${params.toString()}`, {
                 responseType: "blob"
               });
@@ -569,7 +758,8 @@ export default function ClientsPage() {
               return;
             }
             console.info("[clients import] yuklanmoqda", { name: f.name, bytes: f.size });
-            importMut.mutate(f);
+            setImportStagingFile(f);
+            setImportMapOpen(true);
           }}
         />
         {importMsg ? <span className="text-sm text-muted-foreground">{importMsg}</span> : null}
@@ -598,19 +788,9 @@ export default function ClientsPage() {
           setRegionFilter(v);
           setPage(1);
         }}
-        districtFilter={districtFilter}
-        onDistrictFilterChange={(v) => {
-          setDistrictFilter(v);
-          setPage(1);
-        }}
-        neighborhoodFilter={neighborhoodFilter}
-        onNeighborhoodFilterChange={(v) => {
-          setNeighborhoodFilter(v);
-          setPage(1);
-        }}
-        zoneFilter={zoneFilter}
-        onZoneFilterChange={(v) => {
-          setZoneFilter(v);
+        cityFilter={cityFilter}
+        onCityFilterChange={(v) => {
+          setCityFilter(v);
           setPage(1);
         }}
         clientTypeFilter={clientTypeFilter}
@@ -638,61 +818,19 @@ export default function ClientsPage() {
           setExpeditorFilter(v);
           setPage(1);
         }}
-        supervisorFilter={supervisorFilter}
-        onSupervisorFilterChange={(v) => {
-          setSupervisorFilter(v);
-          setPage(1);
-        }}
-        visitWeekdayFilter={visitWeekdayFilter}
-        onVisitWeekdayFilterChange={(v) => {
-          setVisitWeekdayFilter(v);
-          setPage(1);
-        }}
-        innFilter={innFilter}
-        onInnFilterChange={(v) => {
-          setInnFilter(v);
-          setPage(1);
-        }}
-        phoneFilter={phoneFilter}
-        onPhoneFilterChange={(v) => {
-          setPhoneFilter(v);
-          setPage(1);
-        }}
-        createdFromFilter={createdFromFilter}
-        onCreatedFromFilterChange={(v) => {
-          setCreatedFromFilter(v);
-          setPage(1);
-        }}
-        createdToFilter={createdToFilter}
-        onCreatedToFilterChange={(v) => {
-          setCreatedToFilter(v);
-          setPage(1);
-        }}
+        filterVisibility={filterVisibility}
         onApplyToolbar={() => {
           void refetch();
           setFiltersVisible(false);
         }}
-        categoryOptions={refsQ.data?.categories ?? []}
-        regionOptions={refsQ.data?.regions ?? []}
-        districtOptions={refsQ.data?.districts ?? []}
-        neighborhoodOptions={refsQ.data?.neighborhoods ?? []}
-        zoneOptions={refsQ.data?.zones ?? []}
-        clientTypeOptions={refsQ.data?.client_type_codes ?? []}
-        clientFormatOptions={refsQ.data?.client_formats ?? []}
-        salesChannelOptions={refsQ.data?.sales_channels ?? []}
+        categorySelectOptions={categorySelectOptions}
+        regionSelectOptions={regionSelectOptions}
+        citySelectOptions={citySelectOptions}
+        clientTypeSelectOptions={clientTypeSelectOptions}
+        clientFormatSelectOptions={clientFormatSelectOptions}
+        salesChannelSelectOptions={salesChannelSelectOptions}
         agentOptions={agentsFilterQ.data ?? []}
         expeditorOptions={expeditorsFilterQ.data ?? []}
-        supervisorOptions={supervisorsFilterQ.data ?? []}
-        sortField={sortField}
-        onSortFieldChange={(v) => {
-          setSortField(v);
-          setPage(1);
-        }}
-        sortOrder={sortOrder}
-        onSortOrderChange={(v) => {
-          setSortOrder(v);
-          setPage(1);
-        }}
         pageLimit={tablePrefs.pageSize}
         onPageLimitChange={(v) => {
           tablePrefs.setPageSize(v);
@@ -735,12 +873,16 @@ export default function ClientsPage() {
       ) : isError ? (
         <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : (
-        <Card className="overflow-hidden shadow-panel">
+        <Card className="mt-5 overflow-hidden shadow-panel">
           <CardContent className="p-0">
             <ClientsDataTable
               rows={rows}
               visibility={getDefaultColumnVisibility()}
               orderedVisibleColumnIds={tablePrefs.visibleColumnOrder}
+              refDisplayMaps={refDisplayMaps}
+              sortField={sortField}
+              sortOrder={sortOrder}
+              onSortByColumn={handleSortByColumn}
               bulkSelect={canCatalog}
               selectedIds={selectedIds}
               onToggleRow={(id, selected) => {

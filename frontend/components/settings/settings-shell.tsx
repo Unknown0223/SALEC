@@ -2,7 +2,11 @@
 
 import { Input } from "@/components/ui/input";
 import type { SettingsItem } from "@/lib/settings-structure";
-import { resolveSettingsItemHref, settingsSections } from "@/lib/settings-structure";
+import {
+  filterSettingsSectionsByRole,
+  resolveSettingsItemHref,
+  settingsSections
+} from "@/lib/settings-structure";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
@@ -90,10 +94,15 @@ export function SettingsShell({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
+  const roleFilteredSections = useMemo(
+    () => filterSettingsSectionsByRole(settingsSections, role),
+    [role]
+  );
+
   useEffect(() => {
     setOpenGroups((prev) => {
       const next = { ...prev };
-      for (const section of settingsSections) {
+      for (const section of roleFilteredSections) {
         for (const item of section.items) {
           if (!item.children?.length) continue;
           const anyActive = item.children.some((c) =>
@@ -104,14 +113,14 @@ export function SettingsShell({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, [pathname, currentSearch]);
+  }, [pathname, currentSearch, roleFilteredSections]);
 
   useEffect(() => {
     const q = search.trim().toLowerCase();
     if (!q) return;
     setOpenGroups((prev) => {
       const next = { ...prev };
-      for (const section of settingsSections) {
+      for (const section of roleFilteredSections) {
         for (const item of section.items) {
           if (!item.children?.length) continue;
           const matched = filterSettingsItem(item, q);
@@ -120,18 +129,12 @@ export function SettingsShell({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, [search]);
+  }, [search, roleFilteredSections]);
 
   const filteredSections = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let sections = settingsSections;
-    if (role !== "admin") {
-      sections = sections
-        .map((section) => (section.slug === "sistema" ? { ...section, items: [] } : section))
-        .filter((s) => s.items.length > 0);
-    }
-    if (!q) return sections;
-    return sections
+    if (!q) return roleFilteredSections;
+    return roleFilteredSections
       .map((section) => {
         const sectionMatch = section.title.toLowerCase().includes(q);
         const items = section.items
@@ -140,7 +143,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         return { ...section, items };
       })
       .filter((s) => s.items.length > 0);
-  }, [search, role]);
+  }, [search, roleFilteredSections]);
 
   if (hideSettingsAside) {
     return (

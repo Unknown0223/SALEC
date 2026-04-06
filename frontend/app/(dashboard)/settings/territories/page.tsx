@@ -32,7 +32,16 @@ import {
 import { mergeTerritoryBundle } from "@shared/territory-lalaku-seed";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightLeft, ChevronDown, ChevronRight, Pencil, Plus, Share2, Trash2 } from "lucide-react";
+import {
+  ArrowRightLeft,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Share2,
+  Trash2
+} from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -144,7 +153,7 @@ function TerritoryTreeRow({
       >
         <TerritoryTreeGuides depth={depth} verticalMask={verticalMask} isLastChild={isLastChild} />
 
-        <div className="flex min-w-0 flex-1 items-center gap-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
           <button
             type="button"
             className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -163,72 +172,73 @@ function TerritoryTreeRow({
             )}
           </button>
 
-          <div className="flex min-w-0 flex-1 items-center justify-start gap-1">
-            <span className="min-w-0 shrink truncate text-[13px] font-medium uppercase tracking-wide text-foreground">
+          <div className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <span className="min-w-0 shrink text-[13px] font-medium uppercase tracking-wide text-foreground [overflow-wrap:anywhere] sm:truncate">
               {node.name || "—"}
             </span>
             {isAdmin ? (
               <div
                 className={cn(
-                  "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                  "flex shrink-0 items-center gap-0.5 rounded-md px-0.5",
+                  "opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
                 )}
               >
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              className="text-teal-600 hover:text-teal-700 dark:text-teal-400"
-              title="Qo‘shish (ichki)"
-              disabled={busy}
-              onClick={() => onAddChild(node.id)}
-            >
-              <Plus className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              title="O‘zgartirish"
-              disabled={busy}
-              onClick={() => startEdit(node)}
-            >
-              <Pencil className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              title="Ko‘chirish"
-              disabled={busy}
-              onClick={() => onMove(node.id)}
-            >
-              <ArrowRightLeft className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              title="Eksport (JSON)"
-              disabled={busy}
-              onClick={() => onExport(node)}
-            >
-              <Share2 className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
-              title="O‘chirish"
-              disabled={busy}
-              onClick={() => {
-                if (window.confirm(`“${node.name || "Tugun"}” va ichidagi barchasi o‘chirilsinmi?`)) {
-                  onDelete(node.id);
-                }
-              }}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-teal-600 hover:text-teal-700 dark:text-teal-400"
+                  title="Qo‘shish (ichki)"
+                  disabled={busy}
+                  onClick={() => onAddChild(node.id)}
+                >
+                  <Plus className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  title="O‘zgartirish"
+                  disabled={busy}
+                  onClick={() => startEdit(node)}
+                >
+                  <Pencil className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  title="Ko‘chirish"
+                  disabled={busy}
+                  onClick={() => onMove(node.id)}
+                >
+                  <ArrowRightLeft className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  title="Eksport (JSON)"
+                  disabled={busy}
+                  onClick={() => onExport(node)}
+                >
+                  <Share2 className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  title="O‘chirish"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm(`“${node.name || "Tugun"}” va ichidagi barchasi o‘chirilsinmi?`)) {
+                      onDelete(node.id);
+                    }
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
               </div>
             ) : null}
           </div>
@@ -286,6 +296,10 @@ export default function TerritoriesSettingsPage() {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
     enabled: Boolean(tenantSlug),
+    /** Skript / boshqa joydan `settings` o‘zgarganda kesh eskirgan bo‘lmasin */
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -399,6 +413,17 @@ export default function TerritoriesSettingsPage() {
         description="Daraxt: ildizdan qo‘shish, tugun ustida qo‘shish / tahrir / ko‘chirish — barchasi shu sahifada."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              title="Serverdan qayta yuklash (import skriptidan keyin)"
+              disabled={!tenantSlug || profileQ.isFetching}
+              onClick={() => void profileQ.refetch()}
+            >
+              <RefreshCw className={cn("mr-1 size-3.5", profileQ.isFetching && "animate-spin")} />
+              Yangilash
+            </Button>
             <Button type="button" size="sm" disabled={!isAdmin || saveMut.isPending} onClick={() => saveMut.mutate()}>
               {saveMut.isPending ? "Saqlanmoqda..." : "Saqlash"}
             </Button>
