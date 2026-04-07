@@ -385,7 +385,7 @@ export default function BranchesSettingsPage() {
                 ))}
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">Ma'lumot yo'q</td>
+                    <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">Ma’lumot yo‘q</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -400,7 +400,7 @@ export default function BranchesSettingsPage() {
         <DialogContent className="sm:max-w-[460px]" showCloseButton>
           <DialogHeader>
             <DialogTitle>{editId ? "Редактировать" : "Добавить"}</DialogTitle>
-            <DialogDescription>Kichik modal: filial + bog'lanishlar.</DialogDescription>
+            <DialogDescription>Kichik modal: filial + bog‘lanishlar.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5">
@@ -503,7 +503,7 @@ export default function BranchesSettingsPage() {
         <DialogContent className="max-h-[85vh] sm:max-w-[860px]" showCloseButton>
           <DialogHeader>
             <DialogTitle>Прикрепить пользователей</DialogTitle>
-            <DialogDescription>Rol ustiga bosing — hodimlar ro'yxati ochiladi.</DialogDescription>
+            <DialogDescription>Rol ustiga bosing — hodimlar ro‘yxati ochiladi.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2 overflow-y-auto pr-1">

@@ -40,7 +40,7 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_STATUS_VALUES
 } from "@/lib/order-status";
-import { ORDER_TYPE_FILTER_OPTIONS, ORDER_TYPE_LABELS, ORDER_TYPES, ORDER_TYPE_VALUES, orderTypeLabel, orderTypeColor } from "@/lib/order-types";
+import { ORDER_TYPE_FILTER_OPTIONS, ORDER_TYPE_VALUES, orderTypeLabel, orderTypeColor } from "@/lib/order-types";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -176,7 +176,7 @@ function rowStatusPatchError(err: unknown): string {
 
 function OrdersFilterStubSelect({ label }: { label: string }) {
   return (
-    <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+    <label className="orders-filter-field-label min-w-0">
       <span className="truncate">{label}</span>
       <select
         disabled
@@ -332,6 +332,12 @@ function OrdersPageContent() {
 
   const rows = data?.data ?? [];
 
+  const orderListTotalPages = useMemo(() => {
+    if (!data) return 1;
+    const lim = data.limit > 0 ? data.limit : tablePrefs.pageSize;
+    return Math.max(1, Math.ceil(data.total / lim));
+  }, [data, tablePrefs.pageSize]);
+
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "orders-toolbar"],
     enabled: Boolean(tenantSlug),
@@ -425,16 +431,21 @@ function OrdersPageContent() {
   });
 
   const nakladnoyMut = useMutation({
-    mutationFn: async (payload: { template: NakladnoyTemplateId; prefs: NakladnoyExportPrefs }) => {
+    mutationFn: async (payload: {
+      template: NakladnoyTemplateId;
+      prefs: NakladnoyExportPrefs;
+      format?: "xlsx" | "pdf";
+    }) => {
       await downloadOrdersNakladnoyXlsx({
         tenantSlug: tenantSlug!,
         orderIds: Array.from(selectedOrderIds),
         template: payload.template,
-        prefs: payload.prefs
+        prefs: payload.prefs,
+        format: payload.format ?? "xlsx"
       });
     },
-    onSuccess: () => {
-      setNakladnoyFeedback("Excel fayl yuklab olindi.");
+    onSuccess: (_data, vars) => {
+      setNakladnoyFeedback(vars.format === "pdf" ? "PDF fayl yuklab olindi." : "Excel fayl yuklab olindi.");
     },
     onError: (err: unknown) => {
       setNakladnoyFeedback(getUserFacingError(err, "Nakladnoyni yuklab bo‘lmadi."));
@@ -690,19 +701,20 @@ function OrdersPageContent() {
         </div>
       ) : null}
 
-      <Card className="border-border/90 bg-card/90 shadow-sm">
-        <CardContent className="space-y-4 p-4 sm:p-5">
+      <div className="orders-hub-section orders-hub-section--filters">
+        <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between xl:gap-6">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-xl font-semibold tracking-tight text-foreground">Заявки</h1>
               {data ? (
-                <span className="text-sm text-muted-foreground">
+                <span className="text-sm text-foreground/75">
                   Всего: <span className="font-medium text-foreground">{data.total}</span>
                 </span>
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm xl:flex-1 xl:justify-center">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-foreground xl:flex-1 xl:justify-center">
               <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap">
                 <input
                   type="radio"
@@ -736,21 +748,21 @@ function OrdersPageContent() {
             </div>
 
             <div className="flex flex-wrap items-end gap-2 xl:justify-end">
-              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <label className="orders-filter-field-label">
                 <span className="sr-only">С даты</span>
                 <Input
                   type="date"
-                  className="h-9 w-[11rem]"
+                  className="h-9 w-[11rem] bg-background text-foreground"
                   value={filters.date_from}
                   onChange={(e) => replaceOrdersQuery({ date_from: e.target.value, page: 1 })}
                 />
               </label>
-              <span className="pb-2 text-muted-foreground">—</span>
-              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <span className="pb-2 text-foreground/70">—</span>
+              <label className="orders-filter-field-label">
                 <span className="sr-only">По дату</span>
                 <Input
                   type="date"
-                  className="h-9 w-[11rem]"
+                  className="h-9 w-[11rem] bg-background text-foreground"
                   value={filters.date_to}
                   onChange={(e) => replaceOrdersQuery({ date_to: e.target.value, page: 1 })}
                 />
@@ -773,7 +785,7 @@ function OrdersPageContent() {
             </div>
           </div>
 
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-foreground/72">
             Интервал дат на сервере пока фильтрует по{" "}
             <span className="font-medium text-foreground">дате создания</span>; режимы «заказ / отгрузка» —
             подготовка под API.
@@ -782,10 +794,10 @@ function OrdersPageContent() {
           {tenantSlug ? (
             <>
               <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10">
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Статус
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.status}
                     onChange={(e) => replaceOrdersQuery({ status: e.target.value, page: 1 })}
                   >
@@ -797,10 +809,10 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Тип
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.order_type}
                     onChange={(e) => replaceOrdersQuery({ order_type: e.target.value, page: 1 })}
                   >
@@ -816,7 +828,7 @@ function OrdersPageContent() {
                 <OrdersFilterStubSelect label="Способ оплаты" />
                 <OrdersFilterStubSelect label="Тип цены" />
                 <OrdersFilterStubSelect label="День" />
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Категория клиента
                   <Input
                     className="h-9"
@@ -826,7 +838,7 @@ function OrdersPageContent() {
                     onChange={(e) => replaceOrdersQuery({ client_category: e.target.value, page: 1 })}
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Клиенты (ID)
                   <Input
                     className="h-9 font-mono text-sm"
@@ -840,10 +852,10 @@ function OrdersPageContent() {
                   />
                 </label>
                 <OrdersFilterStubSelect label="Категория продукта" />
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Продукт
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.product_id}
                     onChange={(e) => replaceOrdersQuery({ product_id: e.target.value, page: 1 })}
                     disabled={productsFilterQ.isLoading}
@@ -859,10 +871,10 @@ function OrdersPageContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 xl:items-end">
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Склад
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.warehouse_id}
                     onChange={(e) => replaceOrdersQuery({ warehouse_id: e.target.value, page: 1 })}
                   >
@@ -874,10 +886,10 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Агент
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.agent_id}
                     onChange={(e) => replaceOrdersQuery({ agent_id: e.target.value, page: 1 })}
                   >
@@ -889,10 +901,10 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <label className="orders-filter-field-label">
                   Экспедиторы
                   <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.expeditor_id}
                     onChange={(e) => replaceOrdersQuery({ expeditor_id: e.target.value, page: 1 })}
                   >
@@ -960,18 +972,19 @@ function OrdersPageContent() {
               </div>
             </>
           ) : null}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {tenantSlug ? (
         <div
-          className="table-toolbar mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/15 px-3 py-2"
+          className="orders-hub-section orders-hub-section--toolbar table-toolbar mt-4 flex flex-wrap items-center gap-2 px-3 py-2"
           role="toolbar"
           aria-label="Таблица: поиск и экспорт"
         >
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-foreground/85">
             <select
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
               value={tablePrefs.pageSize}
               onChange={(e) => {
                 const n = Number(e.target.value);
@@ -1041,15 +1054,15 @@ function OrdersPageContent() {
       />
 
       {!authHydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <QueryErrorState message={getUserFacingError(error, "Zakazlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : rows.length === 0 ? (
@@ -1059,12 +1072,13 @@ function OrdersPageContent() {
             : "Hozircha zakaz yo‘q."}
         </p>
       ) : (
-        <Card className="overflow-hidden shadow-panel">
+        <div className="orders-hub-section orders-hub-section--table">
+          <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[960px] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/60 text-left text-xs font-medium text-muted-foreground">
+                  <tr className="border-b bg-muted/60 text-left text-xs font-medium text-foreground/82">
                     <th className="w-10 px-3 py-2">
                       <input
                         type="checkbox"
@@ -1090,7 +1104,7 @@ function OrdersPageContent() {
                         </th>
                       );
                     })}
-                    <th className={cn("text-muted-foreground", dataTableStickyActionsThSingle)}>
+                    <th className={cn("text-foreground/82", dataTableStickyActionsThSingle)}>
                       <span className="sr-only">Tafsilot</span>
                     </th>
                   </tr>
@@ -1164,12 +1178,14 @@ function OrdersPageContent() {
                 </tbody>
               </table>
             </div>
-            {data && data.total > data.limit ? (
-              <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/20 px-3 py-2 text-sm sm:px-4">
-                <span className="text-muted-foreground">
-                  Sahifa{" "}
-                  <span className="font-medium tabular-nums text-foreground">{filters.page}</span> /{" "}
-                  <span className="tabular-nums">{Math.max(1, Math.ceil(data.total / data.limit))}</span>
+            {data ? (
+              <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-sm sm:px-4">
+                <span className="text-foreground/80">
+                  Страница{" "}
+                  <span className="font-medium tabular-nums text-foreground">
+                    {Math.min(filters.page, orderListTotalPages)}
+                  </span>{" "}
+                  / <span className="tabular-nums text-foreground">{orderListTotalPages}</span>
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1179,22 +1195,23 @@ function OrdersPageContent() {
                     disabled={filters.page <= 1}
                     onClick={() => replaceOrdersQuery({ page: Math.max(1, filters.page - 1) })}
                   >
-                    Oldingi
+                    Назад
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={filters.page * data.limit >= data.total}
+                    disabled={filters.page >= orderListTotalPages}
                     onClick={() => replaceOrdersQuery({ page: filters.page + 1 })}
                   >
-                    Keyingi
+                    Далее
                   </Button>
                 </div>
               </div>
             ) : null}
           </CardContent>
-        </Card>
+          </Card>
+        </div>
       )}
 
       {tenantSlug && selectedOrderIds.size > 0 ? (
@@ -1206,7 +1223,7 @@ function OrdersPageContent() {
             <label className="flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground">Holatni o‘zgartirish</span>
               <select
-                className="h-9 min-w-[11rem] rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 min-w-[11rem] rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={bulkTargetStatus}
                 onChange={(e) => {
                   setBulkTargetStatus(e.target.value);
@@ -1379,6 +1396,22 @@ function OrdersPageContent() {
                 >
                   {nakladnoyMut.isPending ? "Tayyorlanmoqda…" : "Bitta faylda yuklab olish"}
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={nakladnoyMut.isPending}
+                  onClick={() => {
+                    setNakladnoyFeedback(null);
+                    nakladnoyMut.mutate({
+                      template: nakladnoyTemplate,
+                      prefs: nakladnoyPrefs,
+                      format: "pdf"
+                    });
+                  }}
+                >
+                  {nakladnoyMut.isPending ? "Tayyorlanmoqda…" : "PDF yuklab olish"}
+                </Button>
               </div>
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 <span className="font-medium text-foreground">Joriy sozlamalar:</span>{" "}
@@ -1497,7 +1530,7 @@ export default function OrdersPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-6xl p-6 text-sm text-muted-foreground">Yuklanmoqda…</div>
+        <div className="mx-auto max-w-6xl p-6 text-sm text-muted-foreground">Загрузка…</div>
       }
     >
       <OrdersPageContent />

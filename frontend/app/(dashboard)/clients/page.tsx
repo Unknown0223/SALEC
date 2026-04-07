@@ -594,10 +594,7 @@ export default function ClientsPage() {
               Yangi mijoz
             </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-              Boshqaruv
-            </Link>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/clients/duplicates">
-              Dublikatlar
+              Панель управления
             </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/products">
               Mahsulotlar
@@ -861,15 +858,15 @@ export default function ClientsPage() {
       ) : null}
 
       {!authHydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : (

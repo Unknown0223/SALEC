@@ -11,7 +11,7 @@ export default function CashDesksSettingsPage() {
   const canWrite = role === "admin" || role === "operator";
 
   if (!hydrated) {
-    return <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка сессии…</p>;
   }
   if (!tenantSlug) {
     return (

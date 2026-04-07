@@ -50,6 +50,7 @@ const bulkStatusBodySchema = z.object({
 const bulkNakladnoyBodySchema = z.object({
   order_ids: z.array(z.number().int().positive()).min(1).max(500),
   template: z.enum(["nakladnoy_warehouse", "nakladnoy_expeditor"]),
+  format: z.enum(["xlsx", "pdf"]).optional(),
   code_column: z.enum(["sku", "barcode"]).optional(),
   separate_sheets: z.boolean().optional(),
   group_by: z.enum(["territory", "agent", "expeditor"]).optional()
@@ -338,12 +339,15 @@ export async function registerOrderRoutes(app: FastifyInstance) {
             codeColumn: parsed.data.code_column ?? "sku",
             separateSheets: parsed.data.separate_sheets ?? false,
             groupBy: parsed.data.group_by ?? "agent"
-          }
+          },
+          parsed.data.format ?? "xlsx"
         );
         return reply
           .header(
             "Content-Type",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            result.format === "pdf"
+              ? "application/pdf"
+              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           )
           .header("Content-Disposition", `attachment; filename="${result.filename}"`)
           .send(result.buffer);

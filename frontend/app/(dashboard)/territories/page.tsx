@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, useTenant } from "@/lib/api-client";
 
@@ -26,7 +24,7 @@ export default function TerritoriesPage() {
   const [items, setItems] = useState<Territory[]>([]);
   const [activeFilter, setActiveFilter] = useState("all");
 
-  async function fetch() {
+  const fetchTerritories = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -37,9 +35,9 @@ export default function TerritoriesPage() {
       setItems(data.data ?? []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, [tenant, activeFilter]);
 
-  useEffect(() => { fetch(); }, [tenant, activeFilter]);
+  useEffect(() => { void fetchTerritories(); }, [fetchTerritories]);
 
   return (
     <div className="space-y-6">
@@ -60,7 +58,7 @@ export default function TerritoriesPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? <div className="py-8 text-center">Yuklanmoqda...</div> : (
+          {loading ? <div className="py-8 text-center">Загрузка…</div> : (
             <Table>
               <TableHeader>
                 <TableRow>

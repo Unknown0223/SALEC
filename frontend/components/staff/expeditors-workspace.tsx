@@ -194,12 +194,6 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
     return Array.from(new Set([...fromProfile, ...fromAgents])).sort((a, b) => a.localeCompare(b, "ru"));
   }, [filterOptQ.data, profileQ.data]);
 
-  const tradeDirectionOptions = useMemo(() => {
-    const fromProfile = profileQ.data?.references.trade_directions ?? [];
-    const fromFilters = filterOptQ.data?.trade_directions ?? [];
-    return Array.from(new Set([...fromProfile, ...fromFilters])).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [profileQ.data, filterOptQ.data]);
-
   const listQ = useQuery({
     queryKey: [
       "expeditors",
@@ -803,7 +797,6 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
       <ExpeditorAssignmentDialog
         row={assignRow}
         onClose={() => setAssignRow(null)}
-        tenantSlug={tenantSlug}
         warehouses={warehousesQ.data ?? []}
         priceTypes={priceTypesQ.data ?? []}
         tradeDirections={assignmentTradeDirections}
@@ -1408,7 +1401,6 @@ function MultiSelectBlock({
 function ExpeditorAssignmentDialog({
   row,
   onClose,
-  tenantSlug: _tenantSlug,
   warehouses,
   priceTypes,
   tradeDirections,
@@ -1418,7 +1410,6 @@ function ExpeditorAssignmentDialog({
 }: {
   row: ExpeditorRow | null;
   onClose: () => void;
-  tenantSlug: string;
   warehouses: { id: number; name: string }[];
   priceTypes: string[];
   tradeDirections: string[];

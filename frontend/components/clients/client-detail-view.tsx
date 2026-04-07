@@ -80,16 +80,34 @@ type ClientAuditResponse = {
   limit: number;
 };
 
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function parseFilenameFromDisposition(cd: string | undefined): string | null {
+  if (!cd) return null;
+  const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
+  return m?.[1] ? decodeURIComponent(m[1].trim()) : null;
+}
+
 export function ClientDetailView({ tenantSlug, clientId }: Props) {
   const qc = useQueryClient();
   const role = useEffectiveRole();
   const isAdmin = role === "admin";
+  const canReconciliationPdf = role === "admin" || role === "operator";
   const [tab, setTab] = useState<DetailTab>("main");
   const [balPage, setBalPage] = useState(1);
   const [deltaInput, setDeltaInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
   const [balanceFormError, setBalanceFormError] = useState<string | null>(null);
   const [auditPage, setAuditPage] = useState(1);
+  const [reconDateFrom, setReconDateFrom] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-01`;
+  });
+  const [reconDateTo, setReconDateTo] = useState(() => localYmd(new Date()));
+  const [reconPdfLoading, setReconPdfLoading] = useState(false);
+  const [reconPdfError, setReconPdfError] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["client", tenantSlug, clientId],
@@ -178,8 +196,50 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     creditLimitNum > 0 &&
     Number.isFinite(openNum);
 
+  const downloadReconciliationPdf = async () => {
+    if (!canReconciliationPdf) return;
+    setReconPdfError(null);
+    setReconPdfLoading(true);
+    try {
+      const params = new URLSearchParams({
+        date_from: reconDateFrom.trim(),
+        date_to: reconDateTo.trim()
+      });
+      const res = await api.get<Blob>(
+        `/api/${tenantSlug}/clients/${clientId}/reconciliation-pdf?${params}`,
+        { responseType: "blob" }
+      );
+      const ct = String(res.headers["content-type"] ?? "").toLowerCase();
+      if (!ct.includes("pdf")) {
+        throw new Error("PDF tayyor bo‘lmadi");
+      }
+      const blob = res.data as Blob;
+      const filename =
+        parseFilenameFromDisposition(
+          typeof res.headers["content-disposition"] === "string"
+            ? res.headers["content-disposition"]
+            : Array.isArray(res.headers["content-disposition"])
+              ? res.headers["content-disposition"][0]
+              : undefined
+        ) ?? `akt-sverka-client-${clientId}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setReconPdfError(e instanceof Error ? e.message : "PDF yuklashda xatolik");
+    } finally {
+      setReconPdfLoading(false);
+    }
+  };
+
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка…</p>;
   }
   if (isError || !data) {
     return (
@@ -213,6 +273,51 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           </Link>
         </div>
       </div>
+
+      {canReconciliationPdf ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <p className="text-xs font-medium text-muted-foreground sm:w-full">Akt-sverka (PDF)</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="recon-from" className="text-xs">
+                Dan
+              </Label>
+              <Input
+                id="recon-from"
+                type="date"
+                className="h-9 w-[150px] font-mono text-xs"
+                value={reconDateFrom}
+                onChange={(ev) => setReconDateFrom(ev.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="recon-to" className="text-xs">
+                Gacha
+              </Label>
+              <Input
+                id="recon-to"
+                type="date"
+                className="h-9 w-[150px] font-mono text-xs"
+                value={reconDateTo}
+                onChange={(ev) => setReconDateTo(ev.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-9"
+              disabled={reconPdfLoading}
+              onClick={() => void downloadReconciliationPdf()}
+            >
+              {reconPdfLoading ? "Yuklanmoqda…" : "PDF yuklab olish"}
+            </Button>
+          </div>
+          {reconPdfError ? (
+            <p className="text-xs text-destructive sm:w-full">{reconPdfError}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-1 border-b border-border pb-px">
         {(
@@ -415,7 +520,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           )}
 
           {movementsQuery.isLoading ? (
-            <p className="text-xs text-muted-foreground">Harakatlar yuklanmoqda…</p>
+            <p className="text-xs text-muted-foreground">Harakatlar Загрузка…</p>
           ) : movementsQuery.isError ? (
             <p className="text-xs text-destructive">Harakatlarni yuklab bo‘lmadi.</p>
           ) : (
@@ -507,7 +612,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             </Link>
           </div>
           {paymentsTabQ.isLoading ? (
-            <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+            <p className="text-xs text-muted-foreground">Загрузка…</p>
           ) : paymentsTabQ.isError ? (
             <p className="text-xs text-destructive">Ro‘yxatni yuklab bo‘lmadi (huquq yoki tarmoq).</p>
           ) : (
@@ -561,7 +666,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             PATCH, balans harakatlari va birlashtirish jurnali (admin/operator).
           </p>
           {auditQuery.isLoading ? (
-            <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+            <p className="text-xs text-muted-foreground">Загрузка…</p>
           ) : auditQuery.isError ? (
             <p className="text-xs text-destructive">Jurnalni yuklab bo‘lmadi.</p>
           ) : (
@@ -660,7 +765,7 @@ export function ClientOrdersSnippet({
   });
 
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground">Zakazlar yuklanmoqda…</p>;
+    return <p className="text-xs text-muted-foreground">Zakazlar Загрузка…</p>;
   }
   const rows = data?.data ?? [];
   if (rows.length === 0) {

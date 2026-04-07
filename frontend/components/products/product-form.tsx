@@ -290,7 +290,7 @@ export function ProductForm({
 
   if (isEdit && productQ.isLoading) {
     return (
-      <p className={cn("text-sm text-muted-foreground", isModal && "px-6 py-4")}>Yuklanmoqda…</p>
+      <p className={cn("text-sm text-muted-foreground", isModal && "px-6 py-4")}>Загрузка…</p>
     );
   }
 

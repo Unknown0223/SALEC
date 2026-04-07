@@ -2,11 +2,10 @@
 
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 /**
- * Lucide SVG larni SSR + gidratsiyadan keyin chizadi.
- * Dark Reader kabi kengaytirishlar SVG ga atribut qo‘shganda «Extra attributes» xatosini oldini oladi.
+ * Lucide ikonkasi. Oldingi variantda faqat clientda chizilardi — birinchi kadrda bo‘sh joy qolardi.
+ * Endi SSR va birinchi bo‘yoqda ham SVG darhol ko‘rinadi (sidebar ikonkalari yo‘qolmasin).
  */
 export function ClientLucideIcon({
   icon: Icon,
@@ -17,12 +16,5 @@ export function ClientLucideIcon({
   className?: string;
   ariaHidden?: boolean;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  if (!mounted) {
-    return <span className={cn("inline-block", className)} aria-hidden={ariaHidden} />;
-  }
-
-  return <Icon className={className} aria-hidden={ariaHidden} />;
+  return <Icon className={cn(className)} aria-hidden={ariaHidden} />;
 }

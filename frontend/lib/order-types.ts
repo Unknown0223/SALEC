@@ -40,12 +40,12 @@ export const ORDER_TYPE_COLOR: Record<OrderType, string> = {
   return_by_order: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200"
 };
 
-export function orderTypeLabel(type: string | undefined): string {
+export function orderTypeLabel(type: string | null | undefined): string {
   if (!type || !(type in ORDER_TYPE_LABELS)) return "Заказ";
   return ORDER_TYPE_LABELS[type as OrderType];
 }
 
-export function orderTypeColor(type: string | undefined): string {
+export function orderTypeColor(type: string | null | undefined): string {
   if (!type || !(type in ORDER_TYPE_COLOR)) return ORDER_TYPE_COLOR.order;
   return ORDER_TYPE_COLOR[type as OrderType];
 }

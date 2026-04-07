@@ -11,7 +11,7 @@ This checklist is the release gate for each phase. A phase is complete only when
 - [x] Ko‘p foydalanuvchi: kritik yozuvlar **transaction** strategiyasi hujjatlangan (`docs/NON_FUNCTIONAL.md`) — zakaz/kredit/balans/merge; kilitleme rejasi Faza 5+ uchun qisqa reja
 - [x] API xatolarda `requestId` va strukturalangan `error` maydoni
 - [x] CI: migratsiya + testlar; o‘zgarishlar mavjud jarayonlarni buzmasligi
-- [x] Yagona klientlar bazasi: `phone_normalized`, dublikat guruhlari, `check-duplicates`, `merge`, Web UI (filtr + qidiruv), audit; DB **qisman UNIQUE** tavsiyasi `NON_FUNCTIONAL.md` da (seed dublikatlari sinov uchun)
+- [x] Yagona klientlar bazasi: `phone_normalized`, `merge`, Web UI (filtr + qidiruv), audit; DB **qisman UNIQUE** tavsiyasi `NON_FUNCTIONAL.md` da (seed dublikatlari sinov uchun)
 
 Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 
@@ -77,7 +77,7 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 - [x] **Picking chuqurligi (MVP):** skaner maydoni (Enter → SKU/shtrix filtri), chop etish (`window.print` + sidebar yashirish)
 - [x] **Korrektirovka:** panel `/stock/correction` — jurnal, kategoriya workspace, `POST .../stock/corrections/bulk`, audit (`warehouse-correction`). *(Eski «inventarsiz tezkor» alohida endpoint — ixtiyoriy keyingi iteratsiya.)*
 - [x] **Nakladnoy (Excel, kodda bor):** `POST .../orders/bulk/nakladnoy` + `order-nakladnoy-xlsx.ts`; shablonlar 5.1.8 / 2.1.0; zakazlar paneli: yuklab olish tugmalari + sozlamalar (`frontend/lib/order-nakladnoy.ts`, `nakladnoy-export-settings-dialog`).
-- [ ] **PDF** rasmiy blankalar 518 / 210 / ko‘chirish (Puppeteer yoki worker) — Excel nakladnoydan **alohida** vazifa.
+- [x] **PDF** blankalar (MVP): orders nakladnoy (`5.1.8` / `2.1.0`) uchun `POST .../orders/bulk/nakladnoy` da `format=pdf` + UI tugmalar; transfer uchun `GET .../transfers/:id/pdf` + jurnal modalidan yuklab olish.
 - [x] Ombor Web UI: qoldiqlar jadvalida holat bo‘yicha qator foni (0 / manfiy dostup / to‘liq rezerv)
 - [x] **Transfer UI:** `/stock/transfers` — `apiFetch` + `useTenant` (`frontend/lib/api-client.ts`); marshrut `middleware` orqali `/stock` himoyasida.
 
@@ -86,7 +86,8 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 - [x] To‘lovlar API: yaratish, ro‘yxat, mijoz va zakaz bo‘yicha (`payments`)
 - [x] To‘lovni zakazlarga taqsimlash: `GET/POST .../payments/:id/allocations|allocate` + panel **To‘lovlar** → «Zakazlarga» (FIFO, `payment_allocations`)
 - [ ] Balans materialized view + refresh strategiyasi (agar kerak)
-- [ ] Qarzdorlik + akt-sverka + PDF
+- [x] Akt-sverka **PDF** (mijoz bo‘yicha): `GET /api/:slug/clients/:id/reconciliation-pdf` (`date_from` / `date_to`, ixtiyoriy; default — joriy oy boshidan bugungi kunga) + klient kartochkasida davr + yuklab olish.
+- [x] Qarzdorlik **ro‘yxati**: `GET /api/:slug/reports/receivables` (+ `/export` Excel `.xlsx`; alias `client-receivables`) — faqat **ochiq zakazlar yig‘indisi 0 dan katta** bo‘lgan mijozlar; qo‘shimcha filtrlar (`only_over_limit`, `active_only`), UI — **Hisobotlar** → **Qarzdorlik**.
 
 ## FAZA 7 - GPS (reja: hafta 14)
 
@@ -98,8 +99,8 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 
 - [x] Dashboard API: `GET .../dashboard/stats` (+ Redis cache invalidate)
 - [x] **Hisobotlar MVP (kod bilan):** backend `reports.route.ts` — sales, order-trends, products, clients, agent-kpi, status-distribution, **qo‘shimcha** `channels`, `abc-analysis`, `xyz-analysis`, `client-churn`; frontend `/reports` — asosiy 6 ta oqim + **Excel eksport** (npm `xlsx` / SheetJS; `exceljs` emas).
-- [ ] Hisobotlar UI: `channels` / ABC / XYZ / churn tablari va kengaytirilgan eksport (reja).
-- [ ] UI: dashboard va hisobotlarda **grafiklar** (Recharts yoki Chart.js).
+- [x] Hisobotlar UI: `channels` / ABC / XYZ / churn tablari + har biri uchun **Excel** (`/reports`, `?tab=` + `churn_months`).
+- [x] UI: dashboard va hisobotlarda **grafiklar** (**Recharts** — `components/charts/analytics-charts.tsx`).
 
 ## FAZA 9 - Flutter (reja: hafta 16-18)
 

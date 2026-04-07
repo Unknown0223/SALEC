@@ -45,6 +45,18 @@ function makeItem(
 
 export const settingsSections: SettingsSection[] = [
   {
+    title: "Интерфейс и оформление",
+    slug: "interfeys-oformlenie",
+    items: [
+      {
+        title: "Тема и цвета",
+        slug: "tema-tsveta",
+        href: "/settings/appearance",
+        status: "available"
+      }
+    ]
+  },
+  {
     title: "Основные настройки",
     slug: "osnovnye-nastroiki",
     items: [
@@ -258,7 +270,8 @@ const existingHrefByItemTitle: Record<string, string> = {
   "тип базы знания": "/settings/knowledge-base/type",
   "база знаний": "/settings/knowledge-base/base",
   "надбавки и вычеты к зарплате": "/settings/payroll/adjustments",
-  "поставщики": "/settings/suppliers"
+  "поставщики": "/settings/suppliers",
+  "тема и цвета": "/settings/appearance"
 };
 
 export function resolveSettingsItemHref(item: SettingsItem): string {

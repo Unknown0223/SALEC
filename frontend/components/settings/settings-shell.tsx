@@ -183,13 +183,13 @@ export function SettingsShell({ children }: { children: ReactNode }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-9 pl-9"
-              aria-label="Sozlamalar bo‘yicha qidiruv"
+              aria-label="Поиск в настройках"
             />
           </div>
         </div>
         <nav
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 md:px-3 md:py-3"
-          aria-label="Sozlamalar ichki menyu"
+          aria-label="Внутреннее меню настроек"
         >
           {filteredSections.map((section, sectionIndex) => (
             <section key={section.slug} className="mb-1 last:mb-0">

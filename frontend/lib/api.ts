@@ -2,13 +2,42 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "@/lib/auth-store";
 import { readPersistedAuth } from "@/lib/persisted-auth";
 
-const inferredDefault =
-  process.env.NODE_ENV === "development"
-    ? "http://127.0.0.1:4000"
-    : typeof window !== "undefined"
-      ? window.location.origin
-      : "";
-const baseURL = process.env.NEXT_PUBLIC_API_URL ?? inferredDefault;
+const fromEnv = process.env.NEXT_PUBLIC_API_URL?.trim();
+
+/** Axios `baseURL`: dev + proxy bo‘lsa bo‘sh — so‘rovlar joriy origin (`/api/...`). */
+const baseURL =
+  fromEnv != null && fromEnv !== ""
+    ? fromEnv
+    : process.env.NODE_ENV === "development"
+      ? typeof window !== "undefined"
+        ? ""
+        : process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:4000"
+      : typeof window !== "undefined"
+        ? window.location.origin
+        : "";
+
+/**
+ * `EventSource` / `new URL` uchun to‘liq origin.
+ * Dev + proxy: `window.location.origin`; SSR yoki `NEXT_PUBLIC_API_URL` — mos ravishda.
+ */
+export function resolveApiOrigin(): string {
+  if (fromEnv != null && fromEnv !== "") {
+    try {
+      return new URL(fromEnv).origin;
+    } catch {
+      return fromEnv.replace(/\/$/, "");
+    }
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:4000";
+}
+
+function authRefreshAbsoluteUrl(): string {
+  if (!baseURL) return "/auth/refresh";
+  return `${baseURL.replace(/\/$/, "")}/auth/refresh`;
+}
 
 export const api = axios.create({
   baseURL,
@@ -53,7 +82,7 @@ api.interceptors.response.use(
 
     try {
       const { data } = await axios.post<{ accessToken: string; refreshToken: string }>(
-        `${baseURL}/auth/refresh`,
+        authRefreshAbsoluteUrl(),
         { refreshToken }
       );
       store.setSession({

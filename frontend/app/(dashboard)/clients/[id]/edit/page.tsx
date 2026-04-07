@@ -17,7 +17,7 @@ export default function ClientEditPage() {
   if (!hydrated) {
     return (
       <PageShell>
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       </PageShell>
     );
   }
@@ -27,7 +27,7 @@ export default function ClientEditPage() {
       <PageShell>
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       </PageShell>

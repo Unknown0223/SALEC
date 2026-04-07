@@ -78,7 +78,7 @@ export default function PaymentsPage() {
           </Link>
         </p>
       ) : listQ.isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : listQ.isError ? (
         <p className="text-sm text-destructive">Ro‘yxatni yuklab bo‘lmadi.</p>
       ) : (
@@ -135,13 +135,13 @@ export default function PaymentsPage() {
                       type="button"
                       className="text-xs text-destructive underline underline-offset-2 hover:text-destructive/80"
                       onClick={() => {
-                        if (confirm(`To'lov #${r.id} (${r.amount} so'm) o'chirish? Balans qaytariladi.`)) {
+                        if (confirm(`To‘lov #${r.id} (${r.amount} so‘m) o‘chirish? Balans qaytariladi.`)) {
                           deleteMut.mutate(r.id);
                         }
                       }}
                       disabled={deleteMut.isPending}
                     >
-                      O'chirish
+                      O‘chirish
                     </button>
                   </td>
                 </tr>

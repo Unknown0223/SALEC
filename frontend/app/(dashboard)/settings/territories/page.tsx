@@ -23,7 +23,6 @@ import {
   emptyNode,
   listValidParents,
   moveNode,
-  newTerritoryId,
   removeNode,
   sortForest,
   type TerritoryNode,
@@ -292,6 +291,7 @@ export default function TerritoriesSettingsPage() {
   const [editActive, setEditActive] = useState(true);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveNodeId, setMoveNodeId] = useState<string | null>(null);
+  const [autoSync, setAutoSync] = useState(true);
 
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
@@ -386,6 +386,17 @@ export default function TerritoriesSettingsPage() {
     setMoveNodeId(null);
   };
 
+  useEffect(() => {
+    if (!autoSync) return;
+    if (!tenantSlug) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (saveMut.isPending || editOpen || moveOpen) return;
+      void profileQ.refetch();
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [autoSync, tenantSlug, saveMut.isPending, editOpen, moveOpen, profileQ]);
+
   if (!hydrated) {
     return (
       <PageShell>
@@ -423,6 +434,15 @@ export default function TerritoriesSettingsPage() {
             >
               <RefreshCw className={cn("mr-1 size-3.5", profileQ.isFetching && "animate-spin")} />
               Yangilash
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={autoSync ? "default" : "outline"}
+              onClick={() => setAutoSync((v) => !v)}
+              title="Har 20 soniyada serverdan avtomatik yangilash"
+            >
+              {autoSync ? "Auto-sync: ON" : "Auto-sync: OFF"}
             </Button>
             <Button type="button" size="sm" disabled={!isAdmin || saveMut.isPending} onClick={() => saveMut.mutate()}>
               {saveMut.isPending ? "Saqlanmoqda..." : "Saqlash"}

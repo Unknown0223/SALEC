@@ -19,6 +19,7 @@ import {
 } from "../tenant-settings/tenant-settings.service";
 import { salesRefStoredValue } from "../sales-directions/sales-directions.service";
 import { ClientImportRefResolver } from "./client-import-ref-resolve";
+import { buildClientReconciliationPdf } from "./client-reconciliation-pdf";
 import { normKeyTerritoryMatch } from "../../../../shared/territory-lalaku-seed";
 
 /** Telefonni solishtirish uchun faqat raqamlar (masalan +998 90 → 99890). */
@@ -94,18 +95,6 @@ export type ClientListRow = {
   agent_assignments: ClientAgentAssignmentApi[];
   contact_persons: ContactPersonSlot[];
   created_at: string;
-};
-
-export type DuplicatePhoneGroup = {
-  phone_normalized: string;
-  client_ids: number[];
-  clients: Array<{
-    id: number;
-    name: string;
-    phone: string | null;
-    is_active: boolean;
-    merged_into_client_id: number | null;
-  }>;
 };
 
 export type ListClientsQuery = {
@@ -1442,6 +1431,179 @@ export async function addClientBalanceMovement(
   return getClientDetail(tenantId, clientId);
 }
 
+function formatLocalDateLabel(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+}
+
+function formatLocalDateTimeLabel(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} ${hh}:${mi}`;
+}
+
+/**
+ * Mijoz bo‘yicha akt-svercha: davr ichidagi zakazlar, to‘lovlar va hisob harakatlari + qisqacha moliyaviy ko‘rsatkichlar.
+ */
+export async function getClientReconciliationPdfBuffer(
+  tenantId: number,
+  clientId: number,
+  dateFromStart: Date,
+  dateToEnd: Date
+): Promise<Buffer> {
+  if (dateFromStart.getTime() > dateToEnd.getTime()) {
+    throw new Error("BAD_DATE_RANGE");
+  }
+  const maxMs = 400 * 24 * 60 * 60 * 1000;
+  if (dateToEnd.getTime() - dateFromStart.getTime() > maxMs) {
+    throw new Error("DATE_RANGE_TOO_LONG");
+  }
+
+  const client = await prisma.client.findFirst({
+    where: { id: clientId, tenant_id: tenantId, merged_into_client_id: null },
+    select: {
+      id: true,
+      name: true,
+      legal_name: true,
+      client_code: true,
+      credit_limit: true
+    }
+  });
+  if (!client) {
+    throw new Error("NOT_FOUND");
+  }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true }
+  });
+
+  const bal = await prisma.clientBalance.findUnique({
+    where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
+    select: { id: true, balance: true }
+  });
+
+  const balId = bal?.id ?? null;
+  let openingSum = new Prisma.Decimal(0);
+  let movementsInPeriod: Array<{ created_at: Date; delta: Prisma.Decimal; note: string | null }> = [];
+
+  if (balId != null) {
+    const [openAgg, movRows] = await Promise.all([
+      prisma.clientBalanceMovement.aggregate({
+        where: { client_balance_id: balId, created_at: { lt: dateFromStart } },
+        _sum: { delta: true }
+      }),
+      prisma.clientBalanceMovement.findMany({
+        where: {
+          client_balance_id: balId,
+          created_at: { gte: dateFromStart, lte: dateToEnd }
+        },
+        orderBy: { created_at: "asc" },
+        select: { created_at: true, delta: true, note: true }
+      })
+    ]);
+    openingSum = openAgg._sum.delta ?? new Prisma.Decimal(0);
+    movementsInPeriod = movRows;
+  }
+
+  let periodMovementsSum = new Prisma.Decimal(0);
+  for (const m of movementsInPeriod) {
+    periodMovementsSum = periodMovementsSum.add(m.delta);
+  }
+  const closingAtPeriodEnd = openingSum.add(periodMovementsSum);
+
+  const [ordersInPeriod, paymentsInPeriod, outstandingAgg] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        created_at: { gte: dateFromStart, lte: dateToEnd }
+      },
+      orderBy: { created_at: "asc" },
+      select: {
+        number: true,
+        created_at: true,
+        total_sum: true,
+        status: true,
+        order_type: true
+      }
+    }),
+    prisma.payment.findMany({
+      where: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        created_at: { gte: dateFromStart, lte: dateToEnd }
+      },
+      orderBy: { created_at: "asc" },
+      include: { order: { select: { number: true } } }
+    }),
+    prisma.order.aggregate({
+      where: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        status: { notIn: [...ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE] }
+      },
+      _sum: { total_sum: true }
+    })
+  ]);
+
+  let sumOrders = new Prisma.Decimal(0);
+  for (const o of ordersInPeriod) {
+    sumOrders = sumOrders.add(o.total_sum);
+  }
+  let sumPayments = new Prisma.Decimal(0);
+  for (const p of paymentsInPeriod) {
+    sumPayments = sumPayments.add(p.amount);
+  }
+
+  const accountBalanceStr = bal?.balance.toString() ?? "0";
+  const outstandingStr = (outstandingAgg._sum.total_sum ?? new Prisma.Decimal(0)).toString();
+
+  return buildClientReconciliationPdf({
+    tenantName: tenant?.name?.trim() || `Tenant #${tenantId}`,
+    clientName: client.name,
+    clientLegalName: client.legal_name?.trim() || null,
+    clientId: client.id,
+    clientCode: client.client_code?.trim() || null,
+    dateFromLabel: formatLocalDateLabel(dateFromStart),
+    dateToLabel: formatLocalDateLabel(dateToEnd),
+    generatedAtLabel: formatLocalDateTimeLabel(new Date()),
+    accountBalance: accountBalanceStr,
+    outstandingOrdersTotal: outstandingStr,
+    creditLimit: client.credit_limit.toString(),
+    openingAccountBalance: openingSum.toString(),
+    closingAccountBalanceAtPeriodEnd: closingAtPeriodEnd.toString(),
+    sumOrdersInPeriod: sumOrders.toString(),
+    sumPaymentsInPeriod: sumPayments.toString(),
+    sumMovementDeltasInPeriod: periodMovementsSum.toString(),
+    ordersInPeriod: ordersInPeriod.map((o) => ({
+      number: o.number,
+      created_at: o.created_at.toISOString(),
+      total_sum: o.total_sum.toString(),
+      status: o.status,
+      order_type: o.order_type
+    })),
+    paymentsInPeriod: paymentsInPeriod.map((p) => ({
+      id: p.id,
+      created_at: p.created_at.toISOString(),
+      amount: p.amount.toString(),
+      payment_type: p.payment_type,
+      note: p.note,
+      order_number: p.order?.number ?? null
+    })),
+    movementsInPeriod: movementsInPeriod.map((m) => ({
+      created_at: m.created_at.toISOString(),
+      delta: m.delta.toString(),
+      note: m.note
+    }))
+  });
+}
+
 export type UpdateClientInput = {
   name?: string;
   legal_name?: string | null;
@@ -1850,96 +2012,6 @@ export async function updateClientFields(
   const detail: Record<string, unknown> = { ...input };
   await appendClientAuditLog(tenantId, id, actorUserId, "client.patch", detail);
   return getClientDetail(tenantId, id);
-}
-
-export async function getDuplicatePhoneGroups(tenantId: number): Promise<DuplicatePhoneGroup[]> {
-  const keys = await prisma.$queryRaw<Array<{ phone_normalized: string }>>(
-    Prisma.sql`
-      SELECT "phone_normalized"
-      FROM "clients"
-      WHERE "tenant_id" = ${tenantId}
-        AND "phone_normalized" IS NOT NULL
-        AND "merged_into_client_id" IS NULL
-      GROUP BY "tenant_id", "phone_normalized"
-      HAVING COUNT(*) > 1
-    `
-  );
-
-  const groups: DuplicatePhoneGroup[] = [];
-  for (const k of keys) {
-    if (!k.phone_normalized) continue;
-    const clients = await prisma.client.findMany({
-      where: {
-        tenant_id: tenantId,
-        phone_normalized: k.phone_normalized,
-        merged_into_client_id: null
-      },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        is_active: true,
-        merged_into_client_id: true
-      },
-      orderBy: { id: "asc" }
-    });
-    if (clients.length < 2) continue;
-    groups.push({
-      phone_normalized: k.phone_normalized,
-      client_ids: clients.map((c) => c.id),
-      clients
-    });
-  }
-  return groups;
-}
-
-export type CheckDuplicateMatch = {
-  id: number;
-  name: string;
-  phone: string | null;
-  reason: "phone" | "name";
-};
-
-export async function checkDuplicateCandidates(
-  tenantId: number,
-  name: string,
-  phone: string | null | undefined
-): Promise<CheckDuplicateMatch[]> {
-  const norm = normalizePhoneDigits(phone);
-  const trimmedName = name.trim().toLowerCase();
-  const matches = new Map<number, CheckDuplicateMatch>();
-
-  if (norm) {
-    const byPhone = await prisma.client.findMany({
-      where: {
-        tenant_id: tenantId,
-        phone_normalized: norm,
-        merged_into_client_id: null
-      },
-      select: { id: true, name: true, phone: true }
-    });
-    for (const c of byPhone) {
-      matches.set(c.id, { id: c.id, name: c.name, phone: c.phone, reason: "phone" });
-    }
-  }
-
-  if (trimmedName.length >= 2) {
-    const byName = await prisma.client.findMany({
-      where: {
-        tenant_id: tenantId,
-        merged_into_client_id: null,
-        name: { equals: name.trim(), mode: "insensitive" }
-      },
-      select: { id: true, name: true, phone: true }
-    });
-    for (const c of byName) {
-      if (!matches.has(c.id)) {
-        matches.set(c.id, { id: c.id, name: c.name, phone: c.phone, reason: "name" });
-      }
-    }
-  }
-
-  return [...matches.values()].sort((a, b) => a.id - b.id);
 }
 
 export async function mergeClientsIntoOne(

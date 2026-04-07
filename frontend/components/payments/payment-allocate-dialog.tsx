@@ -117,7 +117,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment 
             </p>
 
             {allocQ.isLoading ? (
-              <p className="text-muted-foreground">Yuklanmoqda…</p>
+              <p className="text-muted-foreground">Загрузка…</p>
             ) : (
               <div className="max-h-48 overflow-auto rounded-md border">
                 <table className="w-full text-xs">

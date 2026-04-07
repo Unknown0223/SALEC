@@ -31,7 +31,7 @@ export default function BonusStrategyPage() {
         }
         actions={
           <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-            Boshqaruv
+            Панель управления
           </Link>
         }
       />

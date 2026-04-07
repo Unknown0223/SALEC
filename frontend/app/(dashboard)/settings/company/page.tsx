@@ -109,7 +109,7 @@ export default function CompanySettingsPage() {
           </Link>
         </p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <p className="text-sm text-destructive">Profilni olishda xato.</p>
       ) : (

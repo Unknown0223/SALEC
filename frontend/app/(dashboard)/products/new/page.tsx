@@ -17,7 +17,7 @@ function NewProductContent() {
   if (!hydrated) {
     return (
       <PageShell>
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       </PageShell>
     );
   }
@@ -27,7 +27,7 @@ function NewProductContent() {
       <PageShell>
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       </PageShell>
@@ -53,7 +53,7 @@ export default function NewProductPage() {
     <Suspense
       fallback={
         <PageShell>
-          <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+          <p className="text-sm text-muted-foreground">Загрузка…</p>
         </PageShell>
       }
     >

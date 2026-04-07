@@ -37,40 +37,40 @@ export default function EditBonusRulePage() {
         href="/settings/bonus-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Bonus qoidalari ro‘yxati
+        ← Список бонусных правил
       </Link>
 
       {!authHydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : invalid ? (
-        <p className="text-sm text-destructive">Qoida identifikatori noto‘g‘ri.</p>
+        <p className="text-sm text-destructive">Некорректный идентификатор правила.</p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <p className="text-sm text-destructive">
-          {error instanceof Error ? error.message : "Qoida topilmadi yoki xato"}
+          {error instanceof Error ? error.message : "Правило не найдено или ошибка"}
         </p>
       ) : data ? (
         <>
           <PageHeader
-            title="Bonus qoidasini tahrirlash"
+            title="Редактирование бонусного правила"
             description={`${data.name} · id #${data.id}`}
             actions={
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-                Boshqaruv
+                Панель управления
               </Link>
             }
           />
           <BonusRuleForm tenantSlug={tenantSlug} initialRule={data} />
         </>
       ) : (
-        <p className="text-sm text-destructive">Ma’lumot yo‘q.</p>
+        <p className="text-sm text-destructive">Нет данных.</p>
       )}
     </PageShell>
   );

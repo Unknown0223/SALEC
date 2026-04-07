@@ -98,7 +98,7 @@ export default function BonusStackHubPage() {
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-medium">Tenant bonus stack</h3>
               {stackQ.isLoading ? (
-                <p className="mt-1 text-sm text-muted-foreground">Yuklanmoqda…</p>
+                <p className="mt-1 text-sm text-muted-foreground">Загрузка…</p>
               ) : stackQ.isError ? (
                 <p className="mt-1 text-sm text-destructive">O‘qib bo‘lmadi.</p>
               ) : (

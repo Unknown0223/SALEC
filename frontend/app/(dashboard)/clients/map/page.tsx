@@ -143,7 +143,7 @@ export default function ClientsMapPage() {
               className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
               href="/clients"
             >
-              Ro'yxatga qaytish
+              Ro‘yxatga qaytish
             </Link>
             <Link
               className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
@@ -205,15 +205,15 @@ export default function ClientsMapPage() {
       {/* Map visualization */}
       {!authHydrated ? (
         <div className="flex items-center justify-center py-24">
-          <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda...</p>
+          <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
         </div>
       ) : !tenantSlug ? (
         <div className="flex items-center justify-center py-24">
-          <p className="text-sm text-destructive">Tenant topilmadi. Qayta kiring.</p>
+          <p className="text-sm text-destructive">Tenant topilmadi. Войти снова.</p>
         </div>
       ) : loading ? (
         <div className="flex items-center justify-center py-24">
-          <p className="text-sm text-muted-foreground">Klientlar yuklanmoqda...</p>
+          <p className="text-sm text-muted-foreground">Klientlar Загрузка…</p>
         </div>
       ) : (
         <Card className="shadow-panel">
@@ -357,7 +357,7 @@ export default function ClientsMapPage() {
         <CardContent className="p-0">
           {clientsWithCoords.length === 0 ? (
             <div className="px-4 py-6 text-sm text-muted-foreground">
-              Ma'lumot yo'q.
+              Ma’lumot yo‘q.
             </div>
           ) : (
             <div className="overflow-x-auto">

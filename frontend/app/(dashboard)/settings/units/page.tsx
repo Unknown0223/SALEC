@@ -205,7 +205,7 @@ export default function UnitsSettingsPage() {
                 ))}
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">Ma'lumot yo'q</td>
+                    <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">Ma’lumot yo‘q</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -220,7 +220,7 @@ export default function UnitsSettingsPage() {
         <DialogContent className="sm:max-w-[520px]" showCloseButton>
           <DialogHeader>
             <DialogTitle>{editId ? "Редактировать" : "Добавить"}</DialogTitle>
-            <DialogDescription>Sortirovka faqat son bo'lishi kerak.</DialogDescription>
+            <DialogDescription>Sortirovka faqat son bo‘lishi kerak.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div className="grid gap-1.5">

@@ -39,7 +39,7 @@ export function OrdersHubTopBar() {
           className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-xs sm:text-sm")}
         >
           <Home className="mr-1 size-3.5 opacity-80" aria-hidden />
-          Boshqaruv
+          Панель управления
         </Link>
         <Link
           href="/payments"

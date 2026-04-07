@@ -553,7 +553,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   }
 
   if (!clientQ.data && clientQ.isLoading) {
-    return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка…</p>;
   }
 
   return (

@@ -175,7 +175,7 @@ export default function PriceListPage() {
 
         {profileQ.isLoading ? (
           <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/15">
-            <p className="text-sm text-muted-foreground">Profil yuklanmoqda…</p>
+            <p className="text-sm text-muted-foreground">Profil Загрузка…</p>
           </div>
         ) : priceColumns.length === 0 ? (
           <div className="flex min-h-[min(50vh,400px)] flex-col items-center justify-center rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 px-6 py-12 text-center">
@@ -189,7 +189,7 @@ export default function PriceListPage() {
           </div>
         ) : productsQ.isLoading ? (
           <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/15">
-            <p className="text-sm text-muted-foreground">Mahsulotlar yuklanmoqda…</p>
+            <p className="text-sm text-muted-foreground">Mahsulotlar Загрузка…</p>
           </div>
         ) : productsQ.isError ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-8 text-center text-sm text-destructive">

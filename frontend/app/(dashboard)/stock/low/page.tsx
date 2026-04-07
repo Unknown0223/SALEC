@@ -61,7 +61,7 @@ export default function StockLowPage() {
             />
           </div>
           {listQ.isLoading ? (
-            <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+            <p className="text-sm text-muted-foreground">Загрузка…</p>
           ) : listQ.isError ? (
             <p className="text-sm text-destructive">Xato.</p>
           ) : (

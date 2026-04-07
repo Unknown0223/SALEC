@@ -43,11 +43,11 @@ export default function SettingsCatalogItemPage({ params }: Props) {
 
         {isMappedToExisting ? (
           <p className="mb-4 text-sm text-muted-foreground">
-            Bu element hozircha mavjud modulga ulangan. To'liq alohida sahifa keyin ajratiladi.
+            Bu element hozircha mavjud modulga ulangan. To‘liq alohida sahifa keyin ajratiladi.
           </p>
         ) : (
           <p className="mb-4 text-sm text-muted-foreground">
-            Bu bo'lim uchun alohida funksional sahifa hali tayyor emas. Hozircha rejalashtirilgan placeholder.
+            Bu bo‘lim uchun alohida funksional sahifa hali tayyor emas. Hozircha rejalashtirilgan placeholder.
           </p>
         )}
 

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify } from "../auth/auth.prehandlers";
 import {
@@ -11,7 +11,9 @@ import {
   getChannelStats,
   getAbcAnalysis,
   getXyzAnalysis,
-  getClientChurn
+  getClientChurn,
+  getClientReceivables,
+  exportClientReceivablesXlsx
 } from "./reports.service";
 
 export async function registerReportRoutes(app: FastifyInstance) {
@@ -105,4 +107,44 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const data = await getClientChurn(request.tenant!.id, monthsAgo ? parseInt(monthsAgo) : 3);
     return reply.send(data);
   });
+
+  // Qarzdorlik / ochiq zakazlar (kredit yuki) — export avvalo (statik suffiks)
+  const receivablesExportHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const q = request.query as Record<string, string | undefined>;
+    const { buffer, truncated, total } = await exportClientReceivablesXlsx(request.tenant!.id, {
+      search: q.search?.trim() || undefined,
+      only_over_limit: q.only_over_limit === "1" || q.only_over_limit === "true",
+      active_only: q.active_only === "1" || q.active_only === "true"
+    });
+    return reply
+      .header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      )
+      .header("Content-Disposition", 'attachment; filename="qarzdorlik.xlsx"')
+      .header("X-Export-Truncated", truncated ? "1" : "0")
+      .header("X-Export-Total", String(total))
+      .send(buffer);
+  };
+
+  const receivablesListHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const q = request.query as Record<string, string | undefined>;
+    const page = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
+    const limit = Math.min(200, Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50));
+    const data = await getClientReceivables(request.tenant!.id, {
+      page,
+      limit,
+      search: q.search?.trim() || undefined,
+      only_over_limit: q.only_over_limit === "1" || q.only_over_limit === "true",
+      active_only: q.active_only === "1" || q.active_only === "true"
+    });
+    return reply.send(data);
+  };
+
+  app.get("/api/:slug/reports/receivables/export", { preHandler }, receivablesExportHandler);
+  app.get("/api/:slug/reports/receivables", { preHandler }, receivablesListHandler);
+  app.get("/api/:slug/reports/client-receivables/export", { preHandler }, receivablesExportHandler);
+  app.get("/api/:slug/reports/client-receivables", { preHandler }, receivablesListHandler);
 }

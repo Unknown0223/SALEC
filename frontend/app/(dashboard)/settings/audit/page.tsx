@@ -72,7 +72,7 @@ export default function AuditJournalPage() {
   });
 
   if (!hydrated) {
-    return <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка…</p>;
   }
 
   if (role !== "admin") {
@@ -204,7 +204,7 @@ export default function AuditJournalPage() {
                   colSpan={Math.max(1, tablePrefs.visibleColumnOrder.length)}
                   className="px-3 py-6 text-center text-muted-foreground"
                 >
-                  Yuklanmoqda…
+                  Загрузка…
                 </td>
               </tr>
             ) : (

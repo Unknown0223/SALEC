@@ -19,7 +19,7 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -31,13 +31,6 @@ type SupplierRow = {
   comment: string | null;
   is_active: boolean;
 };
-
-type TenantProfile = { references: { currency_entries?: { code: string; name: string; is_default: boolean; id: string }[] } };
-
-function newId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `sup-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
 
 export default function SuppliersSettingsPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -209,7 +202,7 @@ export default function SuppliersSettingsPage() {
                 ))}
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Ma'lumot yo'q</td>
+                    <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Ma’lumot yo‘q</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -260,12 +253,14 @@ export default function SuppliersSettingsPage() {
       <Dialog open={confirmDelete != null} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
         <DialogContent className="sm:max-w-[400px]" showCloseButton>
           <DialogHeader>
-            <DialogTitle>O'chirish</DialogTitle>
-            <DialogDescription>"{confirmDelete?.name}" o'chirilsinmi?</DialogDescription>
+            <DialogTitle>O‘chirish</DialogTitle>
+            <DialogDescription>
+              {confirmDelete ? `«${confirmDelete.name}» o‘chirilsinmi?` : null}
+            </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setConfirmDelete(null)}>Отмена</Button>
-            <Button variant="destructive" disabled={deleteMut.isPending} onClick={() => confirmDelete && deleteMut.mutate(confirmDelete.id)}>O'chirish</Button>
+            <Button variant="destructive" disabled={deleteMut.isPending} onClick={() => confirmDelete && deleteMut.mutate(confirmDelete.id)}>O‘chirish</Button>
           </div>
         </DialogContent>
       </Dialog>

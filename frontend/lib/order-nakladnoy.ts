@@ -12,6 +12,7 @@ export type NakladnoyTemplateId = (typeof NAKLADNOY_TEMPLATE_OPTIONS)[number]["i
 
 export type NakladnoyCodeColumn = "sku" | "barcode";
 export type NakladnoyGroupBy = "territory" | "agent" | "expeditor";
+export type NakladnoyFileFormat = "xlsx" | "pdf";
 
 /** Brauzerda saqlanadigan eksport sozlamalari (API body bilan mos). */
 export type NakladnoyExportPrefs = {
@@ -87,8 +88,9 @@ export async function downloadOrdersNakladnoyXlsx(args: {
   orderIds: number[];
   template: NakladnoyTemplateId;
   prefs: NakladnoyExportPrefs;
+  format?: NakladnoyFileFormat;
 }): Promise<void> {
-  const { tenantSlug, orderIds, template, prefs } = args;
+  const { tenantSlug, orderIds, template, prefs, format = "xlsx" } = args;
   if (orderIds.length === 0) {
     throw new Error("Zakaz tanlanmagan.");
   }
@@ -98,6 +100,7 @@ export async function downloadOrdersNakladnoyXlsx(args: {
       {
         order_ids: orderIds,
         template,
+        format,
         ...nakladnoyPrefsToApiBody(prefs)
       },
       { responseType: "blob" }
@@ -117,7 +120,7 @@ export async function downloadOrdersNakladnoyXlsx(args: {
     const blob = res.data as Blob;
     const name =
       parseFilenameFromContentDisposition(res.headers["content-disposition"]) ??
-      `nakladnoy_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      `nakladnoy_${new Date().toISOString().slice(0, 10)}.${format}`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

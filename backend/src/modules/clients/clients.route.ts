@@ -7,12 +7,11 @@ import {
   addClientBalanceMovement,
   bulkSetClientsActive,
   buildClientImportTemplateBuffer,
-  checkDuplicateCandidates,
   createClientMinimal,
   exportClientsFilteredCsv,
   getClientDetail,
   getClientReferences,
-  getDuplicatePhoneGroups,
+  getClientReconciliationPdfBuffer,
   importClientsFromXlsx,
   listClientAuditLogs,
   listClientBalanceMovements,
@@ -23,10 +22,29 @@ import {
 
 const catalogRoles = ["admin", "operator"] as const;
 
-const checkBodySchema = z.object({
-  name: z.string().min(1),
-  phone: z.string().nullable().optional()
-});
+function parseLocalYmd(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, mo - 1, d, 0, 0, 0, 0);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function endOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
+function defaultReconciliationRange(): { from: Date; toEnd: Date } {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const toEnd = endOfLocalDay(now);
+  return { from, toEnd };
+}
 
 const optionalRefString = z.string().max(500).nullable().optional();
 
@@ -350,16 +368,6 @@ export async function registerClientRoutes(app: FastifyInstance) {
   );
 
   app.get(
-    "/api/:slug/clients/duplicate-groups",
-    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
-    async (request, reply) => {
-      if (!ensureTenantContext(request, reply)) return;
-      const groups = await getDuplicatePhoneGroups(request.tenant!.id);
-      return reply.send({ data: groups });
-    }
-  );
-
-  app.get(
     "/api/:slug/clients/export",
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
@@ -395,24 +403,6 @@ export async function registerClientRoutes(app: FastifyInstance) {
         actorUserId
       );
       return reply.send(result);
-    }
-  );
-
-  app.post(
-    "/api/:slug/clients/check-duplicates",
-    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
-    async (request, reply) => {
-      if (!ensureTenantContext(request, reply)) return;
-      const parsed = checkBodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
-      }
-      const matches = await checkDuplicateCandidates(
-        request.tenant!.id,
-        parsed.data.name,
-        parsed.data.phone ?? null
-      );
-      return reply.send({ matches });
     }
   );
 
@@ -464,6 +454,63 @@ export async function registerClientRoutes(app: FastifyInstance) {
       } catch (e) {
         if (e instanceof Error && e.message === "NOT_FOUND") {
           return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/:id/reconciliation-pdf",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const q = request.query as Record<string, string | undefined>;
+      let dateFrom: Date;
+      let dateToEnd: Date;
+      if ((q.date_from && q.date_from.trim()) || (q.date_to && q.date_to.trim())) {
+        if (!q.date_from?.trim() || !q.date_to?.trim()) {
+          return reply.status(400).send({
+            error: "DateRangeIncomplete",
+            message: "date_from va date_to ikkalasi ham YYYY-MM-DD ko‘rinishida yuborilishi kerak."
+          });
+        }
+        const a = parseLocalYmd(q.date_from);
+        const b = parseLocalYmd(q.date_to);
+        if (!a || !b) {
+          return reply.status(400).send({ error: "InvalidDate" });
+        }
+        dateFrom = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 0, 0, 0, 0);
+        dateToEnd = endOfLocalDay(b);
+      } else {
+        const d = defaultReconciliationRange();
+        dateFrom = d.from;
+        dateToEnd = d.toEnd;
+      }
+      try {
+        const buf = await getClientReconciliationPdfBuffer(request.tenant!.id, id, dateFrom, dateToEnd);
+        const ymd = (x: Date) =>
+          `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+        const fname = `akt-sverka-client-${id}-${ymd(dateFrom)}_${ymd(dateToEnd)}.pdf`;
+        return reply
+          .header("Content-Type", "application/pdf")
+          .header("Content-Disposition", `attachment; filename="${fname}"`)
+          .send(buf);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "BAD_DATE_RANGE") {
+          return reply.status(400).send({ error: "BadDateRange", message: "date_from date_to dan katta." });
+        }
+        if (msg === "DATE_RANGE_TOO_LONG") {
+          return reply.status(400).send({
+            error: "DateRangeTooLong",
+            message: "Davr 400 kundan oshmasligi kerak."
+          });
         }
         throw e;
       }

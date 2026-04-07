@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +43,7 @@ export default function ExpensesPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -59,9 +59,9 @@ export default function ExpensesPage() {
       setPnl(pnlData);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, [tenant, page, statusFilter]);
 
-  useEffect(() => { fetchAll(); }, [tenant, page, statusFilter]);
+  useEffect(() => { void fetchAll(); }, [fetchAll]);
 
   const handleAction = async (id: number, action: string) => {
     await apiFetch(`/api/${tenant}/expenses/${id}/${action}`, { method: "POST", body: action === "reject" ? JSON.stringify({ note: "Rad etilgan" }) : undefined });
@@ -86,7 +86,7 @@ export default function ExpensesPage() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle>Chiqimlar ro'yxati</CardTitle>
+            <CardTitle>Chiqimlar ro‘yxati</CardTitle>
             <Select
               value={statusFilter}
               onValueChange={(v: string) => {
@@ -105,7 +105,7 @@ export default function ExpensesPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? <div className="py-8 text-center">Yuklanmoqda...</div> : (
+          {loading ? <div className="py-8 text-center">Загрузка…</div> : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -120,7 +120,7 @@ export default function ExpensesPage() {
               </TableHeader>
               <TableBody>
                 {expenses.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Ma'lumot yo'q</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Ma’lumot yo‘q</TableCell></TableRow>
                 ) : expenses.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell>{typeMap[e.expense_type] || e.expense_type}</TableCell>

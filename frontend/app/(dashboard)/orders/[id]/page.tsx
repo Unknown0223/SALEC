@@ -45,15 +45,17 @@ export default function OrderDetailPage() {
   }, []);
 
   const nakladnoyMut = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (format: "xlsx" | "pdf" = "xlsx") => {
       await downloadOrdersNakladnoyXlsx({
         tenantSlug: tenantSlug!,
         orderIds: [orderId],
         template: nakladnoyTemplate,
-        prefs: nakladnoyPrefs
+        prefs: nakladnoyPrefs,
+        format
       });
     },
-    onSuccess: () => setNakladnoyFeedback("Excel (.xlsx) yuklab olindi."),
+    onSuccess: (_data, format) =>
+      setNakladnoyFeedback(format === "pdf" ? "PDF yuklab olindi." : "Excel (.xlsx) yuklab olindi."),
     onError: (err: unknown) =>
       setNakladnoyFeedback(getUserFacingError(err, "Nakladnoyni yuklab bo‘lmadi."))
   });
@@ -128,10 +130,22 @@ export default function OrderDetailPage() {
                   disabled={nakladnoyMut.isPending}
                   onClick={() => {
                     setNakladnoyFeedback(null);
-                    nakladnoyMut.mutate();
+                    nakladnoyMut.mutate("xlsx");
                   }}
                 >
                   {nakladnoyMut.isPending ? "Excel…" : "Nakladnoy (.xlsx)"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={nakladnoyMut.isPending}
+                  onClick={() => {
+                    setNakladnoyFeedback(null);
+                    nakladnoyMut.mutate("pdf");
+                  }}
+                >
+                  {nakladnoyMut.isPending ? "PDF…" : "Nakladnoy (.pdf)"}
                 </Button>
               </>
             ) : null}
@@ -159,11 +173,11 @@ export default function OrderDetailPage() {
       ) : null}
 
       {!hydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : invalid ? (

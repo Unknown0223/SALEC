@@ -228,7 +228,7 @@ function StockPageContent() {
   if (!authHydrated) {
     return (
       <PageShell>
-        <p className="text-muted-foreground text-sm">Yuklanmoqda…</p>
+        <p className="text-muted-foreground text-sm">Загрузка…</p>
       </PageShell>
     );
   }
@@ -250,7 +250,7 @@ function StockPageContent() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-          ← Boshqaruv
+          ← Панель управления
         </Link>
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/stock/warehouses">
           Omborlar boshqaruvi
@@ -373,7 +373,7 @@ function StockPageContent() {
                             colSpan={visibleStockCols.length}
                             className="text-muted-foreground p-6 text-center"
                           >
-                            Yuklanmoqda…
+                            Загрузка…
                           </td>
                         </tr>
                       ) : stock.length === 0 ? (
@@ -532,7 +532,7 @@ function StockPageContent() {
                 {!receiptWarehouseId ? (
                   <p className="text-muted-foreground text-sm">Avval omborni tanlang.</p>
                 ) : productsLoading ? (
-                  <p className="text-muted-foreground text-sm">Mahsulotlar yuklanmoqda…</p>
+                  <p className="text-muted-foreground text-sm">Mahsulotlar Загрузка…</p>
                 ) : lines.length === 0 ? (
                   <p className="text-muted-foreground text-sm">Mahsulot yo‘q — avval katalogga SKU qo‘shing.</p>
                 ) : (

@@ -6,13 +6,10 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
-
 export default function SpravochnikPage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
   const effectiveRole = useEffectiveRole();
-  const [msg, setMsg] = useState<string | null>(null);
 
   const users = useQuery({
     queryKey: ["ref-users", tenantSlug],
@@ -131,7 +128,7 @@ export default function SpravochnikPage() {
               ) : null}
             </div>
             {users.isLoading ? (
-              <p className="text-xs text-muted-foreground">Yuklanmoqda</p>
+              <p className="text-xs text-muted-foreground">Загрузка</p>
             ) : (
               <ul className="list-disc pl-5 text-sm">
                 {(users.data ?? []).map((u) => (
@@ -162,7 +159,7 @@ export default function SpravochnikPage() {
               Sozlamalar: Тип цены
             </Link>
             {priceTypes.isLoading ? (
-              <p className="text-xs text-muted-foreground">Yuklanmoqda</p>
+              <p className="text-xs text-muted-foreground">Загрузка</p>
             ) : (
               <p className="text-sm text-muted-foreground">
                 {(priceTypes.data ?? []).join(", ") || "—"}
@@ -198,7 +195,6 @@ export default function SpravochnikPage() {
             ) : null}
           </section>
 
-          {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
         </>
       )}
     </div>

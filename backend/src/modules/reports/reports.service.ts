@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
+import * as XLSX from "xlsx";
 import { prisma } from "../../config/database";
+import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 
 /** ─── Helpers ─────────────────────────────────────────────── */
 
@@ -289,6 +291,12 @@ export async function getAgentKpi(
   const range = parseDateRange(from, to);
   const start = range.gte ?? new Date(Date.now() - 30 * 86400000);
   const end = range.lte ?? new Date();
+
+  const agents = await prisma.user.findMany({
+    where: { tenant_id: tenantId, role: "agent", is_active: true },
+    select: { id: true, name: true },
+    orderBy: { id: "asc" }
+  });
 
   if (agents.length === 0) {
     return { data: [] };
@@ -583,9 +591,24 @@ export async function getClientChurn(
       )
   `;
 
-  const churnedRows = await prisma.$queryRaw<
-    Array<{ client_id: number; client_name: string; last_order: Date; total_historical: Prisma.Decimal }>
-  >`
+  const allCount = allClients.length;
+  const activeCount = activeIds.size;
+  const totalChurned = allCount - activeCount;
+  const churnRate = allCount > 0 ? Number((totalChurned / allCount * 100).toFixed(1)) : 0;
+
+  const churnedCandidateIds = allClients.filter((c) => !activeIds.has(c.id)).map((c) => c.id);
+
+  const churnedRows =
+    churnedCandidateIds.length === 0
+      ? []
+      : await prisma.$queryRaw<
+          Array<{
+            client_id: number;
+            client_name: string;
+            last_order: Date;
+            total_historical: Prisma.Decimal;
+          }>
+        >`
     SELECT c.id AS client_id, c.name AS client_name,
       MAX(o.created_at) AS last_order,
       COALESCE(SUM(o.total_sum), 0)::numeric(15,2) AS total_historical
@@ -593,16 +616,11 @@ export async function getClientChurn(
     JOIN orders o ON o.client_id = c.id AND o.status NOT IN ('cancelled', 'returned')
     WHERE c.tenant_id = ${tenantId}
       AND c.merged_into_client_id IS NULL
-      AND c.id IN (${Prisma.join(allClients.filter((c) => !activeIds.has(c.id)).map((c) => c.id))})
+      AND c.id IN (${Prisma.join(churnedCandidateIds.map((id) => Prisma.sql`${id}`))})
     GROUP BY c.id, c.name
     ORDER BY last_order DESC
     LIMIT 50
   `;
-
-  const allCount = allClients.length;
-  const activeCount = activeIds.size;
-  const totalChurned = allCount - activeCount;
-  const churnRate = allCount > 0 ? Number((totalChurned / allCount * 100).toFixed(1)) : 0;
 
   return {
     churnedClients: churnedRows.map((r) => ({
@@ -615,4 +633,234 @@ export async function getClientChurn(
     activeClients: activeCount,
     churnRate
   };
+}
+
+/** ─── Client receivables (ochiq zakazlar / kredit yuki) ─── */
+
+export type ClientReceivableRow = {
+  client_id: number;
+  name: string;
+  phone: string | null;
+  is_active: boolean;
+  credit_limit: string;
+  account_balance: string;
+  outstanding: string;
+  headroom: string;
+  headroom_remaining: string;
+  over_limit: boolean;
+};
+
+export type ClientReceivablesResult = {
+  data: ClientReceivableRow[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+function receivableExcludedStatusSql() {
+  return Prisma.join(
+    ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE.map((s) => Prisma.sql`${s}`)
+  );
+}
+
+export async function getClientReceivables(
+  tenantId: number,
+  opts: {
+    page: number;
+    limit: number;
+    search?: string;
+    only_over_limit?: boolean;
+    active_only?: boolean;
+  }
+): Promise<ClientReceivablesResult> {
+  const page = Math.max(1, Math.floor(opts.page));
+  const limit = Math.min(200, Math.max(1, Math.floor(opts.limit)));
+  const offset = (page - 1) * limit;
+
+  const q = (opts.search ?? "").trim();
+  const searchClause =
+    q.length > 0
+      ? Prisma.sql`AND (c.name ILIKE ${`%${q}%`} OR COALESCE(c.phone, '') ILIKE ${`%${q}%`})`
+      : Prisma.empty;
+
+  const activeClause = opts.active_only === true ? Prisma.sql`AND c.is_active = true` : Prisma.empty;
+
+  /** Limitdan oshgan — `filtered` ichida ustunlar `fr` nomisiz (bir darajali CTE) */
+  const overClause =
+    opts.only_over_limit === true
+      ? Prisma.sql`AND credit_limit > 0 AND outstanding > (credit_limit + account_balance)`
+      : Prisma.empty;
+
+  const st = receivableExcludedStatusSql();
+
+  const countRows = await prisma.$queryRaw<[{ total: bigint }]>`
+    WITH oagg AS (
+      SELECT o.client_id,
+        SUM(o.total_sum)::numeric(15,2) AS outstanding
+      FROM orders o
+      WHERE o.tenant_id = ${tenantId}
+        AND o.status NOT IN (${st})
+      GROUP BY o.client_id
+      HAVING SUM(o.total_sum) > 0
+    ),
+    fr AS (
+      SELECT
+        c.id AS client_id,
+        c.credit_limit::numeric(15,2) AS credit_limit,
+        COALESCE(cb.balance, 0)::numeric(15,2) AS account_balance,
+        oagg.outstanding
+      FROM oagg
+      INNER JOIN clients c ON c.id = oagg.client_id AND c.tenant_id = ${tenantId}
+      LEFT JOIN client_balances cb ON cb.tenant_id = c.tenant_id AND cb.client_id = c.id
+      WHERE c.merged_into_client_id IS NULL
+        ${searchClause}
+        ${activeClause}
+    ),
+    filtered AS (
+      SELECT * FROM fr WHERE true
+        ${overClause}
+    )
+    SELECT COUNT(*)::bigint AS total FROM filtered
+  `;
+
+  const total = Number(countRows[0]?.total ?? 0n);
+
+  const dataRows = await prisma.$queryRaw<
+    Array<{
+      client_id: number;
+      name: string;
+      phone: string | null;
+      is_active: boolean;
+      credit_limit: Prisma.Decimal;
+      account_balance: Prisma.Decimal;
+      outstanding: Prisma.Decimal;
+      headroom: Prisma.Decimal;
+      headroom_remaining: Prisma.Decimal;
+      over_limit: boolean;
+    }>
+  >`
+    WITH oagg AS (
+      SELECT o.client_id,
+        SUM(o.total_sum)::numeric(15,2) AS outstanding
+      FROM orders o
+      WHERE o.tenant_id = ${tenantId}
+        AND o.status NOT IN (${st})
+      GROUP BY o.client_id
+      HAVING SUM(o.total_sum) > 0
+    ),
+    fr AS (
+      SELECT
+        c.id AS client_id,
+        c.name,
+        c.phone,
+        c.is_active,
+        c.credit_limit::numeric(15,2) AS credit_limit,
+        COALESCE(cb.balance, 0)::numeric(15,2) AS account_balance,
+        oagg.outstanding
+      FROM oagg
+      INNER JOIN clients c ON c.id = oagg.client_id AND c.tenant_id = ${tenantId}
+      LEFT JOIN client_balances cb ON cb.tenant_id = c.tenant_id AND cb.client_id = c.id
+      WHERE c.merged_into_client_id IS NULL
+        ${searchClause}
+        ${activeClause}
+    ),
+    filtered AS (
+      SELECT * FROM fr WHERE true
+        ${overClause}
+    )
+    SELECT
+      client_id,
+      name,
+      phone,
+      is_active,
+      credit_limit,
+      account_balance,
+      outstanding,
+      (credit_limit + account_balance) AS headroom,
+      (credit_limit + account_balance - outstanding) AS headroom_remaining,
+      (credit_limit > 0 AND outstanding > (credit_limit + account_balance)) AS over_limit
+    FROM filtered
+    ORDER BY outstanding DESC, client_id ASC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
+
+  return {
+    total,
+    page,
+    limit,
+    data: dataRows.map((r) => ({
+      client_id: r.client_id,
+      name: r.name,
+      phone: r.phone,
+      is_active: r.is_active,
+      credit_limit: r.credit_limit.toString(),
+      account_balance: r.account_balance.toString(),
+      outstanding: r.outstanding.toString(),
+      headroom: r.headroom.toString(),
+      headroom_remaining: r.headroom_remaining.toString(),
+      over_limit: r.over_limit
+    }))
+  };
+}
+
+export async function exportClientReceivablesXlsx(
+  tenantId: number,
+  opts: {
+    search?: string;
+    only_over_limit?: boolean;
+    active_only?: boolean;
+    maxRows?: number;
+  }
+): Promise<{ buffer: Buffer; truncated: boolean; total: number }> {
+  const cap = Math.min(10000, Math.max(1, opts.maxRows ?? 5000));
+  const batch = await getClientReceivables(tenantId, {
+    page: 1,
+    limit: cap,
+    search: opts.search,
+    only_over_limit: opts.only_over_limit,
+    active_only: opts.active_only
+  });
+  const truncated = batch.total > cap;
+  const headers = [
+    "ID",
+    "Mijoz",
+    "Telefon",
+    "Faol",
+    "Kredit limiti",
+    "Hisob saldosi",
+    "Ochiq zakazlar",
+    "Headroom",
+    "Qoldiq",
+    "Limit oshgan"
+  ];
+  const rows: (string | number)[][] = batch.data.map((r) => [
+    r.client_id,
+    r.name,
+    r.phone ?? "",
+    r.is_active ? "Ha" : "Yo‘q",
+    Number.parseFloat(r.credit_limit) || 0,
+    Number.parseFloat(r.account_balance) || 0,
+    Number.parseFloat(r.outstanding) || 0,
+    Number.parseFloat(r.headroom) || 0,
+    Number.parseFloat(r.headroom_remaining) || 0,
+    r.over_limit ? "Ha" : "Yo‘q"
+  ]);
+  const aoa = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [
+    { wch: 8 },
+    { wch: 28 },
+    { wch: 16 },
+    { wch: 6 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 12 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Qarzdorlik");
+  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  return { buffer, truncated, total: batch.total };
 }

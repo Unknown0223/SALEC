@@ -14,14 +14,14 @@ function NewOrderContent() {
   const hydrated = useAuthStoreHydrated();
 
   if (!hydrated) {
-    return <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка сессии…</p>;
   }
 
   if (!tenantSlug) {
     return (
       <p className="text-sm text-destructive">
         <Link href="/login" className="underline">
-          Qayta kiring
+          Войти снова
         </Link>
       </p>
     );
@@ -41,7 +41,7 @@ function NewOrderContent() {
 
 export default function NewOrderPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-muted-foreground">Yuklanmoqda…</p>}>
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Загрузка…</p>}>
       <NewOrderContent />
     </Suspense>
   );

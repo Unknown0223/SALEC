@@ -145,7 +145,7 @@ export function CatalogSimpleTab({
             {listQ.isLoading ? (
               <tr>
                 <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
-                  Yuklanmoqda…
+                  Загрузка…
                 </td>
               </tr>
             ) : rows.length === 0 ? (

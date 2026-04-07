@@ -129,7 +129,7 @@ export default function ClientListsSpravochnikPage() {
       {!hydrated || !tenantSlug ? (
         <p className="text-sm text-muted-foreground">…</p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : !isAdmin ? (
         <p className="text-sm text-destructive">Faqat admin tahrirlashi mumkin.</p>
       ) : (

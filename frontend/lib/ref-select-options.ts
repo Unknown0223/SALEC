@@ -21,7 +21,7 @@ export function dedupeRefSelectOptionsByTerritoryDisplayName(options: RefSelectO
     const row = { value: v, label: lab };
     byNk.set(nk, cur ? prefer(cur, row) : row);
   }
-  return [...byNk.values()].sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  return Array.from(byNk.values()).sort((a, b) => a.label.localeCompare(b.label, "ru"));
 }
 
 /** Joriy qiymat + serverdan kelgan `{ value, label }` + fallback qatorlar ro‘yxati. */

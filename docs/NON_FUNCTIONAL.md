@@ -28,7 +28,7 @@ Bu hujjat loyiha bo‘yicha **nofunksional** yo‘nalishlarni belgilaydi; har bi
 ## Yagona klientlar bazasi va dublikatlar
 
 - Barcha klientlar **tenant ichida** bitta `clients` jadvalida; `phone_normalized` telefonni solishtirish uchun.
-- **Dublikatlar:** bir xil `phone_normalized` bo‘yicha guruhlar (`GET .../duplicate-groups`), yangi yozuvdan oldin tekshiruv (`POST .../check-duplicates`).
+- **Dublikatlar (UI olib tashlangan):** `phone_normalized` maydoni va **merge** API (`POST .../merge`) saqlanadi; avvalgi duplicate-groups / check-duplicates endpointlari yo‘q.
 - **Birlashtirish:** `POST .../merge` — zakazlar `keep` mijozga ko‘chiriladi, qolgan yozuvlar `merged_into_client_id` + `is_active: false`; **audit** `client_audit_logs` da `client.merge`.
 - **Audit:** `GET .../clients/:id/audit` — PATCH, balans harakatlari, merge; operator/admin ko‘rishi mumkin.
 - Kelajak: STIR/INN, fonetik nom, avtomatik merge qoidalari.

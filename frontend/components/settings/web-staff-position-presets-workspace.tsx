@@ -322,7 +322,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
               {listQ.isLoading ? (
                 <tr>
                   <td colSpan={colCount} className="px-4 py-10 text-center text-muted-foreground">
-                    Yuklanmoqda…
+                    Загрузка…
                   </td>
                 </tr>
               ) : subset.length === 0 ? (
@@ -475,7 +475,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
                     <span className="text-muted-foreground"> — audit bo‘yicha o‘zgarishlar zanjiri</span>
                   </>
                 ) : (
-                  "Yuklanmoqda…"
+                  "Загрузка…"
                 )}
               </DialogDescription>
             </div>
@@ -485,7 +485,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
             {historyQ.isLoading ? (
               <div className="flex flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
                 <Loader2Icon className="size-8 animate-spin opacity-50" aria-hidden />
-                <p className="text-xs">Yuklanmoqda…</p>
+                <p className="text-xs">Загрузка…</p>
               </div>
             ) : historyQ.isError ? (
               <div className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-3 text-center text-xs text-destructive">

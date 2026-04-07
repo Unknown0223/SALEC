@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import { buildTransferPdf } from "./warehouse-transfers-pdf";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,7 +52,14 @@ export type TransferListRow = {
   received_at: string | null;
   created_at: string;
   created_by_user_id: number | null;
+  created_by_name: string | null;
+  created_by_login: string | null;
+  received_by_user_id: number | null;
+  received_by_name: string | null;
+  received_by_login: string | null;
   line_count: number;
+  /** Sum of line qty (for list UI) */
+  total_qty: string;
 };
 
 export type TransferLineRow = {
@@ -80,8 +88,17 @@ export type TransferDetail = {
   received_at: string | null;
   created_at: string;
   created_by_user_id: number | null;
+  created_by_name: string | null;
+  created_by_login: string | null;
   received_by_user_id: number | null;
+  received_by_name: string | null;
+  received_by_login: string | null;
   lines: TransferLineRow[];
+};
+
+export type TransferPdfResult = {
+  buffer: Buffer;
+  filename: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -123,6 +140,47 @@ function validateWarehouseDisjoint(input: { source_warehouse_id: number; destina
   }
 }
 
+/** Mavjud = qty − reserved_qty; ko‘chirish miqdori shundan oshmasin (draft yaratish / yangilash / start). */
+async function assertSourceStockForLines(
+  tenantId: number,
+  sourceWarehouseId: number,
+  lines: { product_id: number; qty: number | Prisma.Decimal }[]
+): Promise<void> {
+  if (lines.length === 0) return;
+  const productIds = [...new Set(lines.map((l) => l.product_id))];
+  const products = await prisma.$queryRaw<
+    { id: number; sku: string }[]
+  >`SELECT id, sku FROM products WHERE id IN (${Prisma.join(
+    productIds.map((pid) => Prisma.sql`${pid}`)
+  )}) AND tenant_id = ${tenantId}`;
+  if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
+
+  for (const line of lines) {
+    const delta = new Prisma.Decimal(line.qty);
+    if (delta.lte(0)) throw new Error("BAD_QTY");
+
+    const stock = await prisma.$queryRaw<
+      { qty: Prisma.Decimal; reserved_qty: Prisma.Decimal }[]
+    >`
+      SELECT qty, reserved_qty FROM stock
+      WHERE tenant_id = ${tenantId}
+        AND warehouse_id = ${sourceWarehouseId}
+        AND product_id = ${line.product_id}
+    `;
+
+    const available = stock[0]
+      ? stock[0].qty.minus(stock[0].reserved_qty)
+      : new Prisma.Decimal(0);
+
+    if (available.lt(delta)) {
+      const productInfo = products.find((p) => p.id === line.product_id);
+      throw new Error(
+        `INSUFFICIENT_STOCK:product=${productInfo?.sku ?? line.product_id}:need=${delta}:have=${available}`
+      );
+    }
+  }
+}
+
 function generateTransferNumber(id: number): string {
   return `WT-${String(id).padStart(6, "0")}`;
 }
@@ -145,6 +203,8 @@ export async function createTransfer(
     source_warehouse_id: input.source_warehouse_id,
     destination_warehouse_id: input.destination_warehouse_id,
   });
+
+  await assertSourceStockForLines(tenantId, input.source_warehouse_id, input.lines);
 
   const tmp = `TMP-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -222,9 +282,10 @@ export async function getTransfers(
   if (srcWh != null) extraParts.push(Prisma.sql`t.source_warehouse_id = ${srcWh}`);
   if (dstWh != null) extraParts.push(Prisma.sql`t.destination_warehouse_id = ${dstWh}`);
 
-  const whereClause = extraParts.length > 0
-    ? Prisma.sql`${baseWhere} AND ${Prisma.join(extraParts, Prisma.sql` AND `)}`
-    : baseWhere;
+  const whereClause =
+    extraParts.length > 0
+      ? Prisma.sql`${baseWhere} AND ${Prisma.join(extraParts, " AND ")}`
+      : baseWhere;
 
   const totalCount = await prisma.$queryRaw<{ total: bigint }[]>(
     Prisma.sql`SELECT COUNT(*) AS total FROM warehouse_transfers t WHERE ${whereClause}`
@@ -246,17 +307,37 @@ export async function getTransfers(
       received_at: Date | null;
       created_at: Date;
       created_by_user_id: number | null;
+      received_by_user_id: number | null;
+      created_by_name: string | null;
+      created_by_login: string | null;
+      received_by_name: string | null;
+      received_by_login: string | null;
       line_count: bigint;
+      total_qty: Prisma.Decimal | null;
     }[]
   >(
     Prisma.sql`
-      SELECT t.*, sw.name as source_warehouse_name, dw.name as destination_warehouse_name,
-             COALESCE(lc.cnt, 0) as line_count
+      SELECT t.id, t.number, t.status,
+             t.source_warehouse_id, t.destination_warehouse_id,
+             t.comment, t.planned_date, t.started_at, t.received_at, t.created_at,
+             t.created_by_user_id, t.received_by_user_id,
+             sw.name as source_warehouse_name,
+             dw.name as destination_warehouse_name,
+             cr.name as created_by_name,
+             cr.login as created_by_login,
+             rv.name as received_by_name,
+             rv.login as received_by_login,
+             COALESCE(lc.cnt, 0) as line_count,
+             COALESCE(lc.sum_qty, 0) as total_qty
       FROM warehouse_transfers t
       JOIN warehouses sw ON t.source_warehouse_id = sw.id
       JOIN warehouses dw ON t.destination_warehouse_id = dw.id
+      LEFT JOIN users cr ON cr.id = t.created_by_user_id AND cr.tenant_id = t.tenant_id
+      LEFT JOIN users rv ON rv.id = t.received_by_user_id AND rv.tenant_id = t.tenant_id
       LEFT JOIN (
-        SELECT transfer_id, COUNT(*) as cnt
+        SELECT transfer_id,
+               COUNT(*)::bigint as cnt,
+               SUM(qty) as sum_qty
         FROM warehouse_transfer_lines
         GROUP BY transfer_id
       ) lc ON lc.transfer_id = t.id
@@ -281,7 +362,13 @@ export async function getTransfers(
     received_at: r.received_at?.toISOString() ?? null,
     created_at: r.created_at.toISOString(),
     created_by_user_id: r.created_by_user_id,
+    created_by_name: r.created_by_name,
+    created_by_login: r.created_by_login,
+    received_by_user_id: r.received_by_user_id,
+    received_by_name: r.received_by_name,
+    received_by_login: r.received_by_login,
     line_count: Number(r.line_count),
+    total_qty: (r.total_qty ?? new Prisma.Decimal(0)).toString(),
   }));
 
   return { data, total };
@@ -311,15 +398,25 @@ export async function getTransferById(
       created_at: Date;
       created_by_user_id: number | null;
       received_by_user_id: number | null;
+      created_by_name: string | null;
+      created_by_login: string | null;
+      received_by_name: string | null;
+      received_by_login: string | null;
     }[]
   >(
     Prisma.sql`
       SELECT t.*,
              sw.name as source_warehouse_name,
-             dw.name as destination_warehouse_name
+             dw.name as destination_warehouse_name,
+             cr.name as created_by_name,
+             cr.login as created_by_login,
+             rv.name as received_by_name,
+             rv.login as received_by_login
       FROM warehouse_transfers t
       JOIN warehouses sw ON t.source_warehouse_id = sw.id
       JOIN warehouses dw ON t.destination_warehouse_id = dw.id
+      LEFT JOIN users cr ON cr.id = t.created_by_user_id AND cr.tenant_id = t.tenant_id
+      LEFT JOIN users rv ON rv.id = t.received_by_user_id AND rv.tenant_id = t.tenant_id
       WHERE t.id = ${id} AND t.tenant_id = ${tenantId}
     `
   );
@@ -377,8 +474,26 @@ export async function getTransferById(
     received_at: t.received_at?.toISOString() ?? null,
     created_at: t.created_at.toISOString(),
     created_by_user_id: t.created_by_user_id,
+    created_by_name: t.created_by_name,
+    created_by_login: t.created_by_login,
     received_by_user_id: t.received_by_user_id,
+    received_by_name: t.received_by_name,
+    received_by_login: t.received_by_login,
     lines,
+  };
+}
+
+export async function getTransferPdfById(
+  tenantId: number,
+  id: number
+): Promise<TransferPdfResult> {
+  const detail = await getTransferById(tenantId, id);
+  if (!detail) throw new Error("NOT_FOUND");
+  const buffer = await buildTransferPdf(detail);
+  const day = new Date().toISOString().slice(0, 10);
+  return {
+    buffer,
+    filename: `warehouse_transfer_${detail.number}_${day}.pdf`.replace(/\s+/g, "_"),
   };
 }
 
@@ -408,6 +523,14 @@ export async function updateTransfer(
     source_warehouse_id: srcWh,
     destination_warehouse_id: dstWh,
   });
+
+  if (input.lines != null) {
+    await assertSourceStockForLines(
+      tenantId,
+      srcWh,
+      input.lines.map((l) => ({ product_id: l.product_id, qty: l.qty }))
+    );
+  }
 
   await prisma.$transaction(async () => {
     // Update header fields (each one is safe because Prisma.Sql handles parameterization)
@@ -508,38 +631,18 @@ export async function startTransfer(
 
   if (!lines.length) throw new Error("EMPTY_LINES");
 
-  // Pre-validate: verify all products exist and source stock has enough qty
+  await assertSourceStockForLines(
+    tenantId,
+    sourceWarehouseId,
+    lines.map((l) => ({ product_id: l.product_id, qty: l.qty }))
+  );
+
   const productIds = [...new Set(lines.map((l) => l.product_id))];
   const products = await prisma.$queryRaw<
     { id: number; sku: string }[]
-  >`SELECT id, sku FROM products WHERE id IN ${Prisma.join(productIds)} AND tenant_id = ${tenantId}`;
-  if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
-
-  // Verify source stock availability
-  for (const line of lines) {
-    const delta = new Prisma.Decimal(line.qty);
-    if (delta.lte(0)) throw new Error("BAD_QTY");
-
-    const stock = await prisma.$queryRaw<
-      { qty: Prisma.Decimal; reserved_qty: Prisma.Decimal }[]
-    >`
-      SELECT qty, reserved_qty FROM stock
-      WHERE tenant_id = ${tenantId}
-        AND warehouse_id = ${sourceWarehouseId}
-        AND product_id = ${line.product_id}
-    `;
-
-    const available = stock[0]
-      ? stock[0].qty.minus(stock[0].reserved_qty)
-      : new Prisma.Decimal(0);
-
-    if (available.lt(delta)) {
-      const productInfo = products.find((p) => p.id === line.product_id);
-      throw new Error(
-        `INSUFFICIENT_STOCK:product=${productInfo?.sku ?? line.product_id}:need=${delta}:have=${available}`
-      );
-    }
-  }
+  >`SELECT id, sku FROM products WHERE id IN (${Prisma.join(
+    productIds.map((pid) => Prisma.sql`${pid}`)
+  )}) AND tenant_id = ${tenantId}`;
 
   // Execute status change + stock deductions in a single transaction
   await prisma.$transaction(async () => {

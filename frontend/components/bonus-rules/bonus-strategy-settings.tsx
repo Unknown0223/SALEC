@@ -97,11 +97,11 @@ export function BonusStrategySettings() {
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <p className="text-sm text-destructive">Yuklab bo‘lmadi.</p>
       ) : (

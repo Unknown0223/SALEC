@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { apiBaseURL } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import axios, { isAxiosError } from "axios";
 import Link from "next/link";
@@ -23,7 +22,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const { data } = await axios.post(`${apiBaseURL}/auth/login`, {
+      const { data } = await axios.post("/auth/login", {
         slug,
         login,
         password
@@ -44,11 +43,11 @@ export default function LoginPage() {
           | { error?: string; message?: string }
           | undefined;
         if (st === 401 || body?.error === "INVALID_CREDENTIALS") {
-          setError("Login yoki parol noto‘g‘ri.");
+          setError("Неверный логин или пароль.");
           return;
         }
         if (st === 404 || body?.error === "TENANT_NOT_FOUND") {
-          setError("Bunday diler (slug) topilmadi yoki o‘chirilgan.");
+          setError("Дилер (slug) не найден или отключён.");
           return;
         }
         if (body?.message && typeof body.message === "string") {
@@ -57,12 +56,12 @@ export default function LoginPage() {
         }
         if (st === 503) {
           setError(
-            "Server tayyor emas (odatda baza yoki migratsiya). Backend papkasida: npm run db:deploy va PostgreSQL ishlayotganini tekshiring."
+            "Сервер не готов (часто БД или миграции). В каталоге backend: npm run db:deploy и проверьте, что PostgreSQL запущен."
           );
           return;
         }
       }
-      setError("Serverga ulanib bo‘lmadi yoki kutilmagan xato. Backend 4000-portda ishlayotganini tekshiring.");
+      setError("Не удалось подключиться к серверу или непредвиденная ошибка. Проверьте, что backend слушает порт 4000.");
     } finally {
       setLoading(false);
     }
@@ -78,19 +77,19 @@ export default function LoginPage() {
       <div className="relative w-full max-w-sm space-y-6 rounded-2xl border border-border/80 bg-card/95 p-6 shadow-panel-md backdrop-blur-sm">
         <div className="space-y-2 text-center">
           <div className="mx-auto h-1.5 w-12 rounded-full bg-primary" aria-hidden />
-          <h1 className="text-xl font-semibold tracking-tight">Kirish</h1>
-          <p className="text-sm text-muted-foreground">Diler slug va foydalanuvchi ma’lumotlari</p>
+          <h1 className="text-xl font-semibold tracking-tight">Вход</h1>
+          <p className="text-sm text-muted-foreground">Slug дилера и учётные данные</p>
           <p className="text-xs text-muted-foreground">
-            Import: <code className="text-[10px]">npm run import:once</code> — slug bilan bir xil kirish kerak
-            (odatda <span className="font-medium">test1</span>). Namuna xodimlar:{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">demo_sup_sample</code> va hokazo — parol{" "}
+            Импорт: <code className="text-[10px]">npm run import:once</code> — вход с тем же slug (обычно{" "}
+            <span className="font-medium">test1</span>). Примеры сотрудников:{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">demo_sup_sample</code> и др. — пароль{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-[10px]">Parol123!</code>.
           </p>
         </div>
         <form className="space-y-4" onSubmit={onSubmit}>
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor="slug">
-              Diler (slug)
+              Дилер (slug)
             </label>
             <input
               id="slug"
@@ -103,7 +102,7 @@ export default function LoginPage() {
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor="login">
-              Login
+              Логин
             </label>
             <input
               id="login"
@@ -116,7 +115,7 @@ export default function LoginPage() {
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor="password">
-              Parol
+              Пароль
             </label>
             <input
               id="password"
@@ -130,11 +129,11 @@ export default function LoginPage() {
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <Button className="w-full" type="submit" disabled={loading}>
-            {loading ? "Kutilmoqda…" : "Kirish"}
+            {loading ? "Подождите…" : "Войти"}
           </Button>
         </form>
         <p className="text-center text-xs text-muted-foreground">
-          <Link href="/">Bosh sahifa</Link>
+          <Link href="/">Главная</Link>
         </p>
       </div>
     </main>

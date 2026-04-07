@@ -6,8 +6,8 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
-import { api, apiBaseURL } from "@/lib/api";
-import { orderTypeLabel, orderTypeColor, ORDER_TYPE_VALUES } from "@/lib/order-types";
+import { api, apiBaseURL, resolveApiOrigin } from "@/lib/api";
+import { ORDER_TYPE_VALUES } from "@/lib/order-types";
 import { getUserFacingError, isApiUnreachable } from "@/lib/error-utils";
 import type { ClientRow } from "@/lib/client-types";
 import type { ProductRow } from "@/lib/product-types";
@@ -332,7 +332,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         qtyAgg.set(p.id, (qtyAgg.get(p.id) ?? 0) + q);
       }
       const items: { product_id: number; qty: number }[] = [];
-      for (const [productId, totalQ] of qtyAgg) {
+      for (const [productId, totalQ] of Array.from(qtyAgg.entries())) {
         if (totalQ <= 0) continue;
         if (!Number.isFinite(totalQ)) throw new Error("qty");
         const avail = availableOrderQty(stockMap.get(productId));
@@ -341,12 +341,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }
       if (items.length === 0) throw new Error("nolines");
 
+      const validatedOrderType =
+        orderType && (ORDER_TYPE_VALUES as readonly string[]).includes(orderType) ? orderType : "order";
       const body: Record<string, unknown> = {
         client_id: cid,
         warehouse_id: wid,
         agent_id,
         price_type: priceType.trim() || "retail",
-        order_type: ORDER_TYPE_VALUES.includes(orderType as any) ? orderType : "order",
+        order_type: validatedOrderType,
         apply_bonus: applyBonus,
         comment: orderComment.trim() || null,
         items
@@ -500,7 +502,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       <PageShell>
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       </PageShell>
@@ -536,7 +538,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                       : hasQtyOverStock
                         ? "Miqdor qoldiqdan oshmasin"
                         : !stockReadyForLines
-                          ? "Qoldiqlar yuklanmoqda…"
+                          ? "Qoldiqlar Загрузка…"
                           : undefined
               }
             >
@@ -563,7 +565,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               {isApiUnreachable(clientsQ.error) ? (
                 <>
                   So‘rov manzili:{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">{apiBaseURL}</code>.
+                  <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">
+                    {apiBaseURL || resolveApiOrigin()}
+                  </code>{" "}
+                  (devda ko‘pincha Next proxy orqali <code className="text-xs">/api</code>).
                   Klientlar va boshqa ro‘yxatlar backend ishlamaguncha bo‘sh ko‘rinadi. Loyiha ildizidan{" "}
                   <code className="rounded bg-muted px-1 text-xs text-foreground">npm run dev</code> (api+web)
                   yoki{" "}
@@ -953,7 +958,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   {canPickProducts && stockQ.isLoading ? (
                     <tr>
                       <td colSpan={7} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                        Ombor qoldiqlari yuklanmoqda…
+                        Ombor qoldiqlari Загрузка…
                       </td>
                     </tr>
                   ) : null}

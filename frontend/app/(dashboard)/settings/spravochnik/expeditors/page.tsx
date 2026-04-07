@@ -9,7 +9,7 @@ export default function ExpeditorsPage() {
   const hydrated = useAuthStoreHydrated();
 
   if (!hydrated || !tenantSlug) {
-    return <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda...</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка сессии…</p>;
   }
 
   return (

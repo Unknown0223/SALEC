@@ -117,7 +117,7 @@ export function lalakuExpandRegionFilterTokens(token: string): string[] {
     }
   }
 
-  return [...out].filter((s) => s.length > 0);
+  return Array.from(out).filter((s) => s.length > 0);
 }
 
 function slugId(prefix: string, key: string): string {

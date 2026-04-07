@@ -10,7 +10,7 @@ export default function WebStaffPositionPresetsPage() {
   const role = useEffectiveRole();
 
   if (!hydrated || !tenantSlug) {
-    return <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda...</p>;
+    return <p className="text-sm text-muted-foreground">Загрузка сессии…</p>;
   }
 
   if (role !== "admin") {

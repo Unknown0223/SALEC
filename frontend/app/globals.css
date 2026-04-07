@@ -1,5 +1,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./theme-palettes.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -108,6 +109,49 @@
 
 .dark .app-main-canvas {
   background: linear-gradient(165deg, oklch(0.16 0.02 255) 0%, oklch(0.18 0.025 250) 100%);
+}
+
+@layer components {
+  /* Заявки: три визуальных блока — фильтры / панель таблицы / таблица */
+  .orders-hub-section--filters {
+    margin-bottom: 1rem;
+    border-radius: calc(var(--radius) + 2px);
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, var(--primary) 30%);
+    background: linear-gradient(
+      162deg,
+      color-mix(in srgb, var(--card) 80%, var(--primary) 20%) 0%,
+      var(--card) 48%,
+      color-mix(in srgb, var(--card) 94%, var(--muted) 6%) 100%
+    );
+    box-shadow: 0 6px 24px -10px color-mix(in srgb, var(--foreground) 16%, transparent);
+  }
+
+  .orders-hub-section--toolbar {
+    margin-bottom: 1rem;
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid color-mix(in srgb, var(--border) 88%, var(--foreground) 12%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--muted) 50%, var(--card) 50%) 0%,
+      color-mix(in srgb, var(--card) 96%, var(--muted) 4%) 100%
+    );
+    box-shadow: 0 3px 14px -6px color-mix(in srgb, var(--foreground) 12%, transparent);
+  }
+
+  .orders-hub-section--table {
+    margin-bottom: 1rem;
+    border-radius: calc(var(--radius) + 2px);
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border) 55%, var(--primary) 45%);
+    background: var(--card);
+    box-shadow: 0 8px 30px -10px color-mix(in srgb, var(--foreground) 18%, transparent);
+  }
+
+  .orders-filter-field-label {
+    @apply flex flex-col gap-1 text-xs font-medium;
+    color: color-mix(in srgb, var(--foreground) 88%, transparent);
+  }
 }
 
 /* Komplektatsiya sahifasida chop etish: sidebar va yordamchi tugmalar yashirin */

@@ -130,23 +130,6 @@ describe.skipIf(!dbReady)("clients API (database)", () => {
     expect(revert.status).toBe(201);
   });
 
-  it("returns duplicate-groups for admin (array)", async () => {
-    const loginResponse = await request(app.server).post("/api/auth/login").send({
-      slug: "test1",
-      login: "admin",
-      password: "secret123"
-    });
-    expect(loginResponse.status).toBe(200);
-    const token = loginResponse.body.accessToken as string;
-
-    const res = await request(app.server)
-      .get("/api/test1/clients/duplicate-groups")
-      .set("Authorization", `Bearer ${token}`);
-
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.data)).toBe(true);
-  });
-
   it("POST clients creates minimal row and created_from filter includes it", async () => {
     const loginResponse = await request(app.server).post("/api/auth/login").send({
       slug: "test1",

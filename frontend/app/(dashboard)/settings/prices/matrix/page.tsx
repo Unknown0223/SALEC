@@ -279,7 +279,7 @@ export default function PriceMatrixPage() {
               {matrixQ.isLoading ? (
                 <tr>
                   <td colSpan={4} className="px-3 py-6 text-muted-foreground">
-                    Yuklanmoqda…
+                    Загрузка…
                   </td>
                 </tr>
               ) : categoryId === "" || !priceType ? (

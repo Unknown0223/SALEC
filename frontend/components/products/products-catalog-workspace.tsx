@@ -465,7 +465,7 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
                     colSpan={tablePrefs.visibleColumnOrder.length + 1}
                     className="px-3 py-6 text-center text-muted-foreground"
                   >
-                    Yuklanmoqda…
+                    Загрузка…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
@@ -753,7 +753,7 @@ function ProductsCatalogWorkspaceInner({
       description="Каталог и справочники. Категории: /settings/product-categories."
       actions={
         <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-          Boshqaruv
+          Панель управления
         </Link>
       }
     />
@@ -843,7 +843,7 @@ function ProductsCatalogWorkspaceInner({
 
 export function ProductsCatalogWorkspace(props: WorkspaceProps) {
   return (
-    <Suspense fallback={<p className="text-sm text-muted-foreground">Yuklanmoqda…</p>}>
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Загрузка…</p>}>
       <ProductsCatalogWorkspaceInner {...props} />
     </Suspense>
   );

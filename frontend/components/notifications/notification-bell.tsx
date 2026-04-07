@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -21,10 +22,12 @@ export function NotificationBell({ tenantSlug }: { tenantSlug: string | null }) 
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+  const authHydrated = useAuthStoreHydrated();
+  const accessToken = useAuthStore((s) => s.accessToken);
 
   const q = useQuery({
     queryKey: ["notifications", tenantSlug],
-    enabled: Boolean(tenantSlug),
+    enabled: Boolean(tenantSlug) && authHydrated && Boolean(accessToken?.trim()),
     refetchInterval: 60_000,
     queryFn: async () => {
       const { data } = await api.get<{ data: NotifRow[]; unread_count: number }>(

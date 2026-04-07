@@ -6,7 +6,7 @@ import { useEffectiveRole } from "@/lib/auth-store";
 import { resolveSettingsItemHref, settingsSections } from "@/lib/settings-structure";
 import { cn } from "@/lib/utils";
 
-/** SETTINGS_STRUCTURE_PLAN.md — prioritet (1-navbat) bo‘yicha tezkor havolalar. */
+/** Быстрые ссылки по приоритету (см. SETTINGS_STRUCTURE_PLAN.md). */
 const PRIORITY_QUICK_LINKS: { label: string; href: string }[] = [
   { label: "Должности", href: "/settings/web-staff-position-presets" },
   { label: "Валюты", href: "/settings/currencies" },
@@ -28,22 +28,25 @@ export default function SettingsHubPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Sozlamalar</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Настройки</h1>
         <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-          Bo‘limlarni chapdagi ro‘yxatdan tanlang. Tezkor kirish:
+          Разделы выберите в списке слева. Быстрый доступ:
         </p>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Klassik ro‘yxat (foydalanuvchilar, mijoz tanlovlari):{" "}
+          Классический список (пользователи, справочники по клиентам):{" "}
           <Link href="/settings/spravochnik" className="text-primary underline-offset-4 hover:underline">
-            Spravochniklar
+            Справочники
           </Link>
           .
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Link href="/settings/appearance" className={cn(buttonVariants({ variant: "default", size: "sm" }))}>
+          Тема и цвета
+        </Link>
         <Link
-          href={resolveSettingsItemHref(settingsSections[0]!.items[0]!)}
-          className={cn(buttonVariants({ variant: "default", size: "sm" }))}
+          href={resolveSettingsItemHref(settingsSections[1]!.items[0]!)}
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
         >
           Территория
         </Link>

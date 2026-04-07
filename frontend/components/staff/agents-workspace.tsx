@@ -253,12 +253,6 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
     return Array.from(new Set([...fromProfile, ...fromAgents])).sort((a, b) => a.localeCompare(b, "ru"));
   }, [filterOptQ.data, profileQ.data]);
 
-  const tradeDirectionOptions = useMemo(() => {
-    const fromProfile = profileQ.data?.references.trade_directions ?? [];
-    const fromFilters = filterOptQ.data?.trade_directions ?? [];
-    return Array.from(new Set([...fromProfile, ...fromFilters])).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [profileQ.data, filterOptQ.data]);
-
   const listQ = useQuery({
     queryKey: ["agent", tenantSlug, tab, appliedBranch, appliedTd, appliedPos],
     enabled: Boolean(tenantSlug),
@@ -1477,7 +1471,7 @@ function CategoryRestrictRow({
       </div>
       {expanded && checked && (
         <div className="ml-6 mt-1 space-y-1 border-l pl-2">
-          {q.isLoading && <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>}
+          {q.isLoading && <p className="text-xs text-muted-foreground">Загрузка…</p>}
           {products.map((p) => {
             const key = `${cat.id}:${p.id}`;
             return (

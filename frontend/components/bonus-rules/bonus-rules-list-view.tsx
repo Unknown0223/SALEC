@@ -145,7 +145,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
         actions={
           <>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-              Boshqaruv
+              Панель управления
             </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/products">
               Mahsulotlar
@@ -272,16 +272,16 @@ export function BonusRulesListView({ activeOnly }: Props) {
       ) : null}
 
       {!authHydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           Tenant topilmadi.{" "}
           <Link className="underline underline-offset-4" href="/login">
-            Qayta kiring
+            Войти снова
           </Link>
         </p>
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <p className="text-sm text-destructive">
           Xato: {error instanceof Error ? error.message : "API ga ulanib bo‘lmadi"}

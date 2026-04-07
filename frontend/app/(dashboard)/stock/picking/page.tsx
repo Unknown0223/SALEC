@@ -146,7 +146,7 @@ export default function StockPickingPage() {
   if (!hydrated) {
     return (
       <PageShell>
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       </PageShell>
     );
   }
@@ -263,7 +263,7 @@ export default function StockPickingPage() {
                 {ordersQ.isLoading ? (
                   <tr>
                     <td colSpan={8} className="text-muted-foreground px-3 py-8 text-center">
-                      Yuklanmoqda…
+                      Загрузка…
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
@@ -348,7 +348,7 @@ export default function StockPickingPage() {
             <h2 className="text-base font-semibold">SKU bo‘yicha jamlanma</h2>
             <p className="text-muted-foreground text-xs">
               {aggregateQ.isLoading
-                ? "Yuklanmoqda…"
+                ? "Загрузка…"
                 : `${formatIntGrouped(aggFiltered.length)}${scanFilter.trim() ? ` / ${formatIntGrouped(aggAll.length)}` : ""} mahsulot`}
             </p>
           </div>
@@ -406,7 +406,7 @@ export default function StockPickingPage() {
                 {aggregateQ.isLoading ? (
                   <tr>
                     <td colSpan={6} className="text-muted-foreground px-3 py-8 text-center">
-                      Yuklanmoqda…
+                      Загрузка…
                     </td>
                   </tr>
                 ) : aggAll.length === 0 ? (

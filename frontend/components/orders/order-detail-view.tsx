@@ -550,7 +550,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
       <section className="space-y-2">
         <h2 className="text-base font-semibold tracking-tight">Asosiy ma’lumotlar</h2>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+          <p className="text-sm text-muted-foreground">Загрузка…</p>
         ) : isError || !data ? (
           <p className="text-sm text-destructive">Yuklab bo‘lmadi yoki zakaz topilmadi.</p>
         ) : (
@@ -695,7 +695,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                 </Link>
               </div>
               {paymentsListQ.isLoading ? (
-                <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+                <p className="text-xs text-muted-foreground">Загрузка…</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[480px] border-collapse text-xs">
@@ -726,7 +726,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
 
               <h2 className="text-base font-semibold tracking-tight pt-2">Qaytarishlar</h2>
               {returnsListQ.isLoading ? (
-                <p className="text-xs text-muted-foreground">Yuklanmoqda…</p>
+                <p className="text-xs text-muted-foreground">Загрузка…</p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[480px] border-collapse text-xs">
@@ -1046,7 +1046,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                   </p>
                 ) : null}
                 {loadingProducts ? (
-                  <p className="text-xs text-muted-foreground px-1">Mahsulotlar yuklanmoqda…</p>
+                  <p className="text-xs text-muted-foreground px-1">Mahsulotlar Загрузка…</p>
                 ) : null}
                 <div className="overflow-x-auto rounded-md border bg-background">
                   <table className="w-full min-w-[560px] border-collapse text-xs">

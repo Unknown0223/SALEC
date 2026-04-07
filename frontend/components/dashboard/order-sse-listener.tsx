@@ -1,6 +1,6 @@
 "use client";
 
-import { api, apiBaseURL } from "@/lib/api";
+import { api, resolveApiOrigin } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -44,7 +44,7 @@ export function OrderSseListener() {
       const token = useAuthStore.getState().accessToken ?? accessToken;
       if (!token) return;
 
-      const url = new URL(`${apiBaseURL}/api/${slugAtStart}/stream/orders`);
+      const url = new URL(`/api/${slugAtStart}/stream/orders`, resolveApiOrigin());
       url.searchParams.set("access_token", token);
       if (cancelled) return;
 

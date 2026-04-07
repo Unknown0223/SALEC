@@ -19,8 +19,10 @@ import {
   ChevronDown,
   ChevronRight,
   LayoutDashboard,
+  MapPin,
   MapPinned,
   Package,
+  Receipt,
   Settings,
   ShoppingCart,
   Truck,
@@ -100,18 +102,22 @@ function stockNavChildActive(pathname: string): boolean {
 }
 
 function linkIcon(href: string) {
-  if (href === "/dashboard") return LayoutDashboard;
-  if (href === "/clients") return Users;
-  if (href.startsWith("/settings/cash-desks")) return Wallet;
-  if (href === "/stock/receipts") return Truck;
-  if (href === "/reports") return BarChart3;
-  if (href.startsWith("/stock")) return Warehouse;
-  if (href === "/visits") return ClipboardCheck;
-  if (href === "/tasks") return ListTodo;
-  if (href === "/routes") return MapPinned;
-  if (href.startsWith("/orders")) return ShoppingCart;
-  if (href.startsWith("/products")) return Package;
-  if (href.startsWith("/settings")) return Settings;
+  const path = href.split("?")[0] ?? href;
+  if (path === "/dashboard") return LayoutDashboard;
+  if (path === "/clients") return Users;
+  if (path.startsWith("/settings/cash-desks")) return Wallet;
+  if (path === "/payments") return Wallet;
+  if (path === "/expenses") return Receipt;
+  if (path === "/territories") return MapPin;
+  if (path === "/stock/receipts") return Truck;
+  if (path === "/reports") return BarChart3;
+  if (path.startsWith("/stock")) return Warehouse;
+  if (path === "/visits") return ClipboardCheck;
+  if (path === "/tasks") return ListTodo;
+  if (path === "/routes") return MapPinned;
+  if (path.startsWith("/orders") || path.startsWith("/returns")) return ShoppingCart;
+  if (path.startsWith("/products")) return Package;
+  if (path.startsWith("/settings")) return Settings;
   return LayoutDashboard;
 }
 
@@ -366,7 +372,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">SALESDOC</p>
-              <span className="truncate text-sm font-semibold">{tenantSlug ?? "Panel"}</span>
+              <span className="truncate text-sm font-semibold">{tenantSlug ?? "Панель"}</span>
             </div>
             <Button variant="outline" size="sm" type="button" onClick={logout}>
               Выход

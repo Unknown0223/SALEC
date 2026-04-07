@@ -29,6 +29,7 @@ import {
   type NakladnoyOrderPayload,
   DEFAULT_NAKLADNOY_BUILD_OPTIONS
 } from "./order-nakladnoy-xlsx";
+import { buildNakladnoyPdf } from "./order-nakladnoy-pdf";
 
 export type OrderLineInput = { product_id: number; qty: number };
 
@@ -1593,6 +1594,7 @@ export type BulkNakladnoyFileResult = {
   buffer: Buffer;
   filename: string;
   template: NakladnoyTemplateId;
+  format: "xlsx" | "pdf";
   order_ids: number[];
 };
 
@@ -1782,7 +1784,8 @@ export async function requestBulkOrderNakladnoy(
   tenantId: number,
   orderIds: number[],
   template: string,
-  buildOptions: NakladnoyBuildOptions = DEFAULT_NAKLADNOY_BUILD_OPTIONS
+  buildOptions: NakladnoyBuildOptions = DEFAULT_NAKLADNOY_BUILD_OPTIONS,
+  format: "xlsx" | "pdf" = "xlsx"
 ): Promise<BulkNakladnoyFileResult> {
   if (!NAKLADNOY_TEMPLATE_IDS.includes(template as NakladnoyTemplateId)) {
     throw new Error("INVALID_NAKLADNOY_TEMPLATE");
@@ -1873,17 +1876,21 @@ export async function requestBulkOrderNakladnoy(
   const byId = new Map(loaded.map((x) => [x.id, x]));
   const ordered = ids.map((id) => byId.get(id)!).map((o) => mapOrderToNakladnoyPayload(o as OrderNakladnoyDb));
 
-  const buffer = await buildNakladnoyXlsx(tid, ordered, buildOptions);
+  const buffer =
+    format === "pdf"
+      ? await buildNakladnoyPdf(tid, ordered)
+      : await buildNakladnoyXlsx(tid, ordered, buildOptions);
   const day = new Date().toISOString().slice(0, 10);
   const filename =
     tid === "nakladnoy_warehouse"
-      ? `zagruz_zav_sklda_5_1_8_${day}.xlsx`
-      : `nakladnye_2_1_0_${day}.xlsx`;
+      ? `zagruz_zav_sklda_5_1_8_${day}.${format}`
+      : `nakladnye_2_1_0_${day}.${format}`;
 
   return {
     buffer,
     filename,
     template: tid,
+    format,
     order_ids: ids
   };
 }

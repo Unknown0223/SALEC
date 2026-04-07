@@ -1,0 +1,543 @@
+/**
+ * 16 ta yorug‘ palitra + bir xil sidebar qoidasi (qora-kulrang panel).
+ * Foydalanuvchi :root tokenlari (--bg, --card-bg, …) shu yerda shadcn o‘zgaruvchilariga ulangan.
+ * V2 variantlari V1 bilan bir xil CSS (faqat id boshqacha).
+ */
+
+/* 1. SOFT SLATE BLUE-GREY */
+html[data-app-theme="soft-slate-blue-grey"] {
+  --dash-bg: #f8fafc;
+  --dash-card: #ffffff;
+  --dash-border: #e2e8f0;
+  --dash-text: #0f172a;
+  --dash-text-muted: #64748b;
+  --dash-accent: #64748b;
+  --dash-accent-hover: #475569;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: var(--dash-text);
+  --muted: #f1f5f9;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #e2e8f0;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #1e293b;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #0f172a;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #f8fafc;
+  --sidebar-border: #334155;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="soft-slate-blue-grey"] .app-main-canvas {
+  background: linear-gradient(180deg, #94a3b8 0%, #cbd5e1 42%, #f1f5f9 100%);
+}
+
+/* 2. COOL CYAN — 15. COOL CYAN (V2) */
+html[data-app-theme="cool-cyan"],
+html[data-app-theme="cool-cyan-v2"] {
+  --dash-bg: #f0f9ff;
+  --dash-card: #ffffff;
+  --dash-border: #bae6fd;
+  --dash-text: #0c4a6e;
+  --dash-text-muted: #0369a1;
+  --dash-accent: #06b67f;
+  --dash-accent-hover: #0284c8;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #e0f2fe;
+  --secondary-foreground: var(--dash-text);
+  --muted: #e0f2fe;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #bae6fd;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #0c4a6e;
+  --sidebar-foreground: #f0f9ff;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #0c4a6e;
+  --sidebar-accent: #155e75;
+  --sidebar-accent-foreground: #f0f9ff;
+  --sidebar-border: #164e63;
+  --sidebar-ring: var(--dash-accent-hover);
+}
+html[data-app-theme="cool-cyan"] .app-main-canvas,
+html[data-app-theme="cool-cyan-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #67b7d1 0%, #a5d8ea 42%, #e0f2fe 100%);
+}
+
+/* 3. LIGHT INDIGO */
+html[data-app-theme="light-indigo"] {
+  --dash-bg: #f0f4ff;
+  --dash-card: #ffffff;
+  --dash-border: #dbe4ff;
+  --dash-text: #1e2937;
+  --dash-text-muted: #64748b;
+  --dash-accent: #6366f1;
+  --dash-accent-hover: #4f46e5;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #e0e7ff;
+  --secondary-foreground: var(--dash-text);
+  --muted: #eef2ff;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #e0e7ff;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #312e81;
+  --sidebar-foreground: #eef2ff;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #1e1b4b;
+  --sidebar-accent: #4338ca;
+  --sidebar-accent-foreground: #eef2ff;
+  --sidebar-border: #4c1d95;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="light-indigo"] .app-main-canvas {
+  background: linear-gradient(180deg, #a5b4fc 0%, #c7d2fe 42%, #eef2ff 100%);
+}
+
+/* 4. FRESH TEAL GROWTH — 16. FRESH TEAL GROWTH (V2) */
+html[data-app-theme="fresh-teal-growth"],
+html[data-app-theme="fresh-teal-growth-v2"] {
+  --dash-bg: #f0fdfa;
+  --dash-card: #ffffff;
+  --dash-border: #ccfbf1;
+  --dash-text: #134e4a;
+  --dash-text-muted: #0f766e;
+  --dash-accent: #14b8a6;
+  --dash-accent-hover: #0f766e;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #ccfbf1;
+  --secondary-foreground: var(--dash-text);
+  --muted: #ccfbf1;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #99f6e4;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #134e4a;
+  --sidebar-foreground: #f0fdfa;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #134e4a;
+  --sidebar-accent: #0f766e;
+  --sidebar-accent-foreground: #f0fdfa;
+  --sidebar-border: #115e59;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="fresh-teal-growth"] .app-main-canvas,
+html[data-app-theme="fresh-teal-growth-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #7dd3c7 0%, #a7f3d0 42%, #ecfdf5 100%);
+}
+
+/* 5. LIGHT STEEL BLUE — 14. LIGHT STEEL BLUE (V2) */
+html[data-app-theme="light-steel-blue"],
+html[data-app-theme="light-steel-blue-v2"] {
+  --dash-bg: #f1f5f9;
+  --dash-card: #ffffff;
+  --dash-border: #cbd5e1;
+  --dash-text: #0f172a;
+  --dash-text-muted: #475569;
+  --dash-accent: #475569;
+  --dash-accent-hover: #334155;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #e2e8f0;
+  --secondary-foreground: var(--dash-text);
+  --muted: #e2e8f0;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #cbd5e1;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #334155;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #0f172a;
+  --sidebar-accent: #475569;
+  --sidebar-accent-foreground: #f8fafc;
+  --sidebar-border: #64748b;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="light-steel-blue"] .app-main-canvas,
+html[data-app-theme="light-steel-blue-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #94a3b8 0%, #cbd5e1 42%, #f1f5f9 100%);
+}
+
+/* 6. MUTED INDIGO */
+html[data-app-theme="muted-indigo"] {
+  --dash-bg: #f5f3ff;
+  --dash-card: #ffffff;
+  --dash-border: #e0e7ff;
+  --dash-text: #1e2937;
+  --dash-text-muted: #64748b;
+  --dash-accent: #7c3aed;
+  --dash-accent-hover: #6d28d9;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #ede9fe;
+  --secondary-foreground: var(--dash-text);
+  --muted: #ede9fe;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #ddd6fe;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #4c1d95;
+  --sidebar-foreground: #f5f3ff;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #1e1b4b;
+  --sidebar-accent: #6d28d9;
+  --sidebar-accent-foreground: #f5f3ff;
+  --sidebar-border: #5b21b6;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="muted-indigo"] .app-main-canvas {
+  background: linear-gradient(180deg, #c4b5fd 0%, #ddd6fe 42%, #f5f3ff 100%);
+}
+
+/* 7. PROFESSIONAL CYAN — 13. PROFESSIONAL CYAN (V2) */
+html[data-app-theme="professional-cyan"],
+html[data-app-theme="professional-cyan-v2"] {
+  --dash-bg: #ecfeff;
+  --dash-card: #ffffff;
+  --dash-border: #a5f3fc;
+  --dash-text: #164e63;
+  --dash-text-muted: #0e7490;
+  --dash-accent: #06b67f;
+  --dash-accent-hover: #0891b2;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #cffafe;
+  --secondary-foreground: var(--dash-text);
+  --muted: #cffafe;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #a5f3fc;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #164e63;
+  --sidebar-foreground: #ecfeff;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #164e63;
+  --sidebar-accent: #155e75;
+  --sidebar-accent-foreground: #ecfeff;
+  --sidebar-border: #0e7490;
+  --sidebar-ring: var(--dash-accent-hover);
+}
+html[data-app-theme="professional-cyan"] .app-main-canvas,
+html[data-app-theme="professional-cyan-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #7dd3fc 0%, #a5f3fc 42%, #ecfeff 100%);
+}
+
+/* 8. POWDER BLUE */
+html[data-app-theme="powder-blue"] {
+  --dash-bg: #f0f9ff;
+  --dash-card: #ffffff;
+  --dash-border: #bae6fd;
+  --dash-text: #0c4a6e;
+  --dash-text-muted: #0369a1;
+  --dash-accent: #3b82f6;
+  --dash-accent-hover: #2563eb;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #dbeafe;
+  --secondary-foreground: var(--dash-text);
+  --muted: #dbeafe;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #bfdbfe;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #1e3a8a;
+  --sidebar-foreground: #eff6ff;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #1e3a8a;
+  --sidebar-accent: #2563eb;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1d4ed8;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="powder-blue"] .app-main-canvas {
+  background: linear-gradient(180deg, #93c5fd 0%, #bfdbfe 42%, #eff6ff 100%);
+}
+
+/* 9. SOFT SAGE */
+html[data-app-theme="soft-sage"] {
+  --dash-bg: #f1f5f0;
+  --dash-card: #ffffff;
+  --dash-border: #d1e7d6;
+  --dash-text: #14532d;
+  --dash-text-muted: #166534;
+  --dash-accent: #4ade80;
+  --dash-accent-hover: #22c55e;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #14532d;
+  --secondary: #dcfce7;
+  --secondary-foreground: var(--dash-text);
+  --muted: #dcfce7;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #bbf7d0;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #14532d;
+  --sidebar-foreground: #f0fdf4;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #14532d;
+  --sidebar-accent: #166534;
+  --sidebar-accent-foreground: #f0fdf4;
+  --sidebar-border: #15803d;
+  --sidebar-ring: var(--dash-accent-hover);
+}
+html[data-app-theme="soft-sage"] .app-main-canvas {
+  background: linear-gradient(180deg, #86efac 0%, #bbf7d0 42%, #f0fdf4 100%);
+}
+
+/* 10. OCEAN TEAL */
+html[data-app-theme="ocean-teal"] {
+  --dash-bg: #ecfdf5;
+  --dash-card: #ffffff;
+  --dash-border: #a7f3d0;
+  --dash-text: #134e4a;
+  --dash-text-muted: #0f766e;
+  --dash-accent: #14b8a6;
+  --dash-accent-hover: #0f766e;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #d1fae5;
+  --secondary-foreground: var(--dash-text);
+  --muted: #d1fae5;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #a7f3d0;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #134e4a;
+  --sidebar-foreground: #ecfdf5;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #134e4a;
+  --sidebar-accent: #0f766e;
+  --sidebar-accent-foreground: #ecfdf5;
+  --sidebar-border: #115e59;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="ocean-teal"] .app-main-canvas {
+  background: linear-gradient(180deg, #99f6e4 0%, #a7f3d0 42%, #ecfdf5 100%);
+}
+
+/* 11. LIGHT AQUA */
+html[data-app-theme="light-aqua"] {
+  --dash-bg: #f0fdfa;
+  --dash-card: #ffffff;
+  --dash-border: #ccfbf1;
+  --dash-text: #164e63;
+  --dash-text-muted: #0e7490;
+  --dash-accent: #22d3ee;
+  --dash-accent-hover: #06b67f;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #0f172a;
+  --secondary: #cffafe;
+  --secondary-foreground: var(--dash-text);
+  --muted: #ccfbf1;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #a5f3fc;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent-hover);
+  --chart-1: var(--dash-success);
+  --sidebar: #164e63;
+  --sidebar-foreground: #f0fdfa;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #164e63;
+  --sidebar-accent: #155e75;
+  --sidebar-accent-foreground: #f0fdfa;
+  --sidebar-border: #0e7490;
+  --sidebar-ring: var(--dash-accent-hover);
+}
+html[data-app-theme="light-aqua"] .app-main-canvas {
+  background: linear-gradient(180deg, #a5f3fc 0%, #ccfbf1 42%, #f0fdfa 100%);
+}
+
+/* 12. SOFT SKY BLUE-GREY */
+html[data-app-theme="soft-sky-blue-grey"] {
+  --dash-bg: #f8fafc;
+  --dash-card: #ffffff;
+  --dash-border: #e2e8f0;
+  --dash-text: #0f172a;
+  --dash-text-muted: #64748b;
+  --dash-accent: #60a5fa;
+  --dash-accent-hover: #3b82f6;
+  --dash-success: #10b981;
+
+  --background: var(--dash-bg);
+  --foreground: var(--dash-text);
+  --card: var(--dash-card);
+  --card-foreground: var(--dash-text);
+  --popover: var(--dash-card);
+  --popover-foreground: var(--dash-text);
+  --primary: var(--dash-accent);
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: var(--dash-text);
+  --muted: #f1f5f9;
+  --muted-foreground: var(--dash-text-muted);
+  --accent: #e2e8f0;
+  --accent-foreground: var(--dash-text);
+  --destructive: oklch(0.55 0.22 25);
+  --border: var(--dash-border);
+  --input: var(--dash-border);
+  --ring: var(--dash-accent);
+  --chart-1: var(--dash-success);
+  --sidebar: #1e3a8a;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #fbbf24;
+  --sidebar-primary-foreground: #0f172a;
+  --sidebar-accent: #2563eb;
+  --sidebar-accent-foreground: #f8fafc;
+  --sidebar-border: #1d4ed8;
+  --sidebar-ring: var(--dash-accent);
+}
+html[data-app-theme="soft-sky-blue-grey"] .app-main-canvas {
+  background: linear-gradient(180deg, #bfdbfe 0%, #dbeafe 42%, #f8fafc 100%);
+}
+
+/* V2 gradient overrides (13–16) */
+html[data-app-theme="professional-cyan-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #7dd3fc 0%, #ecfeff 100%);
+}
+html[data-app-theme="light-steel-blue-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #94a3b8 0%, #f1f5f9 100%);
+}
+html[data-app-theme="cool-cyan-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #67b7d1 0%, #bae6fd 100%);
+}
+html[data-app-theme="fresh-teal-growth-v2"] .app-main-canvas {
+  background: linear-gradient(180deg, #7dd3c7 0%, #ccfbf1 100%);
+}

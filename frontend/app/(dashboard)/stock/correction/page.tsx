@@ -593,7 +593,7 @@ export default function StockCorrectionPage() {
   if (!authHydrated) {
     return (
       <PageShell>
-        <p className="text-muted-foreground text-sm">Yuklanmoqda…</p>
+        <p className="text-muted-foreground text-sm">Загрузка…</p>
       </PageShell>
     );
   }

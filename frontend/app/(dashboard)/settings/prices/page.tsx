@@ -3,7 +3,6 @@
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
-import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
@@ -126,7 +125,7 @@ export default function PricesOverviewSettingsPage() {
               {overviewQ.isLoading ? (
                 <tr>
                   <td colSpan={3} className="px-3 py-6 text-muted-foreground">
-                    Yuklanmoqda…
+                    Загрузка…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (

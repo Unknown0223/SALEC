@@ -573,7 +573,7 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
                   colSpan={2 + tablePrefs.visibleColumnOrder.length}
                   className="px-3 py-6 text-center text-muted-foreground"
                 >
-                  Yuklanmoqda…
+                  Загрузка…
                 </td>
               </tr>
             ) : rows.length === 0 ? (

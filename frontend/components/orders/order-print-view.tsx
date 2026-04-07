@@ -132,12 +132,12 @@ export function OrderPrintView({ order, items }: PrintOrderProps) {
           <tr style={{ borderTop: "2px solid #333" }}>
             <td colSpan={4} style={{ padding: "8px", textAlign: "right", fontWeight: "bold" }}>JAMI:</td>
             <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold" }}>{items.length} ta mahsulot</td>
-            <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold", fontSize: "14px" }}>{fmt(order.total_sum)} so'm</td>
+            <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold", fontSize: "14px" }}>{fmt(order.total_sum)} so‘m</td>
           </tr>
           {parseFloat(order.bonus_sum) > 0 && (
             <tr>
               <td colSpan={5} style={{ padding: "4px 8px", textAlign: "right", color: "#666" }}>Bonus summasi:</td>
-              <td style={{ padding: "4px 8px", textAlign: "right", color: "#666" }}>{fmt(order.bonus_sum)} so'm</td>
+              <td style={{ padding: "4px 8px", textAlign: "right", color: "#666" }}>{fmt(order.bonus_sum)} so‘m</td>
             </tr>
           )}
         </tfoot>

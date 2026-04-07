@@ -411,7 +411,7 @@ function ReturnsPageContent() {
             </Card>
           )}
 
-          {clientId && clientDataQuery.isLoading && <p className="text-sm text-muted-foreground">Ma&apos;lumotlar yuklanmoqda…</p>}
+          {clientId && clientDataQuery.isLoading && <p className="text-sm text-muted-foreground">Ma&apos;lumotlar Загрузка…</p>}
           {clientId && clientData && productMap.size === 0 && <p className="text-sm text-muted-foreground">Tanlangan davrda mahsulot topilmadi.</p>}
           {!clientId && <p className="text-sm text-muted-foreground">Mijozni tanlang.</p>}
         </div>
@@ -419,7 +419,7 @@ function ReturnsPageContent() {
         /* ─── Returns list ─────────────────────────────────────────────── */
         <Card className="overflow-hidden shadow-panel">
           <CardContent className="p-0">
-            {listQ.isLoading && <p className="p-4 text-sm text-muted-foreground">Yuklanmoqda…</p>}
+            {listQ.isLoading && <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>}
             {listQ.isError && <p className="p-4 text-sm text-destructive">Xato yuz berdi.</p>}
             {!listQ.isLoading && !listQ.isError && (
               <>
@@ -486,7 +486,7 @@ function ReturnsPageContent() {
 
 export default function ReturnsPage() {
   return (
-    <Suspense fallback={<div className="mx-auto max-w-6xl p-6 text-sm text-muted-foreground">Yuklanmoqda…</div>}>
+    <Suspense fallback={<div className="mx-auto max-w-6xl p-6 text-sm text-muted-foreground">Загрузка…</div>}>
       <ReturnsPageContent />
     </Suspense>
   );

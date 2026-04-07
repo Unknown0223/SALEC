@@ -52,7 +52,7 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 |-------|------------------|
 | GET, POST | `/clients` |
 | GET, PATCH | `/clients/:id` |
-| GET | `/clients/references`, `/clients/duplicate-groups`, `/clients/export`, … |
+| GET | `/clients/references`, `/clients/export`, … |
 | POST | `/clients/import`, `/clients/merge`, `/clients/bulk-active`, … |
 | GET | `/clients/:id/audit` |
 | GET, POST | `/clients/:id/balance-movements` |
@@ -177,7 +177,7 @@ Ko‘p sonli `GET/POST/PATCH` marshrutlar: `/agents`, `/supervisors`, `/expedito
 | Metod | Yo‘l |
 |-------|------|
 | GET | `/dashboard/stats` |
-| GET | `/reports/sales`, `/reports/order-trends`, `/reports/products`, `/reports/clients`, `/reports/agent-kpi`, `/reports/status-distribution`, `/reports/channels` |
+| GET | `/reports/sales`, …, `/reports/receivables`, `/reports/receivables/export` (.xlsx); alias: `client-receivables` |
 
 **Eslatma:** hisobot marshrutlarida hozircha faqat JWT tekshiriladi; rol cheklovi marshrut darajasida yo‘q ([RBAC.md](./RBAC.md)).
 
