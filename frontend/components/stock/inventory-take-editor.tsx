@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { getUserFacingError } from "@/lib/error-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Trash2 } from "lucide-react";
@@ -316,7 +317,7 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
 
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+              <thead className="app-table-thead">
                 <tr>
                   <th className="px-3 py-2 text-left">SKU</th>
                   <th className="px-3 py-2 text-left">Товар</th>
@@ -342,7 +343,9 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
                         <td className="max-w-[220px] truncate px-3 py-2" title={r.name}>
                           {r.name}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{r.system_qty}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatNumberGrouped(r.system_qty, { maxFractionDigits: 3 })}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <Input
                             className="ml-auto h-8 w-24 text-right tabular-nums"
@@ -353,7 +356,11 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
                           />
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                          {d != null && Number.isFinite(d) ? (d > 0 ? `+${d}` : String(d)) : "—"}
+                          {d != null && Number.isFinite(d)
+                            ? d > 0
+                              ? `+${formatNumberGrouped(d, { maxFractionDigits: 3 })}`
+                              : formatNumberGrouped(d, { maxFractionDigits: 3 })
+                            : "—"}
                         </td>
                         <td className="px-2 py-2">
                           <Button
@@ -400,7 +407,7 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50">
+            <thead className="app-table-thead">
               <tr>
                 <th className="px-3 py-2 text-left">SKU</th>
                 <th className="px-3 py-2 text-left">Товар</th>
@@ -413,8 +420,14 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
                 <tr key={r.product_id} className="border-t">
                   <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
                   <td className="max-w-[240px] truncate px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.system_qty}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.counted_qty || "—"}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatNumberGrouped(r.system_qty, { maxFractionDigits: 3 })}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {r.counted_qty?.trim()
+                      ? formatNumberGrouped(r.counted_qty, { maxFractionDigits: 3 })
+                      : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

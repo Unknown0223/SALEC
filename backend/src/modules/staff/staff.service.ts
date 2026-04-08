@@ -332,28 +332,96 @@ export async function listAgentFilterOptions(tenantId: number): Promise<{
   branches: string[];
   trade_directions: string[];
   positions: string[];
+  /** Agent `User.territory` to‘liq qiymatlari (zona / uchastok tanlash) */
+  territories: string[];
+  /** Viloyat, shahar va boshqa tokenlar (`territory` qatorida qidiruv) */
+  territory_tokens: string[];
 }> {
-  const [rows, dbTrade] = await Promise.all([
+  const [rows, dbTrade, tenantRow, cr, cc, cd, cz, cn] = await Promise.all([
     prisma.user.findMany({
       where: { tenant_id: tenantId, role: "agent" },
-      select: { branch: true, trade_direction: true, position: true }
+      select: { branch: true, trade_direction: true, position: true, territory: true }
     }),
-    listActiveTradeDirectionLabels(tenantId)
+    listActiveTradeDirectionLabels(tenantId),
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { settings: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, region: { not: null } },
+      distinct: ["region"],
+      select: { region: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, city: { not: null } },
+      distinct: ["city"],
+      select: { city: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, district: { not: null } },
+      distinct: ["district"],
+      select: { district: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, zone: { not: null } },
+      distinct: ["zone"],
+      select: { zone: true }
+    }),
+    prisma.client.findMany({
+      where: { tenant_id: tenantId, neighborhood: { not: null } },
+      distinct: ["neighborhood"],
+      select: { neighborhood: true }
+    })
   ]);
   const branches = new Set<string>();
   const trade_directions = new Set<string>();
   const positions = new Set<string>();
+  const territories = new Set<string>();
+  const territory_tokens = new Set<string>();
+
+  const pushAgentTerritoryToken = (raw: string | null | undefined) => {
+    const t = (raw ?? "").trim();
+    if (t.length < 2) return;
+    territory_tokens.add(t);
+    for (const part of t.split(/[,;\n|/]+/)) {
+      const p = part.trim();
+      if (p.length >= 2) territory_tokens.add(p);
+    }
+  };
+
   for (const r of rows) {
     if (r.branch?.trim()) branches.add(r.branch.trim());
     if (r.trade_direction?.trim()) trade_directions.add(r.trade_direction.trim());
     if (r.position?.trim()) positions.add(r.position.trim());
+    if (r.territory?.trim()) {
+      const full = r.territory.trim();
+      territories.add(full);
+      pushAgentTerritoryToken(full);
+    }
   }
+
+  const st = tenantRow?.settings;
+  const refObj = (st as { references?: Record<string, unknown> } | null | undefined)?.references;
+  for (const s of territoryRegionPickerNames(refObj)) pushAgentTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_cities")) pushAgentTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_districts")) pushAgentTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_zones")) pushAgentTerritoryToken(s);
+  for (const s of refStringListFromTenantSettings(st, "client_neighborhoods")) pushAgentTerritoryToken(s);
+
+  for (const r of cr) pushAgentTerritoryToken(r.region);
+  for (const r of cc) pushAgentTerritoryToken(r.city);
+  for (const r of cd) pushAgentTerritoryToken(r.district);
+  for (const r of cz) pushAgentTerritoryToken(r.zone);
+  for (const r of cn) pushAgentTerritoryToken(r.neighborhood);
+
   for (const v of dbTrade) trade_directions.add(v);
   const sort = (a: string, b: string) => a.localeCompare(b, "ru");
   return {
     branches: [...branches].sort(sort),
     trade_directions: [...trade_directions].sort(sort),
-    positions: [...positions].sort(sort)
+    positions: [...positions].sort(sort),
+    territories: [...territories].sort(sort),
+    territory_tokens: [...territory_tokens].sort(sort)
   };
 }
 

@@ -11,6 +11,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -171,7 +172,7 @@ export default function PriceMatrixPage() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Установка новых цен"
         description="Kategoriya va narx turini tanlang, jadvalni to‘ldiring, saqlang."
@@ -265,7 +266,7 @@ export default function PriceMatrixPage() {
 
         <div className="overflow-hidden rounded-md border">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-left">
+            <thead className="app-table-thead text-left">
               <tr>
                 <th className="px-3 py-2 font-medium">№</th>
                 <th className="px-3 py-2 font-medium">Название</th>
@@ -291,7 +292,7 @@ export default function PriceMatrixPage() {
               ) : (
                 (matrixQ.data?.data ?? []).map((r, i) => (
                   <tr key={r.product_id} className="border-t">
-                    <td className="px-3 py-2">{i + 1}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatGroupedInteger(i + 1)}</td>
                     <td className="px-3 py-2">{r.name}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
                     <td className="px-3 py-2">

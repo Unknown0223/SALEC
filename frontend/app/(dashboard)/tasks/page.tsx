@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { agentDisplayName, type AgentListItem } from "@/lib/agent-display";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
@@ -33,7 +34,7 @@ export default function TasksPage() {
     queryKey: ["tasks-agents", tenantSlug],
     enabled: Boolean(tenantSlug) && canWrite,
     queryFn: async () => {
-      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
+      const { data } = await api.get<{ data: AgentListItem[] }>(
         `/api/${tenantSlug}/agents?is_active=true`
       );
       return data.data;
@@ -106,7 +107,7 @@ export default function TasksPage() {
               <option value="">Исполнитель — любой</option>
               {pickers.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name}
+                  {agentDisplayName(u)}
                 </option>
               ))}
             </select>
@@ -122,7 +123,7 @@ export default function TasksPage() {
       ) : null}
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50">
+          <thead className="app-table-thead">
             <tr>
               <th className="px-3 py-2 text-left">Задача</th>
               <th className="px-3 py-2 text-left">Исполнитель</th>

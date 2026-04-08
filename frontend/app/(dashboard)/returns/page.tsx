@@ -10,6 +10,7 @@ import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useMemo, useCallback } from "react";
 
@@ -282,10 +283,10 @@ function ReturnsPageContent() {
                 {clientData && (
                   <div className="flex items-end">
                     <div className="text-xs space-y-0.5">
-                      <div>Buyurtmalar: <span className="font-medium">{clientData.total_orders}</span></div>
-                      <div>Qaytarilgan: <span className="font-medium">{clientData.already_returned_value}</span></div>
-                      <div>Max qaytarish: <span className="font-medium text-amber-600">{maxReturnable}</span></div>
-                      <div>Qarz: <span className="font-medium text-red-600">{clientDebt}</span></div>
+                      <div>Buyurtmalar: <span className="font-medium">{formatNumberGrouped(clientData.total_orders)}</span></div>
+                      <div>Qaytarilgan: <span className="font-medium">{formatNumberGrouped(clientData.already_returned_value, { maxFractionDigits: 2 })}</span></div>
+                      <div>Max qaytarish: <span className="font-medium text-amber-600">{formatNumberGrouped(maxReturnable, { maxFractionDigits: 2 })}</span></div>
+                      <div>Qarz: <span className="font-medium text-red-600">{formatNumberGrouped(clientDebt, { maxFractionDigits: 2 })}</span></div>
                     </div>
                   </div>
                 )}
@@ -316,7 +317,7 @@ function ReturnsPageContent() {
 
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[600px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">Kod</th>
                         <th className="px-3 py-2 text-left">Mahsulot</th>
@@ -339,7 +340,9 @@ function ReturnsPageContent() {
                               {p.name}
                               {p.has_bonus && <span className="ml-1 text-[10px] text-amber-600">(bonus)</span>}
                             </td>
-                            <td className="px-3 py-2 text-right tabular-nums">{p.total_qty}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">
+                              {formatNumberGrouped(p.total_qty, { maxFractionDigits: 3 })}
+                            </td>
                             <td className="px-3 py-2 text-center">
                               <Input
                                 type="number"
@@ -352,7 +355,7 @@ function ReturnsPageContent() {
                               />
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums">
-                              {rq > 0 ? rv.toFixed(2) : "—"}
+                              {rq > 0 ? formatNumberGrouped(rv, { maxFractionDigits: 2 }) : "—"}
                               {isOver && <div className="text-[10px] text-red-500">Oshib ketdi!</div>}
                             </td>
                           </tr>
@@ -362,10 +365,12 @@ function ReturnsPageContent() {
                     <tfoot className="border-t bg-muted/30 text-xs">
                       <tr>
                         <td colSpan={2} className="px-3 py-2">Jami qaytarish</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{totalReturnQty} dona</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatNumberGrouped(totalReturnQty, { maxFractionDigits: 3 })} dona
+                        </td>
                         <td />
                         <td className={`px-3 py-2 text-right tabular-nums font-medium ${totalReturnValue > maxRet ? "text-red-600" : ""}`}>
-                          {totalReturnValue.toFixed(2)}
+                          {formatNumberGrouped(totalReturnValue, { maxFractionDigits: 2 })}
                         </td>
                       </tr>
                     </tfoot>
@@ -376,20 +381,26 @@ function ReturnsPageContent() {
                 <div className="rounded-lg bg-muted/30 p-3 space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Buyurtma qiymati (davr):</span>
-                    <span className="tabular-nums font-medium">{clientData?.total_paid_value ?? "—"}</span>
+                    <span className="tabular-nums font-medium">
+                      {clientData ? formatNumberGrouped(clientData.total_paid_value, { maxFractionDigits: 2 }) : "—"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Avval qaytarilgan:</span>
-                    <span className="tabular-nums">{clientData?.already_returned_value ?? "—"}</span>
+                    <span className="tabular-nums">
+                      {clientData ? formatNumberGrouped(clientData.already_returned_value, { maxFractionDigits: 2 }) : "—"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Maksimal:</span>
-                    <span className="tabular-nums font-medium text-amber-600">{maxReturnable}</span>
+                    <span className="tabular-nums font-medium text-amber-600">
+                      {formatNumberGrouped(maxReturnable, { maxFractionDigits: 2 })}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t pt-1 mt-1">
                     <span className="text-muted-foreground">Qaytarish summasi:</span>
                     <span className={`tabular-nums font-bold ${totalReturnValue > maxRet ? "text-red-600" : totalReturnValue > 0 ? "text-emerald-600" : ""}`}>
-                      {totalReturnValue.toFixed(2)}
+                      {formatNumberGrouped(totalReturnValue, { maxFractionDigits: 2 })}
                     </span>
                   </div>
                   {totalReturnQty > 12 && (
@@ -425,7 +436,9 @@ function ReturnsPageContent() {
               <>
                 <div className="flex items-center gap-3 px-3 pt-2">
                   {(listQ.data?.data.length ?? 0) > 0 && (
-                    <span className="text-sm text-muted-foreground">Jami: {listQ.data?.data.length ?? 0} ta</span>
+                    <span className="text-sm text-muted-foreground">
+                      Jami: {formatNumberGrouped(listQ.data?.data.length ?? 0)} ta
+                    </span>
                   )}
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     Ko&apos;rsatish
@@ -436,7 +449,7 @@ function ReturnsPageContent() {
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[800px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-left text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-left text-xs">
                       <tr>
                         <th className="px-3 py-2">Sana</th>
                         <th className="px-3 py-2">Raqam</th>
@@ -466,7 +479,9 @@ function ReturnsPageContent() {
                               </Link>
                             ) : "—"}
                           </td>
-                          <td className="px-3 py-2 text-right tabular-nums">{r.refund_amount ?? "—"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.refund_amount == null ? "—" : formatNumberGrouped(r.refund_amount, { maxFractionDigits: 2 })}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

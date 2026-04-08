@@ -21,6 +21,7 @@ model Tenant {
   updated_at                     DateTime                      @updatedAt
   agent_route_days               AgentRouteDay[]
   agent_visits                   AgentVisit[]
+  agent_location_pings           AgentLocationPing[]
   bonus_rules                    BonusRule[]
   cash_desk_shifts               CashDeskShift[]
   cash_desks                     CashDesk[]
@@ -110,6 +111,7 @@ model User {
   trade_direction_id         Int?
   agent_route_days           AgentRouteDay[]
   agent_visits               AgentVisit[]
+  agent_location_pings       AgentLocationPing[]
   cash_desk_shifts_closed    CashDeskShift[]         @relation("CashDeskShiftClosedBy")
   cash_desk_shifts_opened    CashDeskShift[]         @relation("CashDeskShiftOpenedBy")
   cash_desk_links            CashDeskUserLink[]
@@ -1171,6 +1173,22 @@ model AgentVisit {
   @@index([tenant_id, agent_id])
   @@index([tenant_id, checked_in_at(sort: Desc)])
   @@map("agent_visits")
+}
+
+/// Agent GPS ping (mobil ilova / trek).
+model AgentLocationPing {
+  id              Int      @id @default(autoincrement())
+  tenant_id       Int
+  agent_id        Int
+  latitude        Decimal  @db.Decimal(11, 8)
+  longitude       Decimal  @db.Decimal(11, 8)
+  accuracy_meters Float?
+  recorded_at     DateTime @default(now())
+  agent           User     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  tenant          Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, agent_id, recorded_at])
+  @@map("agent_location_pings")
 }
 
 model TenantTask {

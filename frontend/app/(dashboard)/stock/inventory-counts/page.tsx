@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/auth-store";
@@ -87,78 +88,91 @@ export default function InventoryCountsPage() {
         title="Инвентаризация"
         description="Черновик: добавьте товары, укажите фактические количества, сохраните строки (фиксируются остатки в системе), затем проведите документ — склад обновится."
       />
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-lg border bg-card p-4">
-          <h2 className="text-sm font-semibold">Новый документ</h2>
-          {createError ? (
-            <p className="text-sm text-destructive">{createError}</p>
-          ) : null}
-          <div className="space-y-2">
-            <Label>Склад</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-              value={warehouseId}
-              onChange={(e) => {
-                setWarehouseId(e.target.value);
-                setCreateError(null);
-              }}
-            >
-              <option value="">—</option>
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Input
-            placeholder="Название (необязательно)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <Button
-            type="button"
-            disabled={!warehouseId || createMut.isPending}
-            onClick={() => void createMut.mutate()}
-          >
-            Создать черновик
-          </Button>
-        </div>
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left">ID</th>
-                <th className="px-3 py-2 text-left">Склад</th>
-                <th className="px-3 py-2 text-left">Название</th>
-                <th className="px-3 py-2 text-left">Статус</th>
-                <th className="px-3 py-2 text-right" />
-              </tr>
-            </thead>
-            <tbody>
-              {(listQ.data ?? []).map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="px-3 py-2">{t.id}</td>
-                  <td className="px-3 py-2">{t.warehouse.name}</td>
-                  <td className="max-w-[140px] truncate px-3 py-2 text-muted-foreground" title={t.title ?? ""}>
-                    {t.title ?? "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge variant={statusBadgeVariant(t.status)}>{t.status}</Badge>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setSelectedId(t.id)}>
-                      Открыть
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {listQ.data?.length === 0 ? (
-            <p className="text-muted-foreground border-t px-3 py-4 text-center text-sm">Нет документов</p>
-          ) : null}
-        </div>
+      <div className="orders-hub-section orders-hub-section--table mb-6">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="grid gap-0 lg:grid-cols-2 lg:divide-x lg:divide-border">
+              <div className="space-y-3 p-4 sm:p-5">
+                <h2 className="text-sm font-semibold">Новый документ</h2>
+                {createError ? (
+                  <p className="text-sm text-destructive">{createError}</p>
+                ) : null}
+                <div className="space-y-2">
+                  <Label>Склад</Label>
+                  <select
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    value={warehouseId}
+                    onChange={(e) => {
+                      setWarehouseId(e.target.value);
+                      setCreateError(null);
+                    }}
+                  >
+                    <option value="">—</option>
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <Input
+                  placeholder="Название (необязательно)"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  disabled={!warehouseId || createMut.isPending}
+                  onClick={() => void createMut.mutate()}
+                >
+                  Создать черновик
+                </Button>
+              </div>
+              <div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="app-table-thead">
+                      <tr>
+                        <th className="px-3 py-2 text-left">ID</th>
+                        <th className="px-3 py-2 text-left">Склад</th>
+                        <th className="px-3 py-2 text-left">Название</th>
+                        <th className="px-3 py-2 text-left">Статус</th>
+                        <th className="px-3 py-2 text-right" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(listQ.data ?? []).map((t) => (
+                        <tr key={t.id} className="border-t border-border/80">
+                          <td className="px-3 py-2">{t.id}</td>
+                          <td className="px-3 py-2">{t.warehouse.name}</td>
+                          <td
+                            className="max-w-[140px] truncate px-3 py-2 text-muted-foreground"
+                            title={t.title ?? ""}
+                          >
+                            {t.title ?? "—"}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge variant={statusBadgeVariant(t.status)}>{t.status}</Badge>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setSelectedId(t.id)}>
+                              Открыть
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {listQ.data?.length === 0 ? (
+                  <p className="text-muted-foreground border-t border-border/80 px-3 py-4 text-center text-sm">
+                    Нет документов
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {selectedId != null && tenantSlug ? (

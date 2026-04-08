@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { getUserFacingError } from "@/lib/error-utils";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -40,9 +41,11 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tenantSlug: string;
   payment: PaymentRowLite | null;
+  /** Masalan, to‘lov kartochkasida jadvalni yangilash */
+  onAllocated?: () => void;
 };
 
-export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment }: Props) {
+export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment, onAllocated }: Props) {
   const qc = useQueryClient();
   const pid = payment?.id;
   const [allocateOk, setAllocateOk] = useState(false);
@@ -75,6 +78,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment 
       await qc.invalidateQueries({ queryKey: ["payment-allocations", tenantSlug, pid] });
       await qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
       await qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
+      onAllocated?.();
     }
   });
 
@@ -105,15 +109,21 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment 
             </p>
             <p>
               <span className="text-muted-foreground">To‘lov summasi:</span>{" "}
-              <span className="font-medium tabular-nums">{payment.amount}</span>
+              <span className="font-medium tabular-nums">
+                {formatNumberGrouped(payment.amount, { maxFractionDigits: 2 })}
+              </span>
             </p>
             <p>
               <span className="text-muted-foreground">Allaqachon taqsimlangan:</span>{" "}
-              <span className="font-medium tabular-nums">{allocatedSum.toFixed(2)}</span>
+              <span className="font-medium tabular-nums">
+                {formatNumberGrouped(allocatedSum, { minFractionDigits: 2, maxFractionDigits: 2 })}
+              </span>
             </p>
             <p>
               <span className="text-muted-foreground">Taqsimlash uchun qoldiq:</span>{" "}
-              <span className="font-medium tabular-nums">{unallocated.toFixed(2)}</span>
+              <span className="font-medium tabular-nums">
+                {formatNumberGrouped(unallocated, { minFractionDigits: 2, maxFractionDigits: 2 })}
+              </span>
             </p>
 
             {allocQ.isLoading ? (
@@ -121,7 +131,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment 
             ) : (
               <div className="max-h-48 overflow-auto rounded-md border">
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/50">
+                  <thead className="app-table-thead">
                     <tr>
                       <th className="px-2 py-1.5 text-left">Zakaz</th>
                       <th className="px-2 py-1.5 text-right">Summa</th>
@@ -142,7 +152,9 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment 
                               {a.order_number}
                             </Link>
                           </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">{a.amount}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {formatNumberGrouped(a.amount, { maxFractionDigits: 2 })}
+                          </td>
                         </tr>
                       ))
                     )}

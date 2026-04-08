@@ -4,7 +4,14 @@ import { prisma } from "../../config/database";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
-import { createPayment, deletePayment, listPayments, listPaymentsForClient, listPaymentsForOrder } from "./payments.service";
+import {
+  createPayment,
+  deletePayment,
+  getPaymentDetail,
+  listPayments,
+  listPaymentsForClient,
+  listPaymentsForOrder
+} from "./payments.service";
 import { allocatePayment, getPaymentAllocations } from "./payment-allocations.service";
 
 const catalogRoles = ["admin", "operator"] as const;
@@ -103,6 +110,22 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       if (!one) return reply.status(404).send({ error: "NotFound" });
       const data = await getPaymentAllocations(tenantId, id);
       return reply.send({ data });
+    }
+  );
+
+  app.get(
+    "/api/:slug/payments/:id",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenantId = request.tenant!.id;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const payload = await getPaymentDetail(tenantId, id);
+      if (!payload) return reply.status(404).send({ error: "NotFound" });
+      return reply.send(payload);
     }
   );
 

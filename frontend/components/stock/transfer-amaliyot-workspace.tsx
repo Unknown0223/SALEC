@@ -23,6 +23,7 @@ import {
 import { apiFetch, useTenant } from "@/lib/api-client";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -822,7 +823,7 @@ export function TransferAmaliyotWorkspace() {
                           Jami miqdor
                         </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                          {loadProducts ? "—" : summary.sumQty.toLocaleString("uz-UZ")}
+                          {loadProducts ? "—" : formatNumberGrouped(summary.sumQty, { maxFractionDigits: 3 })}
                         </p>
                       </div>
                       <div className="col-span-2 rounded-lg border border-border/60 bg-muted/25 px-2.5 py-2">

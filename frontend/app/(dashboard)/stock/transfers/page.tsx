@@ -33,6 +33,7 @@ import { apiFetch, useTenant } from "@/lib/api-client";
 import { api } from "@/lib/api";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { cn } from "@/lib/utils";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 
 interface Transfer {
   id: number;
@@ -702,9 +703,13 @@ export default function TransfersPage() {
                               <TableCell className="font-mono text-xs">{line.product_sku}</TableCell>
                               <TableCell className="max-w-[200px]">{line.product_name}</TableCell>
                               <TableCell className="font-mono text-xs">{line.batch_no ?? "—"}</TableCell>
-                              <TableCell className="text-right font-mono text-sm">{line.qty}</TableCell>
                               <TableCell className="text-right font-mono text-sm">
-                                {line.received_qty ?? "—"}
+                                {formatNumberGrouped(line.qty, { maxFractionDigits: 3 })}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm">
+                                {line.received_qty == null
+                                  ? "—"
+                                  : formatNumberGrouped(line.received_qty, { maxFractionDigits: 3 })}
                               </TableCell>
                               <TableCell className="max-w-[160px] truncate text-xs" title={line.comment ?? ""}>
                                 {line.comment?.trim() ? line.comment : "—"}
@@ -764,7 +769,9 @@ export default function TransfersPage() {
                       </TableCell>
                       <TableCell>{t.source_warehouse_name}</TableCell>
                       <TableCell>{t.destination_warehouse_name}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{t.total_qty}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {formatNumberGrouped(t.total_qty, { maxFractionDigits: 3 })}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground text-sm">
                         {formatDateDdMmYyyy(t.created_at)}
                       </TableCell>

@@ -23,6 +23,7 @@ import {
   getDefaultColumnVisibility,
   type ClientColumnId
 } from "@/lib/client-table-columns";
+import { formatDigitsGroupedLoose, formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -124,22 +125,38 @@ function cellContent(row: ClientRow, colId: ClientColumnId, maps?: ClientRefDisp
     }
     case "client_ref": {
       const ref = row.client_code?.trim();
-      return TxtMono(ref && ref.length > 0 ? ref : `#${row.id}`);
+      if (ref && ref.length > 0) {
+        const grouped = /^\d+$/.test(ref.replace(/\s/g, ""))
+          ? formatNumberGrouped(ref.replace(/\s/g, ""), { maxFractionDigits: 0 })
+          : ref;
+        return TxtMono(grouped);
+      }
+      return TxtMono(`#${formatGroupedInteger(row.id)}`);
     }
     case "legal_name":
       return Txt(displayLegalName(row));
     case "address":
       return Txt(displayAddress(row));
-    case "phone":
-      return TxtMono(row.phone);
+    case "phone": {
+      const p = row.phone?.trim();
+      if (!p) return dash;
+      const g = formatDigitsGroupedLoose(p);
+      return TxtMono(g);
+    }
     case "contact_person":
       return Txt(row.responsible_person);
     case "landmark":
       return Txt(row.landmark);
-    case "inn":
-      return Txt(row.inn);
-    case "pinfl":
-      return Txt(displayPinfl(row));
+    case "inn": {
+      const inn = row.inn?.trim();
+      if (!inn) return dash;
+      return Txt(/^\d[\d\s-]*$/.test(inn) ? formatDigitsGroupedLoose(inn) : inn);
+    }
+    case "pinfl": {
+      const pf = displayPinfl(row);
+      if (!pf) return dash;
+      return Txt(formatDigitsGroupedLoose(pf));
+    }
     case "trade_channel_code": {
       const sc = row.sales_channel?.trim();
       if (sc) return Txt(maps?.salesChannel?.[sc] ?? sc);
@@ -175,13 +192,17 @@ function cellContent(row: ClientRow, colId: ClientColumnId, maps?: ClientRefDisp
       const explicit =
         typeof row.latitude === "string" && row.latitude.trim() ? row.latitude.trim() : null;
       const parsed = parseGpsText(row.gps_text).lat;
-      return Txt(explicit ?? parsed);
+      const v = explicit ?? parsed;
+      if (!v?.trim()) return dash;
+      return Txt(formatNumberGrouped(v, { maxFractionDigits: 6 }));
     }
     case "longitude": {
       const explicit =
         typeof row.longitude === "string" && row.longitude.trim() ? row.longitude.trim() : null;
       const parsed = parseGpsText(row.gps_text).lng;
-      return Txt(explicit ?? parsed);
+      const v = explicit ?? parsed;
+      if (!v?.trim()) return dash;
+      return Txt(formatNumberGrouped(v, { maxFractionDigits: 6 }));
     }
     case "_actions":
       return null;
@@ -196,7 +217,11 @@ function cellContent(row: ClientRow, colId: ClientColumnId, maps?: ClientRefDisp
         return Txt(displayAgentDay(row, slot));
       }
       const e = /^expeditor_(\d+)$/.exec(colId);
-      if (e) return TxtMono(displayExpeditorPhone(row, Number(e[1])));
+      if (e) {
+        const ex = displayExpeditorPhone(row, Number(e[1]));
+        if (!ex?.trim()) return dash;
+        return TxtMono(formatDigitsGroupedLoose(ex));
+      }
       return dash;
     }
   }
@@ -263,7 +288,7 @@ export function ClientsDataTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-max min-w-full max-w-none border-separate border-spacing-0 text-left text-sm table-auto">
-        <thead className="border-b-2 border-border bg-muted/70">
+        <thead className="app-table-thead">
           <tr>
             {bulkSelect ? (
               <th className="w-10 whitespace-nowrap px-2 py-2">

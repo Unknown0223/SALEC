@@ -84,7 +84,7 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 ## FAZA 6 - Moliya (reja: hafta 13)
 
 - [x] To‘lovlar API: yaratish, ro‘yxat, mijoz va zakaz bo‘yicha (`payments`)
-- [x] To‘lovni zakazlarga taqsimlash: `GET/POST .../payments/:id/allocations|allocate` + panel **To‘lovlar** → «Zakazlarga» (FIFO, `payment_allocations`)
+- [x] To‘lovni zakazlarga taqsimlash: `GET/POST .../payments/:id/allocations|allocate` + panel **To‘lovlar** → «Zakazlarga» (FIFO, `payment_allocations`); **to‘lov kartochkasi** `GET .../payments/:id` + `/payments/[id]` (taqsimot jadvali, taqsimlash, admin: o‘chirish)
 - [ ] Balans materialized view + refresh strategiyasi (agar kerak)
 - [x] Akt-sverka **PDF** (mijoz bo‘yicha): `GET /api/:slug/clients/:id/reconciliation-pdf` (`date_from` / `date_to`, ixtiyoriy; default — joriy oy boshidan bugungi kunga) + klient kartochkasida davr + yuklab olish.
 - [x] Qarzdorlik **ro‘yxati**: `GET /api/:slug/reports/receivables` (+ `/export` Excel `.xlsx`; alias `client-receivables`) — faqat **ochiq zakazlar yig‘indisi 0 dan katta** bo‘lgan mijozlar; qo‘shimcha filtrlar (`only_over_limit`, `active_only`), UI — **Hisobotlar** → **Qarzdorlik**.
@@ -92,8 +92,8 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 ## FAZA 7 - GPS (reja: hafta 14)
 
 - [x] **Qisman:** `field` moduli API: agent-visits, route days, tenant tasks (`field.route.ts`); Web **`/visits`** — ro‘yxat va CRUD (MVP).
-- [x] **Qisman:** Mijozlar **xarita** `/clients/map` — koordinatalar bo‘yicha scatter (to‘g‘ridan-to‘g‘ri **Leaflet/OSM emas**).
-- [ ] Live GPS trek, **Leaflet** xarita, tashriflar **Excel eksport**, agent mobil sinxron — to‘liq gate.
+- [x] **Leaflet + OpenStreetMap** mijozlar xaritasi (`/clients/map`, `react-leaflet`); tashriflar **Excel** (`GET .../agent-visits/export` + **Визиты**, max 10000 qator).
+- [x] **Agent GPS trek (veb + API):** `agent_location_pings`, `POST/GET .../agent-locations`, panel **`/routes/track`** (Leaflet polyline). **Mobil** fondda ping yuborish — FAZA 9 (shu POST).
 
 ## FAZA 8 - Hisobotlar + dashboard (reja: hafta 15)
 
@@ -108,7 +108,7 @@ Batafsil: [`NON_FUNCTIONAL.md`](./NON_FUNCTIONAL.md)
 
 ## FAZA 10 - Test + deploy (reja: hafta 19)
 
-- [ ] Playwright (yoki E2E) to‘liq zakaz zanjiri
+- [ ] Playwright (yoki E2E) to‘liq zakaz zanjiri *(2026-04-08: login smoke + CI — `frontend/e2e`, `PHASE_PROGRESS.md`)*
 - [ ] k6 yoki load smoke
 - [ ] Production: Nginx wildcard, SSL, PM2, backup cron
 - [ ] Play Store / birinchi diler go-live checklist

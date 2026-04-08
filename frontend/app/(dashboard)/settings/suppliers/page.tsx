@@ -130,7 +130,7 @@ export default function SuppliersSettingsPage() {
   if (!tenantSlug) return <PageShell><p className="text-sm text-destructive"><Link href="/login" className="underline">Kirish</Link></p></PageShell>;
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Поставщики"
         description="Ta'minotchilar ro'yxati — kirim hujjatlarida tanlash uchun."
@@ -154,7 +154,7 @@ export default function SuppliersSettingsPage() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Название</th>
                   <th className="px-3 py-2 font-medium">Код</th>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -120,6 +121,10 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [tab]);
 
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
@@ -333,9 +338,12 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs">
+    <div className="space-y-0">
+      <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
+        <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground/88">
           <span className="sr-only">Должность</span>
           <FilterSelect
             aria-label="Должность"
@@ -350,115 +358,17 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
             ))}
           </FilterSelect>
         </label>
-        <Button type="button" size="sm" onClick={applyFilters}>
+        <Button
+          type="button"
+          size="sm"
+          className="bg-teal-700 text-white hover:bg-teal-800"
+          onClick={applyFilters}
+        >
           Применить
         </Button>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2 border-b border-border">
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("active")}
-          >
-            Активный
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("inactive")}
-          >
-            Не активный
-          </button>
-        </div>
-        <Link
-          href="/settings/spravochnik/supervisors/new"
-          className={cn(buttonVariants({ variant: "default", size: "sm" }))}
-        >
-          Добавить Супервайзера
-        </Link>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={allPageSelected}
-            onChange={(e) => {
-              if (e.target.checked) {
-                setSelected(new Set(pageRows.map((r) => r.id)));
-              } else {
-                setSelected(new Set());
-              }
-            }}
-          />
-        </label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1 px-2 text-xs"
-          title="Управление столбцами"
-          onClick={() => setColumnDialogOpen(true)}
-        >
-          <ListOrdered className="size-3.5" />
-          Столбцы
-        </Button>
-        <select
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-          value={pageSize}
-          onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
-        >
-          {[10, 20, 25, 50, 100].map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-        <Input
-          placeholder="Поиск"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-8 max-w-xs text-xs"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => {
-            const order = tablePrefs.visibleColumnOrder;
-            const headers = order.map((id) => SUPERVISOR_COLUMNS.find((c) => c.id === id)?.label ?? id);
-            const rows = filteredRows.map((r) => order.map((colId) => supervisorExportCellString(r, colId)));
-            downloadXlsxSheet(
-              `supervisors_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-              "Супервайзеры",
-              headers,
-              rows
-            );
-          }}
-        >
-          Excel
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="h-8 w-8"
-          onClick={() => void listQ.refetch()}
-        >
-          <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="ml-auto h-8 text-xs" disabled>
-          Групповая обработка
-        </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <TableColumnSettingsDialog
@@ -474,25 +384,146 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
         onReset={() => tablePrefs.resetColumnLayout()}
       />
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[1400px] text-xs">
-          <thead className="bg-muted/50">
+      <div className="orders-hub-section orders-hub-section--table mt-4">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "active" ? "border-primary text-primary" : "border-transparent text-foreground/65"
+                  )}
+                  onClick={() => setTab("active")}
+                >
+                  Активный
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "inactive" ? "border-primary text-primary" : "border-transparent text-foreground/65"
+                  )}
+                  onClick={() => setTab("inactive")}
+                >
+                  Не активный
+                </button>
+              </div>
+              <div className="py-1">
+                <Link
+                  href="/settings/spravochnik/supervisors/new"
+                  className={cn(buttonVariants({ variant: "default", size: "sm" }), "inline-flex h-9 items-center")}
+                >
+                  Добавить Супервайзера
+                </Link>
+              </div>
+            </div>
+
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                value={pageSize}
+                onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
+              >
+                {[10, 20, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <div className="flex h-9 shrink-0 items-center">
+                <input
+                  type="checkbox"
+                  className="size-4 rounded border-input accent-primary"
+                  checked={allPageSelected}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelected(new Set(pageRows.map((r) => r.id)));
+                    } else {
+                      setSelected(new Set());
+                    }
+                  }}
+                  aria-label="Выбрать всех на странице"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1 px-2 text-xs"
+                title="Управление столбцами"
+                onClick={() => setColumnDialogOpen(true)}
+              >
+                <ListOrdered className="size-3.5" />
+                Столбцы
+              </Button>
+              <Input
+                placeholder="Поиск"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 max-w-xs bg-background text-xs text-foreground"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 text-xs"
+                onClick={() => {
+                  const order = tablePrefs.visibleColumnOrder;
+                  const headers = order.map((id) => SUPERVISOR_COLUMNS.find((c) => c.id === id)?.label ?? id);
+                  const exportData = filteredRows.map((r) =>
+                    order.map((colId) => supervisorExportCellString(r, colId))
+                  );
+                  downloadXlsxSheet(
+                    `supervisors_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                    "Супервайзеры",
+                    headers,
+                    exportData
+                  );
+                }}
+              >
+                Excel
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="h-9 w-9"
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto h-9 text-xs"
+                disabled={selected.size === 0}
+                onClick={() =>
+                  window.alert(
+                    `Выбрано супервайзеров: ${selected.size}. Массовые действия будут добавлены в следующем обновлении.`
+                  )
+                }
+              >
+                Групповая обработка
+              </Button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1400px] text-xs">
+          <thead className="app-table-thead">
             <tr>
               <th className="w-8 px-2 py-2" />
               {tablePrefs.visibleColumnOrder.map((colId) => {
                 const meta = SUPERVISOR_COLUMNS.find((c) => c.id === colId);
                 return (
-                  <th
-                    key={colId}
-                    className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
-                  >
+                  <th key={colId} className="whitespace-nowrap px-2 py-2 text-left">
                     {meta?.label ?? colId}
                   </th>
                 );
               })}
-              <th className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">
-                Действия
-              </th>
+              <th className="whitespace-nowrap px-2 py-2 text-left">Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -558,38 +589,40 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
             ))}
           </tbody>
         </table>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>
-          Показано {total === 0 ? 0 : (safePage - 1) * pageSize + 1} —{" "}
-          {Math.min(safePage * pageSize, total)} из {total}
-        </span>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2"
-            disabled={safePage <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            ‹
-          </Button>
-          <span className="tabular-nums">
-            {safePage} / {pageCount}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2"
-            disabled={safePage >= pageCount}
-            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-          >
-            ›
-          </Button>
-        </div>
+            </div>
+            <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-xs sm:px-4">
+              <span className="text-foreground/80">
+                Показано {total === 0 ? 0 : (safePage - 1) * pageSize + 1} —{" "}
+                {Math.min(safePage * pageSize, total)} из {total}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ‹
+                </Button>
+                <span className="tabular-nums text-foreground">
+                  {safePage} / {pageCount}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={safePage >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                >
+                  ›
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <SupervisorEditDialog

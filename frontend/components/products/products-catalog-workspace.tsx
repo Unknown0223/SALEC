@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
@@ -25,6 +26,7 @@ import {
   PRODUCT_ITEMS_TABLE_ID,
   productItemsExportCell
 } from "@/lib/products-catalog-columns";
+import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
 import { Ban, ListOrdered, Pencil, RefreshCw, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { CatalogInterchangeableTab } from "./catalog-interchangeable-tab";
@@ -208,12 +210,18 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
         return <span className="text-xs">{r.unit}</span>;
       case "qty_per_block":
         return r.qty_per_block != null ? (
-          <span className="tabular-nums text-xs">{r.qty_per_block}</span>
+          <span className="tabular-nums text-xs">
+            {formatNumberGrouped(r.qty_per_block, { maxFractionDigits: 3 })}
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         );
       case "sort_order":
-        return <span className="text-xs">{r.sort_order ?? "—"}</span>;
+        return (
+          <span className="text-xs">
+            {r.sort_order != null ? formatGroupedInteger(r.sort_order) : "—"}
+          </span>
+        );
       case "brand":
         return <span className="text-xs text-muted-foreground">{r.brand?.name ?? "—"}</span>;
       case "segment":
@@ -224,8 +232,14 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
         return <span className="font-mono text-xs">{r.ikpu_code ?? "—"}</span>;
       case "hs_code":
         return <span className="font-mono text-xs">{r.hs_code ?? "—"}</span>;
-      case "price":
-        return <span className="font-mono text-xs">{retailPriceLabel(r)}</span>;
+      case "price": {
+        const pl = retailPriceLabel(r);
+        return (
+          <span className="font-mono text-xs">
+            {pl === "—" ? pl : formatNumberGrouped(pl, { maxFractionDigits: 2 })}
+          </span>
+        );
+      }
       default:
         return "—";
     }
@@ -249,8 +263,25 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="grid gap-1 text-xs text-muted-foreground">
-          Категория
+        <label className="grid shrink-0 gap-1 text-xs text-muted-foreground">
+          <span className="leading-none">Sahifa</span>
+          <select
+            className={`${inputCls} h-9 min-w-[4rem]`}
+            value={pageSize}
+            onChange={(e) => {
+              tablePrefs.setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+          >
+            {[10, 15, 20, 30, 50, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid shrink-0 gap-1 text-xs text-muted-foreground">
+          <span className="leading-none">Категория</span>
           <select
             className={`${inputCls} min-w-[9rem]`}
             value={categoryId}
@@ -264,8 +295,8 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
             ))}
           </select>
         </label>
-        <label className="grid gap-1 text-xs text-muted-foreground">
-          Группа товаров
+        <label className="grid shrink-0 gap-1 text-xs text-muted-foreground">
+          <span className="leading-none">Группа товаров</span>
           <select
             className={`${inputCls} min-w-[9rem]`}
             value={productGroupId}
@@ -279,34 +310,33 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
             ))}
           </select>
         </label>
-        <div className="flex flex-wrap items-center gap-2">
-          {isAdmin ? (
-            <>
-              <div className="relative">
-                <div className="flex">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-r-none"
-                    onClick={() => {
-                      setFullProductId(null);
-                      setFullProductOpen(true);
-                      setAddMenuOpen(false);
-                    }}
-                  >
-                    Добавить
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-l-none border-l border-primary-foreground/30 px-2"
-                    onClick={() => setAddMenuOpen((o) => !o)}
-                    aria-expanded={addMenuOpen}
-                    aria-label="Добавить меню"
-                  >
-                    ▾
-                  </Button>
-                </div>
+        {isAdmin ? (
+          <>
+            <div className="relative shrink-0">
+              <div className="flex">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 rounded-r-none px-3"
+                  onClick={() => {
+                    setFullProductId(null);
+                    setFullProductOpen(true);
+                    setAddMenuOpen(false);
+                  }}
+                >
+                  Добавить
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 rounded-l-none border-l border-primary-foreground/30 px-2"
+                  onClick={() => setAddMenuOpen((o) => !o)}
+                  aria-expanded={addMenuOpen}
+                  aria-label="Добавить меню"
+                >
+                  ▾
+                </Button>
+              </div>
                 {addMenuOpen ? (
                   <div
                     className="absolute right-0 z-50 mt-1 min-w-[240px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
@@ -359,47 +389,49 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
                     </button>
                   </div>
                 ) : null}
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => priceFileRef.current?.click()}
-                disabled={priceImportMut.isPending}
-              >
-                Narx import
-              </Button>
-            </>
-          ) : null}
-          <Button type="button" size="sm" variant="outline" onClick={() => setColumnDialogOpen(true)}>
-            <ListOrdered className="mr-1 h-4 w-4" />
-            Ustunlar
-          </Button>
-          <label className="grid gap-0.5 text-xs text-muted-foreground">
-            Sahifa
-            <select
-              className={`${inputCls} h-9 min-w-[4rem]`}
-              value={pageSize}
-              onChange={(e) => {
-                tablePrefs.setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9"
+              onClick={() => priceFileRef.current?.click()}
+              disabled={priceImportMut.isPending}
             >
-              {[10, 15, 20, 30, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button type="button" size="sm" variant="outline" onClick={() => void listQ.refetch()}>
-            <RefreshCw className="mr-1 h-4 w-4" />
-            Yangilash
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={exportExcel} disabled={rows.length === 0}>
-            Excel
-          </Button>
-        </div>
+              Narx import
+            </Button>
+          </>
+        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 gap-1"
+          onClick={() => setColumnDialogOpen(true)}
+        >
+          <ListOrdered className="h-4 w-4" />
+          Ustunlar
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 gap-1"
+          onClick={() => void listQ.refetch()}
+        >
+          <RefreshCw className="h-4 w-4" />
+          Yangilash
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9"
+          onClick={exportExcel}
+          disabled={rows.length === 0}
+        >
+          Excel
+        </Button>
         <input
           ref={priceFileRef}
           type="file"
@@ -440,9 +472,9 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
           onRetry={() => void listQ.refetch()}
         />
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="-mx-3 overflow-x-auto border-t border-border/80 sm:-mx-4">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-muted/40 text-left">
+            <thead className="app-table-thead text-left">
               <tr>
                 {tablePrefs.visibleColumnOrder.map((colId) => {
                   const label = PRODUCT_ITEMS_COLUMNS.find((c) => c.id === colId)?.label ?? colId;
@@ -564,7 +596,9 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {total ? `Показано ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} / ${total}` : ""}
+          {total
+            ? `Показано ${formatGroupedInteger((page - 1) * pageSize + 1)}–${formatGroupedInteger(Math.min(page * pageSize, total))} / ${formatGroupedInteger(total)}`
+            : ""}
         </span>
         <div className="flex gap-1">
           <Button
@@ -577,7 +611,7 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
             ←
           </Button>
           <span className="px-2 py-1">
-            {page} / {totalPages}
+            {formatGroupedInteger(page)} / {formatGroupedInteger(totalPages)}
           </span>
           <Button
             type="button"
@@ -763,75 +797,84 @@ function ProductsCatalogWorkspaceInner({
     <div className="space-y-4">
       {headerBlock}
 
-      <div className="flex flex-wrap gap-1 border-b border-border pb-2">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm transition-colors",
-              tab === t.id
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <div className="orders-hub-section orders-hub-section--table">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap gap-1 border-b border-border bg-muted/25 px-3 py-2 sm:px-4">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm transition-colors",
+                    tab === t.id
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  onClick={() => setTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-border/80 pb-2">
-        <button
-          type="button"
-          className={cn(
-            "rounded px-2 py-1 text-xs",
-            statusTab === "active" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
-          )}
-          onClick={() => setStatusTab("active")}
-        >
-          Активный
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "rounded px-2 py-1 text-xs",
-            statusTab === "inactive" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
-          )}
-          onClick={() => setStatusTab("inactive")}
-        >
-          Не активный
-        </button>
-      </div>
+            <div className="flex flex-wrap gap-1 border-b border-border/80 px-3 py-2 sm:px-4">
+              <button
+                type="button"
+                className={cn(
+                  "rounded px-2 py-1 text-xs",
+                  statusTab === "active" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
+                )}
+                onClick={() => setStatusTab("active")}
+              >
+                Активный
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded px-2 py-1 text-xs",
+                  statusTab === "inactive" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
+                )}
+                onClick={() => setStatusTab("inactive")}
+              >
+                Не активный
+              </button>
+            </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          className="max-w-xs"
-          placeholder="Поиск"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void qc.invalidateQueries({ queryKey: ["products", tenantSlug] });
-            void qc.invalidateQueries({ queryKey: ["catalog-simple"] });
-            void qc.invalidateQueries({ queryKey: ["catalog-interchangeable", tenantSlug] });
-          }}
-        >
-          Обновить
-        </Button>
-      </div>
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <Input
+                className="h-9 max-w-xs bg-background"
+                placeholder="Поиск"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0"
+                onClick={() => {
+                  void qc.invalidateQueries({ queryKey: ["products", tenantSlug] });
+                  void qc.invalidateQueries({ queryKey: ["catalog-simple"] });
+                  void qc.invalidateQueries({ queryKey: ["catalog-interchangeable", tenantSlug] });
+                }}
+              >
+                Обновить
+              </Button>
+            </div>
 
-      {!hydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya…</p>
-      ) : !tenantSlug ? (
-        <p className="text-sm text-destructive">Tenant yo‘q</p>
-      ) : (
-        main
-      )}
+            <div className="px-3 pb-3 pt-2 sm:px-4">
+              {!hydrated ? (
+                <p className="text-sm text-muted-foreground">Sessiya…</p>
+              ) : !tenantSlug ? (
+                <p className="text-sm text-destructive">Tenant yo‘q</p>
+              ) : (
+                main
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 

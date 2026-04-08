@@ -396,17 +396,7 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/50 pb-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-9 w-9"
-          title="Управление столбцами"
-          onClick={() => setColumnOpen(true)}
-        >
-          <LayoutGrid className="size-4" />
-        </Button>
+      <div className="flex flex-wrap items-end gap-2 border-b border-border/50 pb-3">
         <select
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
           value={String(tablePrefs.pageSize)}
@@ -421,6 +411,16 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
             </option>
           ))}
         </select>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-9 w-9"
+          title="Управление столбцами"
+          onClick={() => setColumnOpen(true)}
+        >
+          <LayoutGrid className="size-4" />
+        </Button>
         <div className="relative min-w-[180px] max-w-xs flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -474,7 +474,7 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
             </tbody>
           ) : (
             <>
-              <thead>
+              <thead className="app-table-thead">
                 <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
                   {visible.map((colId) => (
                     <th

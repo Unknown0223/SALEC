@@ -3,6 +3,7 @@ import { prisma } from "../../config/database";
 import { appendClientAuditLog } from "../clients/clients.service";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import { invalidateDashboard } from "../../lib/redis-cache";
+import { getPaymentAllocations, type PaymentAllocationRow } from "./payment-allocations.service";
 
 export async function deletePayment(
   tenantId: number,
@@ -69,6 +70,60 @@ export type PaymentListRow = {
   note: string | null;
   created_at: string;
 };
+
+export type PaymentDetailRow = PaymentListRow & {
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+};
+
+export type PaymentDetailPayload = {
+  payment: PaymentDetailRow;
+  allocations: PaymentAllocationRow[];
+  allocated_total: string;
+  unallocated: string;
+};
+
+export async function getPaymentDetail(
+  tenantId: number,
+  paymentId: number
+): Promise<PaymentDetailPayload | null> {
+  const p = await prisma.payment.findFirst({
+    where: { id: paymentId, tenant_id: tenantId },
+    include: {
+      client: { select: { name: true } },
+      order: { select: { number: true } },
+      created_by: { select: { name: true } }
+    }
+  });
+  if (!p) return null;
+
+  const allocations = await getPaymentAllocations(tenantId, paymentId);
+  const allocatedSum = allocations.reduce(
+    (acc, row) => acc.add(new Prisma.Decimal(row.amount)),
+    new Prisma.Decimal(0)
+  );
+  const rawUnalloc = p.amount.sub(allocatedSum);
+  const unallocated = rawUnalloc.lt(0) ? new Prisma.Decimal(0) : rawUnalloc;
+
+  return {
+    payment: {
+      id: p.id,
+      client_id: p.client_id,
+      client_name: p.client.name,
+      order_id: p.order_id,
+      order_number: p.order?.number ?? null,
+      amount: p.amount.toString(),
+      payment_type: p.payment_type,
+      note: p.note,
+      created_at: p.created_at.toISOString(),
+      created_by_user_id: p.created_by_user_id,
+      created_by_name: p.created_by?.name ?? null
+    },
+    allocations,
+    allocated_total: allocatedSum.toString(),
+    unallocated: unallocated.toString()
+  };
+}
 
 export async function listPayments(
   tenantId: number,

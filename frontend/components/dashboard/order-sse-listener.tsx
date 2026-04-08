@@ -3,7 +3,7 @@
 import { api, resolveApiOrigin } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 type StreamPayload = { type: string; tenant_id?: number; order_id?: number };
 
@@ -16,7 +16,6 @@ export function OrderSseListener() {
   const accessToken = useAuthStore((s) => s.accessToken);
   const esRef = useRef<EventSource | null>(null);
   const nudgeRef = useRef(false);
-  const [status, setStatus] = useState<"idle" | "connected" | "reconnecting">("idle");
 
   useEffect(() => {
     if (!tenantSlug || !accessToken) {
@@ -24,7 +23,6 @@ export function OrderSseListener() {
         esRef.current.close();
         esRef.current = null;
       }
-      setStatus("idle");
       return;
     }
 
@@ -57,7 +55,6 @@ export function OrderSseListener() {
       }
       esRef.current?.close();
       esRef.current = es;
-      setStatus("connected");
 
       es.onmessage = (ev) => {
         try {
@@ -71,7 +68,6 @@ export function OrderSseListener() {
       };
 
       es.onerror = () => {
-        setStatus("reconnecting");
         try {
           es.close();
         } catch {
@@ -102,15 +98,8 @@ export function OrderSseListener() {
         esRef.current.close();
         esRef.current = null;
       }
-      setStatus("idle");
     };
   }, [qc, tenantSlug, accessToken]);
 
-  if (!tenantSlug || status === "idle") return null;
-
-  return (
-    <div className="fixed bottom-3 right-3 z-50 rounded-md border border-border bg-background/90 px-2 py-1 text-xs shadow">
-      SSE: {status === "connected" ? "connected" : "reconnecting"}
-    </div>
-  );
+  return null;
 }

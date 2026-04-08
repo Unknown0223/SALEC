@@ -22,7 +22,8 @@ export async function registerTerritoryRoutes(app: FastifyInstance) {
     const data = await listTerritories(request.tenant!.id, {
       page: q.page ? parseInt(q.page) : 1,
       limit: q.limit ? parseInt(q.limit) : 50,
-      user_id: q.userId ? parseInt(q.userId) : undefined
+      q: q.q?.trim() || undefined,
+      is_active: q.is_active === "true" ? true : q.is_active === "false" ? false : undefined
     });
     return reply.send(data);
   });
@@ -53,8 +54,14 @@ export async function registerTerritoryRoutes(app: FastifyInstance) {
 
   app.post("/api/:slug/territories/:id/assign", { preHandler }, async (request, reply) => {
     if (!ensureTenantContext(request, reply)) return;
-    const body = request.body as { userId: number; role?: string };
-    const data = await assignUser(request.tenant!.id, parseInt((request.params as any).id), body.userId, body.role);
+    const body = request.body as { userId: number };
+    const jwtUser = getAccessUser(request);
+    const data = await assignUser(
+      request.tenant!.id,
+      parseInt((request.params as any).id),
+      body.userId,
+      Number(jwtUser.sub)
+    );
     return reply.send(data);
   });
 
@@ -75,7 +82,7 @@ export async function registerTerritoryRoutes(app: FastifyInstance) {
   app.get("/api/:slug/territories/stats", { preHandler }, async (request, reply) => {
     if (!ensureTenantContext(request, reply)) return;
     const q = request.query as Record<string, string | undefined>;
-    const data = await getTerritoryStats(request.tenant!.id, q.from, q.to);
+    const data = await getTerritoryStats(request.tenant!.id, { from: q.from, to: q.to });
     return reply.send(data);
   });
 }

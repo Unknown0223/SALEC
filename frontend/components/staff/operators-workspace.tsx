@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { FilterSelect, filterSelectClassName } from "@/components/ui/filter-select";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -149,7 +151,9 @@ function renderOperatorDataCell(colId: string, r: WebStaffRow) {
     case "branch":
       return <span className="text-xs">{r.branch ?? "—"}</span>;
     case "max_sessions":
-      return <span className="text-xs tabular-nums">{r.max_sessions}</span>;
+      return (
+        <span className="text-xs tabular-nums">{formatGroupedInteger(r.max_sessions)}</span>
+      );
     case "app_access":
       return <span className="text-xs">{r.app_access ? "Ha" : "Yo‘q"}</span>;
     case "can_authorize":
@@ -375,158 +379,79 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex gap-1 border-b border-border pb-1">
-            <button
-              type="button"
-              className={cn(
-                "rounded px-2 py-1 text-xs",
-                tab === "active" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
-              )}
-              onClick={() => setTab("active")}
-            >
-              Faol
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded px-2 py-1 text-xs",
-                tab === "inactive" ? "border-b-2 border-primary font-medium" : "text-muted-foreground"
-              )}
-              onClick={() => setTab("inactive")}
-            >
-              Nofaol
-            </button>
-          </div>
-          <label className="grid gap-0.5 text-xs">
-            <span className="sr-only">Filial</span>
-            <FilterSelect
-              aria-label="Filial"
-              emptyLabel="Filial"
-              value={filterBranch}
-              onChange={(e) => setFilterBranch(e.target.value)}
-            >
-              {(filterOptsQ.data?.branches ?? []).map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </FilterSelect>
-          </label>
-          <label className="grid gap-0.5 text-xs">
-            <span className="sr-only">Lavozim</span>
-            <FilterSelect
-              aria-label="Lavozim"
-              emptyLabel="Lavozim"
-              value={filterPosition}
-              onChange={(e) => setFilterPosition(e.target.value)}
-            >
-              {(filterOptsQ.data?.positions ?? []).map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </FilterSelect>
-          </label>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="shrink-0"
-            onClick={() => {
-              setAppliedBranch(filterBranch);
-              setAppliedPosition(filterPosition);
-            }}
-          >
-            Qo‘llash
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1 px-2 text-xs"
-            title="Ustunlar va tartib"
-            onClick={() => setColumnDialogOpen(true)}
-          >
-            <ListOrdered className="size-3.5" />
-            Ustunlar
-          </Button>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-            value={pageSize}
-            onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
-          >
-            {[10, 20, 25, 50, 100, 500, 1000].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <Input
-            className="max-w-[200px]"
-            placeholder="Qidiruv"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const order = tablePrefs.visibleColumnOrder;
-              const headers = order.map((id) => OPERATOR_COLUMNS.find((c) => c.id === id)?.label ?? id);
-              const dataRows = rows.map((r) => order.map((colId) => operatorExportCellString(r, colId)));
-              downloadXlsxSheet(
-                `veb_xodimlar_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-                "Veb xodimlar",
-                headers,
-                dataRows
-              );
-            }}
-          >
-            Excel
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            title="Ro‘yxat va faol sessiyalar sonini yangilash"
-            disabled={listQ.isFetching}
-            onClick={() => void listQ.refetch()}
-          >
-            <RefreshCw className={cn("size-3.5", listQ.isFetching && "animate-spin")} />
-          </Button>
-          <label className="text-xs text-muted-foreground">
-            <span className="sr-only">Guruh</span>
-            <select
-              className={filterSelectClassName}
-              value=""
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "revoke" && rows.length > 0) openBulkRevoke();
-                if (v === "limits" && rows.length > 0) openBulkLimits();
-                e.target.value = "";
-              }}
-            >
-              <option value="">Guruh ishlovi…</option>
-              <option value="revoke" disabled={rows.length === 0}>
-                Sessiyalarni yopish
-              </option>
-              <option value="limits" disabled={rows.length === 0}>
-                Sessiya limitlari
-              </option>
-            </select>
-          </label>
-          <Link
-            href="/settings/spravochnik/operators/new"
-            className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
-          >
-            + Qoʻshish
-          </Link>
-        </div>
+      <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
+        <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="space-y-3 p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex gap-1 border-b border-border pb-1">
+                  <button
+                    type="button"
+                    className={cn(
+                      "rounded px-2 py-1 text-xs font-medium text-foreground",
+                      tab === "active" ? "border-b-2 border-primary" : "text-foreground/65"
+                    )}
+                    onClick={() => setTab("active")}
+                  >
+                    Faol
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "rounded px-2 py-1 text-xs font-medium text-foreground",
+                      tab === "inactive" ? "border-b-2 border-primary" : "text-foreground/65"
+                    )}
+                    onClick={() => setTab("inactive")}
+                  >
+                    Nofaol
+                  </button>
+                </div>
+                <label className="grid gap-0.5 text-xs font-medium text-foreground/88">
+                  <span className="sr-only">Filial</span>
+                  <FilterSelect
+                    aria-label="Filial"
+                    emptyLabel="Filial"
+                    value={filterBranch}
+                    onChange={(e) => setFilterBranch(e.target.value)}
+                  >
+                    {(filterOptsQ.data?.branches ?? []).map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </label>
+                <label className="grid gap-0.5 text-xs font-medium text-foreground/88">
+                  <span className="sr-only">Lavozim</span>
+                  <FilterSelect
+                    aria-label="Lavozim"
+                    emptyLabel="Lavozim"
+                    value={filterPosition}
+                    onChange={(e) => setFilterPosition(e.target.value)}
+                  >
+                    {(filterOptsQ.data?.positions ?? []).map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </label>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="shrink-0 bg-teal-700 text-white hover:bg-teal-800"
+                onClick={() => {
+                  setAppliedBranch(filterBranch);
+                  setAppliedPosition(filterPosition);
+                }}
+              >
+                Qo‘llash
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <TableColumnSettingsDialog
@@ -542,9 +467,102 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
         onReset={() => tablePrefs.resetColumnLayout()}
       />
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-[1100px] text-sm">
-          <thead className="bg-muted/40 text-left text-xs">
+      <div className="orders-hub-section orders-hub-section--table mt-4">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <label className="grid shrink-0 gap-1 text-xs font-medium text-foreground/85">
+                <span className="whitespace-nowrap leading-none">Qator</span>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                  value={pageSize}
+                  onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
+                >
+                  {[10, 20, 25, 50, 100, 500, 1000].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1 px-2 text-xs"
+                title="Ustunlar va tartib"
+                onClick={() => setColumnDialogOpen(true)}
+              >
+                <ListOrdered className="size-3.5" />
+                Ustunlar
+              </Button>
+              <Input
+                className="h-9 max-w-[220px] bg-background text-foreground"
+                placeholder="Qidiruv"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 shrink-0"
+                onClick={() => {
+                  const order = tablePrefs.visibleColumnOrder;
+                  const headers = order.map((id) => OPERATOR_COLUMNS.find((c) => c.id === id)?.label ?? id);
+                  const dataRows = rows.map((r) => order.map((colId) => operatorExportCellString(r, colId)));
+                  downloadXlsxSheet(
+                    `veb_xodimlar_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                    "Veb xodimlar",
+                    headers,
+                    dataRows
+                  );
+                }}
+              >
+                Excel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 w-9 shrink-0 p-0"
+                title="Ro‘yxat va faol sessiyalar sonini yangilash"
+                disabled={listQ.isFetching}
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("mx-auto size-3.5", listQ.isFetching && "animate-spin")} />
+              </Button>
+              <div className="shrink-0">
+                <select
+                  aria-label="Guruh ishlovi"
+                  className={cn(filterSelectClassName, "min-w-[10rem] max-w-[14rem]")}
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "revoke" && rows.length > 0) openBulkRevoke();
+                    if (v === "limits" && rows.length > 0) openBulkLimits();
+                    e.target.value = "";
+                  }}
+                >
+                  <option value="">Guruh ishlovi…</option>
+                  <option value="revoke" disabled={rows.length === 0}>
+                    Sessiyalarni yopish
+                  </option>
+                  <option value="limits" disabled={rows.length === 0}>
+                    Sessiya limitlari
+                  </option>
+                </select>
+              </div>
+              <Link
+                href="/settings/spravochnik/operators/new"
+                className={cn(buttonVariants({ size: "sm" }), "inline-flex h-9 shrink-0 items-center")}
+              >
+                + Qoʻshish
+              </Link>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] text-sm">
+          <thead className="app-table-thead text-left text-xs">
             <tr>
               <th className="w-10 px-2 py-2">
                 <input
@@ -688,14 +706,16 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
               ))
             )}
           </tbody>
-        </table>
+              </table>
+            </div>
+            {rows.length > 0 ? (
+              <div className="table-content-footer border-t border-border/80 bg-muted/25 px-3 py-2 text-xs text-muted-foreground sm:px-4">
+                Ko‘rsatilmoqda {pageRows.length} / {rows.length}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
       </div>
-
-      {rows.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          Ko‘rsatilmoqda {pageRows.length} / {rows.length}
-        </p>
-      ) : null}
 
       <p className="text-xs text-muted-foreground">
         <strong className="text-foreground">Tizim roli</strong> hozircha faqat{" "}

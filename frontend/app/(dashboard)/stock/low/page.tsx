@@ -2,10 +2,12 @@
 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -51,46 +53,61 @@ export default function StockLowPage() {
         </p>
       ) : (
         <>
-          <div className="mb-4 flex max-w-xs flex-col gap-2">
-            <Label htmlFor="low-th">Chegara (mavjud &lt;)</Label>
-            <Input
-              id="low-th"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              inputMode="decimal"
-            />
+          <div className="orders-hub-section orders-hub-section--filters">
+            <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+              <CardContent className="max-w-md p-4 sm:p-5">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="low-th" className="text-sm font-medium text-foreground/88">
+                    Chegara (mavjud &lt;)
+                  </Label>
+                  <Input
+                    id="low-th"
+                    className="bg-background text-foreground"
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    inputMode="decimal"
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </div>
           {listQ.isLoading ? (
-            <p className="text-sm text-muted-foreground">Загрузка…</p>
+            <p className="mt-4 text-sm text-muted-foreground">Загрузка…</p>
           ) : listQ.isError ? (
-            <p className="text-sm text-destructive">Xato.</p>
+            <p className="mt-4 text-sm text-destructive">Xato.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[560px] border-collapse text-sm">
-                <thead className="border-b bg-muted/60 text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2">Mahsulot</th>
-                    <th className="px-3 py-2 text-right">Mavjud (jami)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(listQ.data?.data ?? []).map((r) => (
-                    <tr key={r.product_id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-amber-800 dark:text-amber-300">
-                        {r.available_qty}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {(listQ.data?.data.length ?? 0) === 0 ? (
-                <p className="p-6 text-center text-sm text-muted-foreground">
-                  Chegara {listQ.data?.threshold ?? threshold} dan past qoldiq yo‘q.
-                </p>
-              ) : null}
+            <div className="orders-hub-section orders-hub-section--table mt-4">
+              <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] border-collapse text-sm">
+                      <thead className="app-table-thead text-left text-xs">
+                        <tr>
+                          <th className="px-3 py-2">SKU</th>
+                          <th className="px-3 py-2">Mahsulot</th>
+                          <th className="px-3 py-2 text-right">Mavjud (jami)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(listQ.data?.data ?? []).map((r) => (
+                          <tr key={r.product_id} className="border-b border-border last:border-0">
+                            <td className="px-3 py-2 font-mono text-xs">{r.sku}</td>
+                            <td className="px-3 py-2">{r.name}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-amber-800 dark:text-amber-300">
+                              {formatNumberGrouped(r.available_qty, { maxFractionDigits: 3 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {(listQ.data?.data.length ?? 0) === 0 ? (
+                    <p className="border-t border-border/60 p-6 text-center text-sm text-foreground/75">
+                      Chegara {listQ.data?.threshold ?? threshold} dan past qoldiq yo‘q.
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
             </div>
           )}
         </>

@@ -20,7 +20,7 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
   return (
     <div className="w-full">
       {showTabs ? (
-        <div className="mx-auto mb-4 flex w-full max-w-6xl flex-wrap items-center gap-2 border-b border-border/80 pb-3">
+        <div className="mb-4 flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-border/80 pb-3">
           <Link
             href={`${BR}/active`}
             className={cn(

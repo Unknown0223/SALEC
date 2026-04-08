@@ -39,3 +39,16 @@ export function formatNumberGrouped(
     maximumFractionDigits: max
   });
 }
+
+/**
+ * Telefon / ПИНФЛ: faqat raqamlarni ajratib, uzun bo‘lsa minglik guruhlaydi.
+ * Qisqa yoki aralash matnni o‘zgartirmaydi.
+ */
+export function formatDigitsGroupedLoose(raw: string | null | undefined): string {
+  if (raw == null) return "";
+  const t = raw.trim();
+  if (!t) return "";
+  const digits = t.replace(/\D/g, "");
+  if (digits.length < 6) return t;
+  return formatNumberGrouped(digits, { maxFractionDigits: 0 });
+}

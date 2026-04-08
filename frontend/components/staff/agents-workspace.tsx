@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -223,13 +224,21 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const [sessionAgent, setSessionAgent] = useState<AgentRow | null>(null);
   const [restrictAgent, setRestrictAgent] = useState<AgentRow | null>(null);
   const [deactivateAgent, setDeactivateAgent] = useState<AgentRow | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const headerCbRef = useRef<HTMLInputElement>(null);
 
   const filterOptQ = useQuery({
     queryKey: ["agents-filter-options", tenantSlug],
     enabled: Boolean(tenantSlug),
     queryFn: async () => {
       const { data } = await api.get<{
-        data: { branches: string[]; trade_directions: string[]; positions: string[] };
+        data: {
+          branches: string[];
+          trade_directions: string[];
+          positions: string[];
+          territories?: string[];
+          territory_tokens?: string[];
+        };
       }>(`/api/${tenantSlug}/agents/filter-options`);
       return data.data;
     }
@@ -370,6 +379,39 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
     return filteredRows.slice(0, pageSize);
   }, [filteredRows, pageSize]);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [tab]);
+
+  const allOnPageSelected = pageRows.length > 0 && pageRows.every((r) => selectedIds.has(r.id));
+  const someOnPageSelected = pageRows.some((r) => selectedIds.has(r.id));
+  useEffect(() => {
+    const el = headerCbRef.current;
+    if (!el) return;
+    el.indeterminate = someOnPageSelected && !allOnPageSelected;
+  }, [someOnPageSelected, allOnPageSelected]);
+
+  const toggleAgentSelection = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleAllAgentsOnPage = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        for (const r of pageRows) next.add(r.id);
+      } else {
+        for (const r of pageRows) next.delete(r.id);
+      }
+      return next;
+    });
+  };
+
   const applyFilters = () => {
     setAppliedBranch(draftBranch);
     setAppliedTd(draftTd);
@@ -453,9 +495,12 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs">
+    <div className="space-y-0">
+      <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
+        <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground/88">
           <span className="sr-only">Филиал</span>
           <FilterSelect
             aria-label="Филиал"
@@ -470,7 +515,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
             ))}
           </FilterSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs">
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground/88">
           <span className="sr-only">Направление торговли</span>
           <FilterSelect
             aria-label="Направление торговли"
@@ -485,7 +530,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
             ))}
           </FilterSelect>
         </label>
-        <label className="flex flex-col gap-1 text-xs">
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground/88">
           <span className="sr-only">Должность</span>
           <FilterSelect
             aria-label="Должность"
@@ -500,96 +545,17 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
             ))}
           </FilterSelect>
         </label>
-        <Button type="button" size="sm" onClick={applyFilters}>
+        <Button
+          type="button"
+          size="sm"
+          className="bg-teal-700 text-white hover:bg-teal-800"
+          onClick={applyFilters}
+        >
           Применить
         </Button>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2 border-b border-border">
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("active")}
-          >
-            Активный
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("inactive")}
-          >
-            Не активный
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-            Добавить агента
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1 px-2 text-xs"
-          title="Управление столбцами"
-          onClick={() => setColumnDialogOpen(true)}
-        >
-          <ListOrdered className="size-3.5" />
-          Столбцы
-        </Button>
-        <select
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-          value={pageSize}
-          onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
-        >
-          {[10, 20, 25, 50, 100, 500, 1000].map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-        <Input
-          placeholder="Поиск"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-8 max-w-xs text-xs"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => {
-            const order = tablePrefs.visibleColumnOrder;
-            const headers = order.map((id) => AGENT_COLUMNS.find((c) => c.id === id)?.label ?? id);
-            const rows = filteredRows.map((r) => order.map((colId) => agentExportCellString(r, colId)));
-            downloadXlsxSheet(`agents_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`, "Агенты", headers, rows);
-          }}
-        >
-          Excel
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="h-8 w-8"
-          onClick={() => void listQ.refetch()}
-        >
-          <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="ml-auto h-8 text-xs" disabled>
-          Групповая обработка
-        </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <TableColumnSettingsDialog
@@ -605,105 +571,234 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
         onReset={() => tablePrefs.resetColumnLayout()}
       />
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[2200px] text-xs">
-          <thead className="bg-muted/50">
-            <tr>
-              {tablePrefs.visibleColumnOrder.map((colId) => {
-                const meta = AGENT_COLUMNS.find((c) => c.id === colId);
-                return (
-                  <th
-                    key={colId}
-                    className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground"
-                  >
-                    {meta?.label ?? colId}
-                  </th>
-                );
-              })}
-              <th className="whitespace-nowrap px-2 py-2 text-left font-medium text-muted-foreground">
-                Действия
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageRows.map((r) => (
-              <tr key={r.id} className="border-t even:bg-muted/20">
-                {tablePrefs.visibleColumnOrder.map((colId) => (
-                  <td key={colId} className={colId === "price_types" ? "max-w-[10rem] px-2 py-2" : "px-2 py-2"}>
-                    {renderAgentDataCell(colId, r)}
-                  </td>
-                ))}
-                <td className="px-2 py-2 text-right">
-                  <TableRowActionGroup className="justify-end" ariaLabel="Agent">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-foreground"
-                      title="Активные сессии"
-                      aria-label="Активные сессии"
-                      onClick={() => setSessionAgent(r)}
-                    >
-                      <MonitorSmartphone className="size-3.5" aria-hidden />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-foreground"
-                      title="Изменить ограничения"
-                      aria-label="Изменить ограничения"
-                      onClick={() => setRestrictAgent(r)}
-                    >
-                      <Settings2 className="size-3.5" aria-hidden />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-foreground"
-                      title="Инфо"
-                      aria-label="Инфо"
-                      onClick={() => setInfoRow(r)}
-                    >
-                      <Eye className="size-3.5" aria-hidden />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-foreground"
-                      title="Редактировать"
-                      aria-label="Редактировать"
-                      onClick={() => setEditRow(r)}
-                    >
-                      <Pencil className="size-3.5" aria-hidden />
-                    </Button>
-                    {tab === "active" && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        title="Деактивировать"
-                        aria-label="Деактивировать"
-                        onClick={() => setDeactivateAgent(r)}
-                      >
-                        <UserMinus className="size-3.5" aria-hidden />
-                      </Button>
-                    )}
-                  </TableRowActionGroup>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <div className="orders-hub-section orders-hub-section--table mt-4">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "active" ? "border-primary text-primary" : "border-transparent text-foreground/65"
+                  )}
+                  onClick={() => setTab("active")}
+                >
+                  Активный
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "inactive" ? "border-primary text-primary" : "border-transparent text-foreground/65"
+                  )}
+                  onClick={() => setTab("inactive")}
+                >
+                  Не активный
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 py-1">
+                <Button type="button" size="sm" className="h-9" onClick={() => setAddOpen(true)}>
+                  Добавить агента
+                </Button>
+              </div>
+            </div>
 
-      <p className="text-xs text-muted-foreground">
-        Показано {pageRows.length} / {filteredRows.length}
-        {listQ.data && listQ.data.length !== filteredRows.length ? ` (вкладка: ${listQ.data.length})` : ""}
-      </p>
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                value={pageSize}
+                onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
+              >
+                {[10, 20, 25, 50, 100, 500, 1000].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1 px-2 text-xs"
+                title="Управление столбцами"
+                onClick={() => setColumnDialogOpen(true)}
+              >
+                <ListOrdered className="size-3.5" />
+                Столбцы
+              </Button>
+              <Input
+                placeholder="Поиск"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 max-w-xs bg-background text-xs text-foreground"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 text-xs"
+                onClick={() => {
+                  const order = tablePrefs.visibleColumnOrder;
+                  const headers = order.map((id) => AGENT_COLUMNS.find((c) => c.id === id)?.label ?? id);
+                  const exportData = filteredRows.map((r) =>
+                    order.map((colId) => agentExportCellString(r, colId))
+                  );
+                  downloadXlsxSheet(
+                    `agents_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                    "Агенты",
+                    headers,
+                    exportData
+                  );
+                }}
+              >
+                Excel
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="h-9 w-9"
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto h-9 text-xs"
+                disabled={selectedIds.size === 0}
+                onClick={() =>
+                  window.alert(
+                    `Выбрано агентов: ${selectedIds.size}. Массовые действия будут добавлены в следующем обновлении.`
+                  )
+                }
+              >
+                Групповая обработка
+              </Button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[2200px] text-xs">
+                <thead className="app-table-thead">
+                  <tr>
+                    <th className="w-10 whitespace-nowrap px-2 py-2 text-left">
+                      <input
+                        ref={headerCbRef}
+                        type="checkbox"
+                        className="size-4 rounded border-input accent-primary"
+                        checked={allOnPageSelected}
+                        onChange={(e) => toggleAllAgentsOnPage(e.target.checked)}
+                        aria-label="Выбрать всех на странице"
+                      />
+                    </th>
+                    {tablePrefs.visibleColumnOrder.map((colId) => {
+                      const meta = AGENT_COLUMNS.find((c) => c.id === colId);
+                      return (
+                        <th key={colId} className="whitespace-nowrap px-2 py-2 text-left">
+                          {meta?.label ?? colId}
+                        </th>
+                      );
+                    })}
+                    <th className="whitespace-nowrap px-2 py-2 text-left">Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((r) => (
+                    <tr key={r.id} className="border-t even:bg-muted/20">
+                      <td className="px-2 py-2">
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-input accent-primary"
+                          checked={selectedIds.has(r.id)}
+                          onChange={(e) => toggleAgentSelection(r.id, e.target.checked)}
+                          aria-label={`Выбрать ${r.fio}`}
+                        />
+                      </td>
+                      {tablePrefs.visibleColumnOrder.map((colId) => (
+                        <td
+                          key={colId}
+                          className={colId === "price_types" ? "max-w-[10rem] px-2 py-2" : "px-2 py-2"}
+                        >
+                          {renderAgentDataCell(colId, r)}
+                        </td>
+                      ))}
+                      <td className="px-2 py-2 text-right">
+                        <TableRowActionGroup className="justify-end" ariaLabel="Agent">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Активные сессии"
+                            aria-label="Активные сессии"
+                            onClick={() => setSessionAgent(r)}
+                          >
+                            <MonitorSmartphone className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Изменить ограничения"
+                            aria-label="Изменить ограничения"
+                            onClick={() => setRestrictAgent(r)}
+                          >
+                            <Settings2 className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Инфо"
+                            aria-label="Инфо"
+                            onClick={() => setInfoRow(r)}
+                          >
+                            <Eye className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Редактировать"
+                            aria-label="Редактировать"
+                            onClick={() => setEditRow(r)}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                          {tab === "active" && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              title="Деактивировать"
+                              aria-label="Деактивировать"
+                              onClick={() => setDeactivateAgent(r)}
+                            >
+                              <UserMinus className="size-3.5" aria-hidden />
+                            </Button>
+                          )}
+                        </TableRowActionGroup>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-content-footer border-t border-border/80 bg-muted/25 px-3 py-2 text-xs text-foreground/75 sm:px-4">
+              Показано {pageRows.length} / {filteredRows.length}
+              {listQ.data && listQ.data.length !== filteredRows.length
+                ? ` (вкладка: ${listQ.data.length})`
+                : ""}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <AgentAddDialog
         open={addOpen}

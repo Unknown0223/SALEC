@@ -96,3 +96,13 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: frontend
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: E2E smoke (login)
+        run: npx playwright test
+        working-directory: frontend
+        env:
+          CI: true

@@ -102,25 +102,25 @@ async function resolveNames(expenses: Array<{
 
 function enrichExpense(
   expense: { id: number; expense_type: string; agent_id: number | null; amount: Prisma.Decimal; currency: string; warehouse_id: number | null; status: string; note: string | null; expense_date: Date; created_by_user_id: number | null; approved_by_user_id: number | null; rejection_note: string | null; created_at: Date },
-  userMap: Map<string, string>,
-  whMap: Map<string, string>
+  userMap: Map<number, string>,
+  whMap: Map<number, string>
 ): ExpenseListRow {
   return {
     id: expense.id,
     expense_type: expense.expense_type,
     agent_id: expense.agent_id,
-    agent_name: expense.agent_id != null ? (userMap.get(String(expense.agent_id)) ?? null) : null,
+    agent_name: expense.agent_id != null ? (userMap.get(expense.agent_id) ?? null) : null,
     amount: expense.amount.toString(),
     currency: expense.currency,
     warehouse_id: expense.warehouse_id,
-    warehouse_name: expense.warehouse_id != null ? (whMap.get(String(expense.warehouse_id)) ?? null) : null,
+    warehouse_name: expense.warehouse_id != null ? (whMap.get(expense.warehouse_id) ?? null) : null,
     status: expense.status,
     note: expense.note,
     expense_date: expense.expense_date.toISOString(),
     created_by_user_id: expense.created_by_user_id,
-    created_by_name: expense.created_by_user_id != null ? (userMap.get(String(expense.created_by_user_id)) ?? null) : null,
+    created_by_name: expense.created_by_user_id != null ? (userMap.get(expense.created_by_user_id) ?? null) : null,
     approved_by_user_id: expense.approved_by_user_id,
-    approved_by_name: expense.approved_by_user_id != null ? (userMap.get(String(expense.approved_by_user_id)) ?? null) : null,
+    approved_by_name: expense.approved_by_user_id != null ? (userMap.get(expense.approved_by_user_id) ?? null) : null,
     rejection_note: expense.rejection_note,
     created_at: expense.created_at.toISOString()
   };

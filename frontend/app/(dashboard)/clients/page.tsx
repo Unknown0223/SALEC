@@ -2,7 +2,8 @@
 
 import { ClientsDataTable } from "@/components/clients/clients-data-table";
 import {
-  ClientsTableToolbar,
+  ClientsTableFilters,
+  ClientsTableListToolbarStrip,
   type ClientsToolbarFilterVisibility
 } from "@/components/clients/clients-table-toolbar";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
@@ -33,6 +34,7 @@ import {
   optionsToValueLabelMap
 } from "@/lib/ref-select-options";
 import { api } from "@/lib/api";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { clientsFilterDebugEnabled, logClientsFilters } from "@/lib/clients-filter-debug";
 import {
   ClientImportMappingDialog,
@@ -549,6 +551,12 @@ export default function ClientsPage() {
 
   const rows = data?.data ?? [];
 
+  const clientsTotalPages = useMemo(() => {
+    if (!data) return 1;
+    const lim = data.limit > 0 ? data.limit : tablePrefs.pageSize;
+    return Math.max(1, Math.ceil(data.total / lim));
+  }, [data, tablePrefs.pageSize]);
+
   const handleSortByColumn = (columnId: ClientColumnId) => {
     const api = CLIENT_COLUMN_TO_SORT[columnId];
     if (!api) {
@@ -764,12 +772,7 @@ export default function ClientsPage() {
         {bulkMsg ? <span className="text-sm text-muted-foreground">{bulkMsg}</span> : null}
       </div>
 
-      <ClientsTableToolbar
-        search={search}
-        onSearchChange={(v) => {
-          setSearch(v);
-          setPage(1);
-        }}
+      <ClientsTableFilters
         activeFilter={activeFilter}
         onActiveFilterChange={(v) => {
           setActiveFilter(v);
@@ -828,14 +831,8 @@ export default function ClientsPage() {
         salesChannelSelectOptions={salesChannelSelectOptions}
         agentOptions={agentsFilterQ.data ?? []}
         expeditorOptions={expeditorsFilterQ.data ?? []}
-        pageLimit={tablePrefs.pageSize}
-        onPageLimitChange={(v) => {
-          tablePrefs.setPageSize(v);
-          setPage(1);
-        }}
         filtersVisible={filtersVisible}
         onFiltersVisibleChange={setFiltersVisible}
-        onOpenColumnSettings={() => setColumnDialogOpen(true)}
       />
 
       <TableColumnSettingsDialog
@@ -851,12 +848,6 @@ export default function ClientsPage() {
         onReset={() => tablePrefs.resetColumnLayout()}
       />
 
-      {data ? (
-        <p className="text-sm text-muted-foreground">
-          Jami: <span className="font-medium text-foreground">{data.total}</span>
-        </p>
-      ) : null}
-
       {!authHydrated ? (
         <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
@@ -870,70 +861,94 @@ export default function ClientsPage() {
       ) : isError ? (
         <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : (
-        <Card className="mt-5 overflow-hidden shadow-panel">
-          <CardContent className="p-0">
-            <ClientsDataTable
-              rows={rows}
-              visibility={getDefaultColumnVisibility()}
-              orderedVisibleColumnIds={tablePrefs.visibleColumnOrder}
-              refDisplayMaps={refDisplayMaps}
-              sortField={sortField}
-              sortOrder={sortOrder}
-              onSortByColumn={handleSortByColumn}
-              bulkSelect={canCatalog}
-              selectedIds={selectedIds}
-              onToggleRow={(id, selected) => {
-                setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  if (selected) next.add(id);
-                  else next.delete(id);
-                  return next;
-                });
-              }}
-              onTogglePage={(selectAll) => {
-                setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  if (selectAll) {
-                    for (const r of rows) next.add(r.id);
-                  } else {
-                    for (const r of rows) next.delete(r.id);
-                  }
-                  return next;
-                });
-              }}
-              onEdit={(row) => {
-                router.push(`/clients/${row.id}/edit`);
-              }}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {data && data.total > data.limit ? (
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Oldingi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {page} / {Math.ceil(data.total / data.limit) || 1}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={page * data.limit >= data.total}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Keyingi
-          </Button>
+        <div className="orders-hub-section orders-hub-section--table mt-4">
+          <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+            <CardContent className="p-0">
+              <ClientsTableListToolbarStrip
+                search={search}
+                onSearchChange={(v) => {
+                  setSearch(v);
+                  setPage(1);
+                }}
+                pageLimit={tablePrefs.pageSize}
+                onPageLimitChange={(v) => {
+                  tablePrefs.setPageSize(v);
+                  setPage(1);
+                }}
+                onOpenColumnSettings={() => setColumnDialogOpen(true)}
+                totalRecords={data?.total}
+              />
+              <ClientsDataTable
+                rows={rows}
+                visibility={getDefaultColumnVisibility()}
+                orderedVisibleColumnIds={tablePrefs.visibleColumnOrder}
+                refDisplayMaps={refDisplayMaps}
+                sortField={sortField}
+                sortOrder={sortOrder}
+                onSortByColumn={handleSortByColumn}
+                bulkSelect={canCatalog}
+                selectedIds={selectedIds}
+                onToggleRow={(id, selected) => {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    if (selected) next.add(id);
+                    else next.delete(id);
+                    return next;
+                  });
+                }}
+                onTogglePage={(selectAll) => {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    if (selectAll) {
+                      for (const r of rows) next.add(r.id);
+                    } else {
+                      for (const r of rows) next.delete(r.id);
+                    }
+                    return next;
+                  });
+                }}
+                onEdit={(row) => {
+                  router.push(`/clients/${row.id}/edit`);
+                }}
+              />
+              {data ? (
+                <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-sm sm:px-4">
+                  <span className="text-foreground/80">
+                    Страница{" "}
+                    <span className="font-medium tabular-nums text-foreground">
+                      {formatGroupedInteger(Math.min(page, clientsTotalPages))}
+                    </span>{" "}
+                    /{" "}
+                    <span className="tabular-nums text-foreground">
+                      {formatGroupedInteger(clientsTotalPages)}
+                    </span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Назад
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={page >= clientsTotalPages}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      Далее
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
-      ) : null}
+      )}
 
     </PageShell>
   );

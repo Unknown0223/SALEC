@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import {
+  formatDigitsGroupedLoose,
+  formatGroupedInteger,
+  formatNumberGrouped
+} from "@/lib/format-numbers";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
@@ -353,14 +358,16 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground w-44">
                   Telefon
                 </th>
-                <td className="px-4 py-3 font-mono text-xs">{data.phone ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-xs">
+                  {data.phone?.trim() ? formatDigitsGroupedLoose(data.phone) : "—"}
+                </td>
               </tr>
               <tr className="border-b border-border">
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                   Telefon (normal.)
                 </th>
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {data.phone_normalized ?? "—"}
+                  {data.phone_normalized?.trim() ? formatDigitsGroupedLoose(data.phone_normalized) : "—"}
                 </td>
               </tr>
               <tr className="border-b border-border">
@@ -391,19 +398,25 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                   Kredit limiti
                 </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.credit_limit}</td>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">
+                  {formatNumberGrouped(data.credit_limit, { maxFractionDigits: 2 })}
+                </td>
               </tr>
               <tr className="border-b border-border">
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                   Hisob saldosi
                 </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.account_balance}</td>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">
+                  {formatNumberGrouped(data.account_balance, { maxFractionDigits: 2 })}
+                </td>
               </tr>
               <tr className="border-b border-border">
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                   Ochiq zakazlar (jami)
                 </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">{data.open_orders_total}</td>
+                <td className="px-4 py-3 tabular-nums font-mono text-xs">
+                  {formatNumberGrouped(data.open_orders_total, { maxFractionDigits: 2 })}
+                </td>
               </tr>
               {showCreditHint ? (
                 <>
@@ -432,7 +445,8 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                       Qolgan «joy»
                     </th>
                     <td className="px-4 py-3 tabular-nums text-xs">
-                      {(creditLimitNum - openNum).toFixed(2)} (limit − ochiq zakazlar; saldo alohida)
+                      {formatNumberGrouped(creditLimitNum - openNum, { maxFractionDigits: 2 })} (limit − ochiq
+                      zakazlar; saldo alohida)
                     </td>
                   </tr>
                 </>
@@ -453,7 +467,9 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                   Agent ID
                 </th>
-                <td className="px-4 py-3 font-mono text-xs">{data.agent_id ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-xs">
+                  {data.agent_id != null ? formatGroupedInteger(data.agent_id) : "—"}
+                </td>
               </tr>
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
@@ -473,7 +489,9 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           <p className="text-xs text-muted-foreground">
             Joriy saldo:{" "}
             <span className="font-mono tabular-nums text-foreground">
-              {movementsQuery.data?.account_balance ?? data.account_balance}
+              {formatNumberGrouped(movementsQuery.data?.account_balance ?? data.account_balance, {
+                maxFractionDigits: 2
+              })}
             </span>
           </p>
 
@@ -527,7 +545,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             <>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full min-w-[480px] border-collapse text-xs">
-                  <thead>
+                  <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground">
                       <th className="px-2 py-2 font-medium">Vaqt</th>
                       <th className="px-2 py-2 font-medium text-right">O‘zgarish</th>
@@ -541,7 +559,9 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                         <td className="px-2 py-2 text-muted-foreground whitespace-nowrap">
                           {new Date(m.created_at).toLocaleString()}
                         </td>
-                        <td className="px-2 py-2 text-right font-mono tabular-nums">{m.delta}</td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums">
+                          {formatNumberGrouped(m.delta, { maxFractionDigits: 2 })}
+                        </td>
                         <td className="px-2 py-2">{m.note ?? "—"}</td>
                         <td className="px-2 py-2 font-mono">{m.user_login ?? "—"}</td>
                       </tr>
@@ -561,7 +581,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     Oldingi
                   </Button>
                   <span className="text-muted-foreground">
-                    {balPage} / {balTotalPages}
+                    {formatGroupedInteger(balPage)} / {formatGroupedInteger(balTotalPages)}
                   </span>
                   <Button
                     type="button"
@@ -618,7 +638,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full min-w-[520px] border-collapse text-xs">
-                <thead>
+                <thead className="app-table-thead">
                   <tr className="border-b bg-muted/50 text-left text-muted-foreground">
                     <th className="px-2 py-2 font-medium">Sana</th>
                     <th className="px-2 py-2 font-medium">Tur</th>
@@ -634,7 +654,9 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                         {new Date(p.created_at).toLocaleString()}
                       </td>
                       <td className="px-2 py-2">{p.payment_type}</td>
-                      <td className="px-2 py-2 text-right font-mono tabular-nums">{p.amount}</td>
+                      <td className="px-2 py-2 text-right font-mono tabular-nums">
+                        {formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}
+                      </td>
                       <td className="px-2 py-2 font-mono">
                         {p.order_id != null && p.order_number ? (
                           <Link
@@ -673,7 +695,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             <>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full min-w-[560px] border-collapse text-xs">
-                  <thead>
+                  <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground">
                       <th className="px-2 py-2 font-medium">Vaqt</th>
                       <th className="px-2 py-2 font-medium">Harakat</th>
@@ -709,8 +731,8 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     Oldingi
                   </Button>
                   <span className="text-muted-foreground">
-                    {auditPage} /{" "}
-                    {Math.max(1, Math.ceil(auditQuery.data.total / auditQuery.data.limit))}
+                    {formatGroupedInteger(auditPage)} /{" "}
+                    {formatGroupedInteger(Math.max(1, Math.ceil(auditQuery.data.total / auditQuery.data.limit)))}
                   </span>
                   <Button
                     type="button"
@@ -775,7 +797,7 @@ export function ClientOrdersSnippet({
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full min-w-[480px] border-collapse text-xs">
-        <thead>
+        <thead className="app-table-thead">
           <tr className="border-b bg-muted/50 text-left text-muted-foreground">
             <th className="px-2 py-2 font-medium">Raqam</th>
             <th className="px-2 py-2 font-medium">Holat</th>
@@ -788,7 +810,9 @@ export function ClientOrdersSnippet({
             <tr key={o.id} className="border-b last:border-0">
               <td className="px-2 py-2 font-mono">{o.number}</td>
               <td className="px-2 py-2">{ORDER_STATUS_LABELS[o.status] ?? o.status}</td>
-              <td className="px-2 py-2 text-right tabular-nums">{o.total_sum}</td>
+              <td className="px-2 py-2 text-right tabular-nums">
+                {formatNumberGrouped(o.total_sum, { maxFractionDigits: 2 })}
+              </td>
               <td className="px-2 py-2">
                 <Link
                   className="text-primary underline-offset-2 hover:underline"
@@ -803,7 +827,7 @@ export function ClientOrdersSnippet({
       </table>
       {data && data.total > rows.length ? (
         <p className="px-2 py-2 text-[11px] text-muted-foreground border-t">
-          + yana {data.total - rows.length} ta.{" "}
+          + yana {formatGroupedInteger(data.total - rows.length)} ta.{" "}
           <Link className="text-primary underline" href={`/orders?client_id=${clientId}`}>
             Hammasi
           </Link>

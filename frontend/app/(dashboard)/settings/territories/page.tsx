@@ -418,7 +418,7 @@ export default function TerritoriesSettingsPage() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Territoriya"
         description="Daraxt: ildizdan qo‘shish, tugun ustida qo‘shish / tahrir / ko‘chirish — barchasi shu sahifada."

@@ -197,7 +197,7 @@ export function FinancePriceTypesSettings() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Тип цены"
         description="Sotish/yoki xarid; to‘lov usuli bilan bog‘langan. Kalit: kod bo‘lsa kod, aks holda nom (product_prices.price_type)."
@@ -253,7 +253,7 @@ export function FinancePriceTypesSettings() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Название</th>
                   <th className="px-3 py-2 font-medium">Способ оплаты</th>

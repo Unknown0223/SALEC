@@ -17,6 +17,7 @@ import type { AxiosError } from "axios";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 
 type Props = {
   tenantSlug: string | null;
@@ -59,9 +60,7 @@ function unitPriceForType(p: ProductRow, priceTypeKey: string): string | null {
   if (list.length === 0) return null;
   const want = priceTypeKey.trim().toLowerCase();
   const exact = list.find((x) => x.price_type.trim().toLowerCase() === want);
-  if (exact) return exact.price;
-  const retail = list.find((x) => x.price_type.trim().toLowerCase() === "retail");
-  return retail?.price ?? list[0]!.price;
+  return exact?.price ?? null;
 }
 
 export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderType }: Props) {
@@ -241,6 +240,25 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     }
     return false;
   }, [catalogProducts, qtyByProductId, stockQ.data]);
+  const hasMissingPriceForSelected = useMemo(() => {
+    for (const p of catalogProducts) {
+      const raw = qtyByProductId[p.id];
+      const q = Number.parseFloat((raw ?? "").replace(",", "."));
+      if (!Number.isFinite(q) || q <= 0) continue;
+      if (unitPriceForType(p, priceType) == null) return true;
+    }
+    return false;
+  }, [catalogProducts, qtyByProductId, priceType]);
+  const missingPriceProductNames = useMemo(() => {
+    const names: string[] = [];
+    for (const p of catalogProducts) {
+      const raw = qtyByProductId[p.id];
+      const q = Number.parseFloat((raw ?? "").replace(",", "."));
+      if (!Number.isFinite(q) || q <= 0) continue;
+      if (unitPriceForType(p, priceType) == null) names.push(p.name);
+    }
+    return names.slice(0, 3);
+  }, [catalogProducts, qtyByProductId, priceType]);
 
   const loadingLists =
     clientsQ.isLoading ||
@@ -472,7 +490,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     !mutation.isPending &&
     !loadingLists &&
     stockReadyForLines &&
-    !hasQtyOverStock;
+    !hasQtyOverStock &&
+    !hasMissingPriceForSelected;
 
   useEffect(() => {
     if (!hasClient) {
@@ -537,6 +556,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                       ? "Kamida bitta mahsulot miqdorini kiriting"
                       : hasQtyOverStock
                         ? "Miqdor qoldiqdan oshmasin"
+                        : hasMissingPriceForSelected
+                          ? "Tanlangan narx turi bo‘yicha narxi yo‘q mahsulotlar bor"
                         : !stockReadyForLines
                           ? "Qoldiqlar Загрузка…"
                           : undefined
@@ -868,12 +889,16 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             <div className="mt-4 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">Mijoz moliyasi: </span>
               balans{" "}
-              <span className="font-mono tabular-nums text-foreground">{clientSummaryQ.data.account_balance}</span>
+              <span className="font-mono tabular-nums text-foreground">
+                {formatNumberGrouped(clientSummaryQ.data.account_balance, { maxFractionDigits: 2 })}
+              </span>
               {" · "}kredit limiti{" "}
-              <span className="font-mono tabular-nums text-foreground">{clientSummaryQ.data.credit_limit}</span>
+              <span className="font-mono tabular-nums text-foreground">
+                {formatNumberGrouped(clientSummaryQ.data.credit_limit, { maxFractionDigits: 2 })}
+              </span>
               {" · "}ochiq zakazlar{" "}
               <span className="font-mono tabular-nums text-foreground">
-                {clientSummaryQ.data.open_orders_total}
+                {formatNumberGrouped(clientSummaryQ.data.open_orders_total, { maxFractionDigits: 2 })}
               </span>
             </div>
           ) : null}
@@ -898,21 +923,21 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               <div className="rounded-lg border border-emerald-600/25 bg-emerald-600/8 px-3 py-3 text-sm shadow-sm dark:bg-emerald-950/30">
                 <p className="text-xs font-medium text-emerald-800/90 dark:text-emerald-200/90">Jami hajm</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
-                  {totalVolumeM3.toLocaleString("uz-UZ", { maximumFractionDigits: 3 })}{" "}
+                  {formatNumberGrouped(totalVolumeM3, { maxFractionDigits: 3 })}{" "}
                   <span className="text-sm font-normal text-emerald-800/80 dark:text-emerald-300/80">m³</span>
                 </p>
               </div>
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm shadow-sm dark:bg-amber-950/35">
                 <p className="text-xs font-medium text-amber-900/90 dark:text-amber-100/90">Jami miqdor</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-amber-950 dark:text-amber-50">
-                  {selectedTotalQty}{" "}
+                  {formatNumberGrouped(selectedTotalQty, { maxFractionDigits: 3 })}{" "}
                   <span className="text-sm font-normal text-amber-800/90 dark:text-amber-200/80">dona</span>
                 </p>
               </div>
               <div className="rounded-lg border border-teal-600/25 bg-teal-600/10 px-3 py-3 text-sm shadow-sm dark:bg-teal-950/35">
                 <p className="text-xs font-medium text-teal-900/90 dark:text-teal-100/90">Taxminiy summa</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-teal-900 dark:text-teal-100">
-                  {estimatedSum > 0 ? estimatedSum.toLocaleString("uz-UZ", { maximumFractionDigits: 0 }) : "0"}
+                  {estimatedSum > 0 ? formatNumberGrouped(estimatedSum, { maxFractionDigits: 0 }) : "0"}
                 </p>
               </div>
             </div>
@@ -933,7 +958,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="max-h-[min(60vh,720px)] overflow-auto">
               <table className="w-full min-w-[980px] border-collapse text-sm">
-                <thead className="sticky top-0 z-[1] border-b-2 border-border bg-muted/90 backdrop-blur-sm">
+                <thead className="app-table-thead sticky top-0 z-[1] backdrop-blur-sm">
                   <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <th className="min-w-[12rem] px-3 py-2.5">Mahsulot</th>
                     <th className="min-w-[5.5rem] px-3 py-2.5 text-right">Narx</th>
@@ -945,11 +970,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     </th>
                     <th className="min-w-[5.5rem] px-3 py-2.5 text-center">Miqdor</th>
                     <th className="min-w-[4.5rem] px-3 py-2.5 text-right">Hajm m³</th>
-                    <th
-                      className="min-w-[4.5rem] px-3 py-2.5 text-right"
-                      title="Mavjud (jami omborda − band qilingan)"
-                    >
-                      Omborda
+                    <th className="min-w-[4.5rem] px-3 py-2.5 text-right" title="Fakt qoldiq (jami omborda)">
+                      Fakt
+                    </th>
+                    <th className="min-w-[4.5rem] px-3 py-2.5 text-right" title="Band qilingan miqdor">
+                      Bron
+                    </th>
+                    <th className="min-w-[5rem] px-3 py-2.5 text-right" title="Mavjud (fakt − bron)">
+                      Mavjud
                     </th>
                     <th className="min-w-[6rem] px-3 py-2.5 text-right">Jami</th>
                   </tr>
@@ -957,14 +985,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 <tbody>
                   {canPickProducts && stockQ.isLoading ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-sm text-muted-foreground">
+                      <td colSpan={9} className="px-3 py-10 text-center text-sm text-muted-foreground">
                         Ombor qoldiqlari Загрузка…
                       </td>
                     </tr>
                   ) : null}
                   {canPickProducts && stockQ.isError ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-sm text-destructive">
+                      <td colSpan={9} className="px-3 py-10 text-center text-sm text-destructive">
                         Qoldiqlarni yuklab bo‘lmadi. Internet yoki omborni tekshiring.
                       </td>
                     </tr>
@@ -1003,7 +1031,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                           Number.isFinite(volU) && effQ > 0 ? effQ * volU : 0;
                         const lineTotalMoney =
                           unit != null && effQ > 0 ? effQ * parsePriceAmount(unit) : null;
-                        const maxLabel = availNum.toLocaleString("uz-UZ");
+                        const maxLabel = formatNumberGrouped(availNum, { maxFractionDigits: 3 });
                         return (
                           <tr key={p.id} className="border-b border-border/80 last:border-0 hover:bg-muted/25">
                             <td className="px-3 py-2 align-top">
@@ -1015,7 +1043,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                               ) : null}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-muted-foreground align-middle">
-                              {unit != null ? parsePriceAmount(unit).toLocaleString("uz-UZ") : "—"}
+                              {unit != null
+                                ? formatNumberGrouped(parsePriceAmount(unit), { maxFractionDigits: 2 })
+                                : "—"}
                             </td>
                             <td className="px-3 py-2 align-top">
                               <div className="mx-auto flex max-w-[6.5rem] flex-col items-stretch">
@@ -1152,18 +1182,24 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-muted-foreground align-middle">
                               {lineVolM3 > 0
-                                ? lineVolM3.toLocaleString("uz-UZ", { maximumFractionDigits: 4 })
+                                ? formatNumberGrouped(lineVolM3, { maxFractionDigits: 4 })
                                 : "0"}
                             </td>
+                            <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground align-middle">
+                              {formatNumberGrouped(parseStockQty(qtyTotal), { maxFractionDigits: 3 })}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300 align-middle">
+                              {formatNumberGrouped(parseStockQty(reserved), { maxFractionDigits: 3 })}
+                            </td>
                             <td
-                              className="px-3 py-2 text-right tabular-nums font-medium text-foreground align-middle"
-                              title={`Jami omborda: ${qtyTotal}, band: ${reserved}`}
+                              className="px-3 py-2 text-right tabular-nums font-semibold text-foreground align-middle"
+                              title={`Fakt: ${qtyTotal}, bron: ${reserved}`}
                             >
-                              {availNum.toLocaleString("uz-UZ")}
+                              {formatNumberGrouped(availNum, { maxFractionDigits: 3 })}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums font-semibold text-foreground align-middle">
                               {lineTotalMoney != null && lineTotalMoney > 0
-                                ? lineTotalMoney.toLocaleString("uz-UZ", { maximumFractionDigits: 0 })
+                                ? formatNumberGrouped(lineTotalMoney, { maxFractionDigits: 0 })
                                 : "—"}
                             </td>
                           </tr>
@@ -1176,7 +1212,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   catalogProducts.length > 0 &&
                   displayProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                      <td colSpan={9} className="px-3 py-10 text-center text-xs text-muted-foreground">
                         Qidiruv bo‘yicha mahsulot topilmadi.
                       </td>
                     </tr>
@@ -1186,7 +1222,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   !stockQ.isError &&
                   catalogProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                      <td colSpan={9} className="px-3 py-10 text-center text-xs text-muted-foreground">
                         {showZeroStock
                           ? "Bu kategoriya / ombor bo‘yicha mahsulot yo‘q."
                           : "Noldan yuqori qoldiq yo‘q. «Nol qoldiq»ni yoqing yoki kategoriyani tekshiring."}
@@ -1195,7 +1231,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   ) : null}
                   {!canPickProducts ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                      <td colSpan={9} className="px-3 py-10 text-center text-xs text-muted-foreground">
                         Avval klient va omborni tanlang — keyin jadval ochiladi.
                       </td>
                     </tr>
@@ -1208,15 +1244,17 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                         Jami
                       </td>
                       <td className="px-3 py-2.5 text-center tabular-nums text-foreground">
-                        {selectedTotalQty}
+                        {formatNumberGrouped(selectedTotalQty, { maxFractionDigits: 3 })}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-foreground">
-                        {totalVolumeM3.toLocaleString("uz-UZ", { maximumFractionDigits: 4 })}
+                        {formatNumberGrouped(totalVolumeM3, { maxFractionDigits: 4 })}
                       </td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                       <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 dark:text-teal-200">
                         {estimatedSum > 0
-                          ? `${estimatedSum.toLocaleString("uz-UZ", { maximumFractionDigits: 0 })}`
+                          ? formatNumberGrouped(estimatedSum, { maxFractionDigits: 0 })
                           : "—"}
                       </td>
                     </tr>
@@ -1225,6 +1263,15 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               </table>
             </div>
           </div>
+
+          {hasMissingPriceForSelected ? (
+            <p className="mt-3 text-xs text-destructive">
+              Tanlangan narx turi ({priceType}) bo‘yicha narxi yo‘q mahsulot bor:{" "}
+              {missingPriceProductNames.join(", ")}
+              {missingPriceProductNames.length >= 3 ? "..." : ""}. Narx turini almashtiring yoki mahsulot narxini
+              kiriting.
+            </p>
+          ) : null}
 
           <p className="mt-3 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">Ombor: </span>

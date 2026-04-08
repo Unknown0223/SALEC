@@ -247,7 +247,7 @@ export default function StockPickingPage() {
 
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="bg-muted/50 border-b">
+              <thead className="app-table-thead">
                 <tr>
                   <th className="px-3 py-2 font-medium">Raqam</th>
                   <th className="px-3 py-2 font-medium">Mijoz</th>
@@ -392,7 +392,7 @@ export default function StockPickingPage() {
 
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="bg-muted/50 border-b">
+              <thead className="app-table-thead">
                 <tr>
                   <th className="px-3 py-2 font-medium">SKU</th>
                   <th className="px-3 py-2 font-medium">Shtrix</th>

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { WarehouseStockPurpose } from "@/components/warehouses/warehouses-workspace";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
@@ -158,24 +159,12 @@ const VAL_NUMERIC = new Set([
 ]);
 
 function formatQty(s: string): string {
-  const n = Number.parseFloat(s.replace(",", "."));
-  if (!Number.isFinite(n)) return s;
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(n);
+  return formatNumberGrouped(s, { maxFractionDigits: 3 });
 }
 
 function formatMoney(s: string, currency: string): string {
-  const n = Number.parseFloat(s.replace(",", "."));
-  if (!Number.isFinite(n)) return s;
   const cur = /^[A-Z]{3}$/i.test(currency) ? currency.toUpperCase() : "UZS";
-  try {
-    return new Intl.NumberFormat("ru-RU", {
-      style: "currency",
-      currency: cur,
-      maximumFractionDigits: 2
-    }).format(n);
-  } catch {
-    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " " + cur;
-  }
+  return `${formatNumberGrouped(s, { minFractionDigits: 2, maxFractionDigits: 2 })} ${cur}`;
 }
 
 function parseBalanceQty(s: string): number {
@@ -720,14 +709,15 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
         }
       />
 
-      <Card className="mb-4 border-border/90 shadow-sm">
-        <CardContent className="space-y-2 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Фильтр</p>
+      <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
+        <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="space-y-2 p-4 sm:p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground/80">Фильтр</p>
           <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
             <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Склад</Label>
+              <Label className="text-xs font-medium text-foreground/88">Склад</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftWh}
                 onChange={(e) => setDraftWh(e.target.value)}
               >
@@ -740,9 +730,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               </select>
             </div>
             <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Категория</Label>
+              <Label className="text-xs font-medium text-foreground/88">Категория</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftCat}
                 onChange={(e) => setDraftCat(e.target.value)}
               >
@@ -755,9 +745,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               </select>
             </div>
             <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Группа товаров</Label>
+              <Label className="text-xs font-medium text-foreground/88">Группа товаров</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftGroup}
                 onChange={(e) => setDraftGroup(e.target.value)}
               >
@@ -770,9 +760,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               </select>
             </div>
             <div className="grid min-w-[9.5rem] max-w-[200px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Кол-во</Label>
+              <Label className="text-xs font-medium text-foreground/88">Кол-во</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftQtyMode}
                 onChange={(e) => setDraftQtyMode(e.target.value as QtyMode)}
               >
@@ -782,9 +772,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               </select>
             </div>
             <div className="grid min-w-[9.5rem] max-w-[200px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Все продукты</Label>
+              <Label className="text-xs font-medium text-foreground/88">Все продукты</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftProductScope}
                 onChange={(e) => setDraftProductScope(e.target.value as ProductScope)}
               >
@@ -793,9 +783,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               </select>
             </div>
             <div className="grid min-w-[9.5rem] max-w-[200px] flex-[1_1_9.5rem] gap-1.5">
-              <Label className="text-xs">Тип сортировки</Label>
+              <Label className="text-xs font-medium text-foreground/88">Тип сортировки</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
                 value={draftSort}
                 onChange={(e) => setDraftSort(e.target.value as typeof draftSort)}
               >
@@ -822,137 +812,9 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
               Применить
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <div className="mb-3 flex flex-wrap gap-1 border-b border-border pb-0">
-        {VIEW_TABS.map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => selectView(t.value)}
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              balanceView === t.value
-                ? "border-teal-600 text-teal-700 dark:border-teal-500 dark:text-teal-400"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+          </CardContent>
+        </Card>
       </div>
-
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-9 w-9 shrink-0"
-            title="Управление столбцами"
-            onClick={() => setColumnDialogOpen(true)}
-          >
-            <LayoutGrid className="size-4" />
-          </Button>
-          <div className="grid gap-0.5">
-            <Label className="sr-only">Строк на странице</Label>
-            <select
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-              value={String(pageSize)}
-              onChange={(e) => {
-                tablePrefs.setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-          </div>
-          <div className="relative min-w-[180px] max-w-xs flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="h-9 pl-8"
-              placeholder="Поиск"
-              value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyFilters();
-              }}
-            />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9"
-            disabled={exporting || (balanceView === "valuation" && !applied.priceType.trim())}
-            onClick={() => void downloadExcel()}
-          >
-            <Download className="mr-1 size-3.5" />
-            {exporting ? "…" : "Excel"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-9 w-9 shrink-0"
-            title="Обновить"
-            onClick={() => void balancesQ.refetch()}
-          >
-            <RefreshCw className={cn("size-4", balancesQ.isFetching && "animate-spin")} />
-          </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {balanceView === "valuation" ? (
-            <div className="grid gap-1">
-              <Label className="text-xs text-muted-foreground">Тип цены</Label>
-              <select
-                className="flex h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm"
-                value={draftPriceType}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setDraftPriceType(v);
-                  setApplied((prev) => ({ ...prev, priceType: v.trim() }));
-                  setPage(1);
-                }}
-              >
-                <option value="">— выберите —</option>
-                {(priceTypesQ.data ?? []).map((pt) => (
-                  <option key={pt} value={pt}>
-                    {pt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {balanceView === "summary" ? (
-            <>
-              <Link
-                href="/stock"
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 whitespace-nowrap")}
-              >
-                Движения товаров на складе
-              </Link>
-              <Link
-                href="/products"
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 whitespace-nowrap")}
-              >
-                Движение одного товара
-              </Link>
-            </>
-          ) : null}
-        </div>
-      </div>
-      {balanceView === "valuation" &&
-      priceTypesQ.isSuccess &&
-      (priceTypesQ.data?.length ?? 0) === 0 ? (
-        <p className="mb-3 text-xs text-muted-foreground">
-          Нет типов цен продажи. Настройте в разделе «Типы цен».
-        </p>
-      ) : null}
 
       <TableColumnSettingsDialog
         open={columnDialogOpen}
@@ -967,7 +829,146 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
         onReset={() => tablePrefs.resetColumnLayout()}
       />
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
+      <div className="orders-hub-section orders-hub-section--table mt-4">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap gap-1 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              {VIEW_TABS.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => selectView(t.value)}
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                    balanceView === t.value
+                      ? "border-teal-600 text-teal-700 dark:border-teal-500 dark:text-teal-400"
+                      : "border-transparent text-foreground/65 hover:text-foreground"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="table-toolbar flex flex-wrap items-end justify-between gap-3 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="grid gap-0.5">
+                  <Label className="sr-only">Строк на странице</Label>
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={String(pageSize)}
+                    onChange={(e) => {
+                      tablePrefs.setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  title="Управление столбцами"
+                  onClick={() => setColumnDialogOpen(true)}
+                >
+                  <LayoutGrid className="size-4" />
+                </Button>
+                <div className="relative min-w-[180px] max-w-xs flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="h-9 bg-background pl-8 text-foreground"
+                    placeholder="Поиск"
+                    value={searchDraft}
+                    onChange={(e) => setSearchDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyFilters();
+                    }}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  disabled={exporting || (balanceView === "valuation" && !applied.priceType.trim())}
+                  onClick={() => void downloadExcel()}
+                >
+                  <Download className="mr-1 size-3.5" />
+                  {exporting ? "…" : "Excel"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  title="Обновить"
+                  onClick={() => void balancesQ.refetch()}
+                >
+                  <RefreshCw className={cn("size-4", balancesQ.isFetching && "animate-spin")} />
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {balanceView === "valuation" ? (
+                  <div className="grid gap-1">
+                    <Label className="text-xs font-medium text-foreground/88">Тип цены</Label>
+                    <select
+                      className="flex h-9 min-w-[10rem] rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                      value={draftPriceType}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraftPriceType(v);
+                        setApplied((prev) => ({ ...prev, priceType: v.trim() }));
+                        setPage(1);
+                      }}
+                    >
+                      <option value="">— выберите —</option>
+                      {(priceTypesQ.data ?? []).map((pt) => (
+                        <option key={pt} value={pt}>
+                          {pt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {balanceView === "summary" ? (
+                  <>
+                    <Link
+                      href="/stock"
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "h-9 whitespace-nowrap"
+                      )}
+                    >
+                      Движения товаров на складе
+                    </Link>
+                    <Link
+                      href="/products"
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "h-9 whitespace-nowrap"
+                      )}
+                    >
+                      Движение одного товара
+                    </Link>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            {balanceView === "valuation" &&
+            priceTypesQ.isSuccess &&
+            (priceTypesQ.data?.length ?? 0) === 0 ? (
+              <p className="border-b border-border/60 px-3 py-2 text-xs text-muted-foreground sm:px-4">
+                Нет типов цен продажи. Настройте в разделе «Типы цен».
+              </p>
+            ) : null}
+
+            <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] border-collapse text-sm">
           {visibleCols.length === 0 ? (
             <tbody>
@@ -979,8 +980,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
             </tbody>
           ) : (
             <>
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left">
+          <thead className="app-table-thead">
+            <tr className="text-left">
               {visibleCols.map((colId) => (
                 <th
                   key={colId}
@@ -1187,37 +1188,39 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
             </>
           )}
         </table>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>
-          Показано {from}–{to} / {total}
-        </span>
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2"
-            disabled={page <= 1 || !balancesEnabled}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            ←
-          </Button>
-          <span className="tabular-nums">
-            {page} / {totalPages}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2"
-            disabled={page >= totalPages || !balancesEnabled}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            →
-          </Button>
-        </div>
+            </div>
+            <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-xs sm:px-4">
+              <span className="text-foreground/80">
+                Показано {from}–{to} / {total}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={page <= 1 || !balancesEnabled}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ←
+                </Button>
+                <span className="tabular-nums text-foreground">
+                  {page} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={page >= totalPages || !balancesEnabled}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  →
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </PageShell>
   );

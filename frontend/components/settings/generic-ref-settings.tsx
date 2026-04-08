@@ -224,7 +224,7 @@ export function GenericRefSettingsPage({ config }: { config: GenericRefConfig })
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title={title}
         description={description ?? "Akтив / не активный, modal orqali qo'shish va tahrirlash."}
@@ -268,7 +268,7 @@ export function GenericRefSettingsPage({ config }: { config: GenericRefConfig })
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Название</th>
                   {showCode && <th className="px-3 py-2 font-medium">Код</th>}

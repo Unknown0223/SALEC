@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import type { InterchangeableGroupRow } from "@/lib/product-types";
 import type { ProductRow } from "@/lib/product-types";
 import { api } from "@/lib/api";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -187,7 +188,7 @@ export function CatalogInterchangeableTab({
 
       <div className="overflow-hidden rounded-md border">
         <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-left">
+          <thead className="app-table-thead text-left">
             <tr>
               <th className="px-3 py-2 font-medium">Название</th>
               <th className="px-3 py-2 font-medium">Код</th>
@@ -215,7 +216,9 @@ export function CatalogInterchangeableTab({
                 <tr key={r.id} className="border-t align-top">
                   <td className="px-3 py-2">{r.name}</td>
                   <td className="px-3 py-2 text-muted-foreground">{r.code ?? "—"}</td>
-                  <td className="px-3 py-2">{r.sort_order ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    {r.sort_order != null ? formatGroupedInteger(r.sort_order) : "—"}
+                  </td>
                   <td className="max-w-[200px] px-3 py-2 text-xs text-muted-foreground">
                     {r.products.slice(0, 3).map((p) => (
                       <span key={p.id} className="mr-1 inline-block rounded bg-muted px-1 py-0.5">
@@ -256,7 +259,9 @@ export function CatalogInterchangeableTab({
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {total ? `Показано ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} / ${total}` : ""}
+          {total
+            ? `Показано ${formatGroupedInteger((page - 1) * pageSize + 1)}–${formatGroupedInteger(Math.min(page * pageSize, total))} / ${formatGroupedInteger(total)}`
+            : ""}
         </span>
         <div className="flex gap-1">
           <Button
@@ -269,7 +274,7 @@ export function CatalogInterchangeableTab({
             ←
           </Button>
           <span className="px-2 py-1">
-            {page} / {totalPages}
+            {formatGroupedInteger(page)} / {formatGroupedInteger(totalPages)}
           </span>
           <Button
             type="button"

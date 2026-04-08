@@ -75,6 +75,7 @@ export const dashboardSidebarLayout: SidebarLayoutEntry[] = [
   { kind: "link", item: { href: "/visits", label: "Визиты" } },
   { kind: "link", item: { href: "/tasks", label: "Задачи" } },
   { kind: "link", item: { href: "/routes", label: "Маршрут" } },
+  { kind: "link", item: { href: "/routes/track", label: "GPS трек" } },
   { kind: "link", item: { href: "/settings/cash-desks", label: "Касса" } },
   { kind: "link", item: { href: "/payments", label: "Платежи" } },
   { kind: "link", item: { href: "/expenses", label: "Расходы" } },

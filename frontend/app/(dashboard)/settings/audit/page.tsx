@@ -89,7 +89,7 @@ export default function AuditJournalPage() {
   const totalPages = q.data ? Math.max(1, Math.ceil(q.data.total / q.data.limit)) : 1;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+    <div className="flex w-full min-w-0 max-w-none flex-col gap-6">
       <div>
         <Link href="/settings/company" className="text-sm text-primary underline">
           ← Kompaniya
@@ -101,6 +101,23 @@ export default function AuditJournalPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Satr/sahifa</span>
+          <select
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={tablePrefs.pageSize}
+            onChange={(e) => {
+              tablePrefs.setPageSize(Number.parseInt(e.target.value, 10));
+              setPage(1);
+            }}
+          >
+            {[20, 40, 80, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">entity_type</label>
           <Input
@@ -147,23 +164,6 @@ export default function AuditJournalPage() {
           <ListOrdered className="size-3.5" />
           Ustunlar
         </Button>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Satr/sahifa</span>
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-            value={tablePrefs.pageSize}
-            onChange={(e) => {
-              tablePrefs.setPageSize(Number.parseInt(e.target.value, 10));
-              setPage(1);
-            }}
-          >
-            {[20, 40, 80, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       <TableColumnSettingsDialog
@@ -185,7 +185,7 @@ export default function AuditJournalPage() {
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="border-b border-border bg-muted/50">
+          <thead className="app-table-thead">
             <tr>
               {tablePrefs.visibleColumnOrder.map((colId) => {
                 const meta = AUDIT_COLUMN_META.find((c) => c.id === colId);

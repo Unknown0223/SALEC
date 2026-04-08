@@ -6,16 +6,20 @@ import {
   checkoutAgentVisit,
   createAgentVisit,
   createTenantTask,
+  exportAgentVisitsXlsx,
   getAgentRouteDay,
   getTenantTask,
+  listAgentLocationPings,
   listAgentRouteDays,
   listAgentVisits,
   listTenantTasks,
   patchTenantTask,
+  recordAgentLocationPing,
   upsertAgentRouteDay
 } from "./field.service";
 
 const writeRoles = ["admin", "operator", "supervisor"] as const;
+const locationPingPostRoles = ["agent", "admin", "operator", "supervisor"] as const;
 
 function parseUserId(request: FastifyRequest) {
   const viewer = getAccessUser(request);
@@ -51,6 +55,115 @@ export async function registerFieldRoutes(app: FastifyInstance) {
       limit: q.limit ?? 20
     });
     return reply.send(result);
+  });
+
+  app.get("/api/:slug/agent-visits/export", {
+    preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const q = z
+      .object({
+        agent_id: z.coerce.number().int().positive().optional(),
+        client_id: z.coerce.number().int().positive().optional()
+      })
+      .parse(request.query);
+    const viewer = getAccessUser(request);
+    let agentId = q.agent_id;
+    if (viewer.role === "agent") {
+      const self = parseUserId(request);
+      if (!self) return reply.status(400).send({ error: "BadUser" });
+      agentId = self;
+    }
+    const buffer = await exportAgentVisitsXlsx(tenantId, {
+      agent_id: agentId,
+      client_id: q.client_id
+    });
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", 'attachment; filename="tashriflar.xlsx"')
+      .send(buffer);
+  });
+
+  app.get("/api/:slug/agent-locations", {
+    preHandler: [jwtAccessVerify, requireRoles(...DIRECTORY_READ_ROLES)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const q = z
+      .object({
+        agent_id: z.coerce.number().int().positive().optional(),
+        from: z.string().max(40).optional(),
+        to: z.string().max(40).optional(),
+        limit: z.coerce.number().int().min(1).max(5000).optional()
+      })
+      .parse(request.query);
+    const viewer = getAccessUser(request);
+    let agentId = q.agent_id;
+    if (viewer.role === "agent") {
+      const self = parseUserId(request);
+      if (!self) return reply.status(400).send({ error: "BadUser" });
+      agentId = self;
+    }
+    if (agentId == null) {
+      return reply.status(400).send({ error: "AgentIdRequired" });
+    }
+    const to = q.to ? new Date(q.to) : new Date();
+    const from = q.from ? new Date(q.from) : new Date(to.getTime() - 24 * 3600 * 1000);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return reply.status(400).send({ error: "BadDateRange" });
+    }
+    if (from > to) return reply.status(400).send({ error: "BadDateRange" });
+    const result = await listAgentLocationPings(tenantId, {
+      agent_id: agentId,
+      from,
+      to,
+      limit: q.limit ?? 2000
+    });
+    return reply.send({
+      ...result,
+      range: { from: from.toISOString(), to: to.toISOString() }
+    });
+  });
+
+  app.post("/api/:slug/agent-locations", {
+    preHandler: [jwtAccessVerify, requireRoles(...locationPingPostRoles)]
+  }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const tenantId = request.tenant!.id;
+    const body = z
+      .object({
+        latitude: z.number().finite().gte(-90).lte(90),
+        longitude: z.number().finite().gte(-180).lte(180),
+        accuracy_meters: z.number().finite().positive().max(5000).optional().nullable(),
+        agent_id: z.number().int().positive().optional()
+      })
+      .parse(request.body);
+    const viewer = getAccessUser(request);
+    let agentId: number;
+    if (viewer.role === "agent") {
+      const self = parseUserId(request);
+      if (!self) return reply.status(400).send({ error: "BadUser" });
+      agentId = self;
+      if (body.agent_id != null && body.agent_id !== self) {
+        return reply.status(403).send({ error: "Forbidden" });
+      }
+    } else {
+      if (body.agent_id == null) return reply.status(400).send({ error: "AgentIdRequired" });
+      agentId = body.agent_id;
+    }
+    try {
+      const data = await recordAgentLocationPing(tenantId, agentId, {
+        latitude: body.latitude,
+        longitude: body.longitude,
+        accuracy_meters: body.accuracy_meters
+      });
+      return reply.status(201).send({ data });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "AgentNotFound") return reply.status(400).send({ error: "AgentNotFound" });
+      throw e;
+    }
   });
 
   app.post("/api/:slug/agent-visits", {

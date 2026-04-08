@@ -1,5 +1,7 @@
 "use client";
 
+import { formatNumberGrouped } from "@/lib/format-numbers";
+
 type PrintOrderProps = {
   order: {
     id: number;
@@ -29,9 +31,7 @@ type PrintOrderProps = {
 };
 
 function fmt(n: string | number) {
-  const v = typeof n === "string" ? parseFloat(n) : n;
-  if (Number.isNaN(v)) return "—";
-  return new Intl.NumberFormat("uz-UZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+  return formatNumberGrouped(n, { minFractionDigits: 2, maxFractionDigits: 2 });
 }
 
 function statusLabel(status: string): string {
@@ -99,7 +99,7 @@ export function OrderPrintView({ order, items }: PrintOrderProps) {
 
       {/* Items Table */}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", marginBottom: "24px" }}>
-        <thead>
+        <thead className="app-table-thead">
           <tr style={{ borderBottom: "2px solid #333" }}>
             <th style={{ padding: "8px", textAlign: "left", fontWeight: "bold" }}>#</th>
             <th style={{ padding: "8px", textAlign: "left", fontWeight: "bold" }}>Kod</th>

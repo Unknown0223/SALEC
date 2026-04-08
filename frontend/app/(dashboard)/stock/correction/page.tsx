@@ -737,19 +737,9 @@ export default function StockCorrectionPage() {
               </Button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 border-b border-border/50 pb-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-9 w-9"
-                title="Столбцы"
-                onClick={() => setJournalDialogOpen(true)}
-              >
-                <LayoutGrid className="size-4" />
-              </Button>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">На странице</span>
+            <div className="flex flex-wrap items-end gap-2 border-b border-border/50 pb-3">
+              <div className="flex items-end gap-2 text-sm">
+                <span className="pb-2 text-muted-foreground">На странице</span>
                 <select
                   className="border-input bg-background h-9 rounded-md border px-2 text-sm"
                   value={journalPrefs.pageSize}
@@ -765,10 +755,20 @@ export default function StockCorrectionPage() {
                   ))}
                 </select>
               </div>
-              <div className="relative min-w-[12rem] flex-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                title="Столбцы"
+                onClick={() => setJournalDialogOpen(true)}
+              >
+                <LayoutGrid className="size-4" />
+              </Button>
+              <div className="relative min-w-[12rem] max-w-xs flex-1">
                 <Search className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
                 <Input
-                  className="pl-8"
+                  className="h-9 pl-8"
                   placeholder="Поиск"
                   value={jSearch}
                   onChange={(e) => setJSearch(e.target.value)}
@@ -804,7 +804,7 @@ export default function StockCorrectionPage() {
 
             <div className="overflow-x-auto rounded-lg border">
               <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="border-b border-border/60 bg-slate-200/90 text-xs font-medium text-slate-800 dark:bg-slate-800/90 dark:text-slate-100">
+                <thead className="app-table-thead text-xs">
                   <tr>
                     {visibleJournalCols.map((colId) => (
                       <th
@@ -1019,7 +1019,7 @@ export default function StockCorrectionPage() {
                   )}
                 >
                   <table className="w-full min-w-[1120px] text-left text-sm">
-                    <thead className="sticky top-0 z-[1] border-b border-border/60 bg-slate-200/95 text-xs font-medium text-slate-800 dark:bg-slate-800/95 dark:text-slate-100">
+                    <thead className="app-table-thead sticky top-0 z-[1] text-xs">
                       <tr>
                         <th className="px-2 py-2.5">Код</th>
                         <th className="px-2 py-2.5">Наименование</th>

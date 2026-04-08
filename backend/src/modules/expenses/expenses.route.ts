@@ -70,7 +70,12 @@ export async function registerExpenseRoutes(app: FastifyInstance) {
     if (!ensureTenantContext(request, reply)) return;
     const jwtUser = getAccessUser(request);
     const body = request.body as { note?: string } | undefined;
-    const data = await rejectExpense(request.tenant!.id, parseInt((request.params as any).id), Number(jwtUser.sub), body?.note);
+    const data = await rejectExpense(
+      request.tenant!.id,
+      parseInt((request.params as any).id),
+      Number(jwtUser.sub),
+      body?.note ?? ""
+    );
     return reply.send(data);
   });
 

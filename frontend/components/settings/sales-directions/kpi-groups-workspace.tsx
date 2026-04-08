@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Pencil, RefreshCw } from "lucide-react";
 
@@ -57,7 +59,7 @@ function TagOverflow({
       ))}
       {more > 0 ? (
         <span className="text-[10px] font-medium text-primary">
-          ещё {more} {label}
+          ещё {formatGroupedInteger(more)} {label}
         </span>
       ) : null}
     </div>
@@ -124,81 +126,107 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
   useEffect(() => setPage(1), [tab, search, pageSize]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2 border-b border-border">
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("active")}
-          >
-            Активный
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-            )}
-            onClick={() => setTab("inactive")}
-          >
-            Не активный
-          </button>
-        </div>
-        <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
-          Добавить
-        </Button>
-      </div>
+    <>
+      <div className="orders-hub-section orders-hub-section--table">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("active")}
+                >
+                  Активный
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("inactive")}
+                >
+                  Не активный
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 py-1">
+                <Button type="button" size="sm" className="h-9" onClick={() => setAddOpen(true)}>
+                  Добавить
+                </Button>
+              </div>
+            </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-          value={pageSize}
-          onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
-        >
-          {[10, 25, 50].map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-        <Input placeholder="Поиск" value={search} onChange={(e) => setSearch(e.target.value)} className="h-8 max-w-xs text-xs" />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => {
-            const headers = ["Название", "Код", "Сортировка", "Продукты", "Агенты", "Комментарий"];
-            const rows = filteredRows.map((r) => [
-              r.name,
-              r.code ?? "",
-              r.sort_order,
-              r.product_total,
-              r.agent_total,
-              (r.comment ?? "").replace(/\n/g, " ")
-            ]);
-            downloadXlsxSheet(
-              `kpi_groups_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-              "KPI группы",
-              headers,
-              rows
-            );
-          }}
-        >
-          Excel
-        </Button>
-        <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8" onClick={() => void listQ.refetch()}>
-          <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
-        </Button>
-      </div>
+            <div
+              className="table-toolbar flex min-w-0 flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4"
+              role="toolbar"
+              aria-label="Таблица: поиск и экспорт"
+            >
+              <label className="grid shrink-0 gap-1 text-xs font-medium text-foreground/85">
+                <span className="leading-none">На стр.</span>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
+                >
+                  {[10, 25, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="relative min-w-[12rem] max-w-xs flex-1">
+                <Input
+                  placeholder="Поиск"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 w-full min-w-0 bg-background text-xs"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0 text-xs"
+                onClick={() => {
+                  const headers = ["Название", "Код", "Сортировка", "Продукты", "Агенты", "Комментарий"];
+                  const rows = filteredRows.map((r) => [
+                    r.name,
+                    r.code ?? "",
+                    r.sort_order,
+                    r.product_total,
+                    r.agent_total,
+                    (r.comment ?? "").replace(/\n/g, " ")
+                  ]);
+                  downloadXlsxSheet(
+                    `kpi_groups_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                    "KPI группы",
+                    headers,
+                    rows
+                  );
+                }}
+              >
+                Excel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                title="Обновить"
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
+              </Button>
+            </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[960px] text-xs">
-          <thead className="bg-muted/50">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-xs">
+          <thead className="app-table-thead">
             <tr>
               <th className="px-2 py-2 text-left font-medium text-muted-foreground">Название</th>
               <th className="px-2 py-2 text-left font-medium text-muted-foreground">Код</th>
@@ -214,7 +242,7 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
               <tr key={r.id} className="border-t even:bg-muted/20">
                 <td className="px-2 py-2 font-medium">{r.name}</td>
                 <td className="px-2 py-2 font-mono">{r.code ?? "—"}</td>
-                <td className="px-2 py-2 tabular-nums">{r.sort_order}</td>
+                <td className="px-2 py-2 tabular-nums">{formatGroupedInteger(r.sort_order)}</td>
                 <td className="max-w-[220px] px-2 py-2">
                   <TagOverflow
                     items={r.products.map((p) => ({
@@ -245,21 +273,43 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
             ))}
           </tbody>
         </table>
-      </div>
+            </div>
 
-      <p className="text-xs text-muted-foreground">
-        Показано {pageRows.length ? (safePage - 1) * pageSize + 1 : 0} – {(safePage - 1) * pageSize + pageRows.length} / {total}
-      </p>
-      <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" size="sm" className="h-7" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-          ‹
-        </Button>
-        <span className="text-xs tabular-nums">
-          {safePage} / {pageCount}
-        </span>
-        <Button type="button" variant="outline" size="sm" className="h-7" disabled={safePage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
-          ›
-        </Button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/20 px-3 py-2 sm:px-4">
+              <p className="text-xs text-muted-foreground">
+                Показано{" "}
+                {formatGroupedInteger(pageRows.length ? (safePage - 1) * pageSize + 1 : 0)} –{" "}
+                {formatGroupedInteger((safePage - 1) * pageSize + pageRows.length)} /{" "}
+                {formatGroupedInteger(total)}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ‹
+                </Button>
+                <span className="text-xs tabular-nums">
+                  {formatGroupedInteger(safePage)} / {formatGroupedInteger(pageCount)}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={safePage >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                >
+                  ›
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <KpiFormDialog
@@ -279,7 +329,7 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
         saving={patchMut.isPending}
         onSave={(body) => editId != null && patchMut.mutate({ id: editId, body })}
       />
-    </div>
+    </>
   );
 }
 

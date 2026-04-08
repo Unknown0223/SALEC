@@ -9,6 +9,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, useTenant } from "@/lib/api-client";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 
 interface Expense {
   id: number;
@@ -75,10 +76,10 @@ export default function ExpensesPage() {
       {/* PnL Summary */}
       {pnl && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Daromad</p><p className="text-2xl font-bold">{Number(pnl.revenue).toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Tasdiqlangan chiqimlar</p><p className="text-2xl font-bold text-orange-600">{Number(pnl.total_expenses_approved).toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Qoralama chiqimlar</p><p className="text-2xl font-bold text-gray-500">{Number(pnl.total_expenses_draft).toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Sof foyda</p><p className="text-2xl font-bold text-green-600">{Number(pnl.net_profit).toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Daromad</p><p className="text-2xl font-bold tabular-nums">{formatNumberGrouped(pnl.revenue, { maxFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Tasdiqlangan chiqimlar</p><p className="text-2xl font-bold tabular-nums text-orange-600">{formatNumberGrouped(pnl.total_expenses_approved, { maxFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Qoralama chiqimlar</p><p className="text-2xl font-bold tabular-nums text-gray-500">{formatNumberGrouped(pnl.total_expenses_draft, { maxFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Sof foyda</p><p className="text-2xl font-bold tabular-nums text-green-600">{formatNumberGrouped(pnl.net_profit, { maxFractionDigits: 2 })}</p></CardContent></Card>
         </div>
       )}
 
@@ -124,7 +125,7 @@ export default function ExpensesPage() {
                 ) : expenses.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell>{typeMap[e.expense_type] || e.expense_type}</TableCell>
-                    <TableCell className="font-medium">{Number(e.amount).toLocaleString()} {e.currency}</TableCell>
+                    <TableCell className="font-medium tabular-nums">{formatNumberGrouped(e.amount, { maxFractionDigits: 2 })} {e.currency}</TableCell>
                     <TableCell>{e.agent_name || "—"}</TableCell>
                     <TableCell>
                       <Badge className={
@@ -151,7 +152,7 @@ export default function ExpensesPage() {
 
           {total > 20 && (
             <div className="flex items-center justify-between mt-4">
-              <span className="text-sm text-muted-foreground">Jami: {total}</span>
+              <span className="text-sm text-muted-foreground">Jami: {formatNumberGrouped(total, { maxFractionDigits: 0 })}</span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Oldingi</Button>
                 <Button variant="outline" size="sm" disabled={page * 20 >= total} onClick={() => setPage((p) => p + 1)}>Keyingi</Button>

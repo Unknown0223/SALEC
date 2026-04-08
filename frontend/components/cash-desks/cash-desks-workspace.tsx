@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -241,90 +243,93 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
   }, [rows, tab, tablePrefs.visibleColumnOrder]);
 
   return (
-    <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-2 border-b border-border">
-            <button
-              type="button"
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-                tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-              )}
-              onClick={() => setTab("active")}
-            >
-              Активный
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-                tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-              )}
-              onClick={() => setTab("inactive")}
-            >
-              Не активный
-            </button>
-          </div>
-          {canWrite ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setColumnOpen(true)}>
-                Столбцы
+    <>
+      <TableColumnSettingsDialog
+        open={columnOpen}
+        onOpenChange={setColumnOpen}
+        title="Управление столбцами"
+        description="Выберите видимые столбцы и порядок. Сохраняется для вашей учётной записи."
+        columns={COLUMN_META}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
+
+      <div className="orders-hub-section orders-hub-section--table">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("active")}
+                >
+                  Активный
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("inactive")}
+                >
+                  Не активный
+                </button>
+              </div>
+              {canWrite ? (
+                <div className="flex flex-wrap items-center gap-2 py-1">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setColumnOpen(true)}>
+                    Столбцы
+                  </Button>
+                  <Button type="button" size="sm" onClick={() => setFormOpen(true)}>
+                    Добавить
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                value={limit}
+                onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
+              >
+                {[10, 20, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <Input
+                placeholder="Поиск"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 max-w-xs text-xs"
+              />
+              <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={exportRows}>
+                Excel
               </Button>
-              <Button type="button" size="sm" onClick={() => setFormOpen(true)}>
-                Добавить
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="h-9 w-9"
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
               </Button>
             </div>
-          ) : null}
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-            value={limit}
-            onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
-          >
-            {[10, 20, 25, 50, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <Input
-            placeholder="Поиск"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 max-w-xs text-xs"
-          />
-          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={exportRows}>
-            Excel
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="h-8 w-8"
-            onClick={() => void listQ.refetch()}
-          >
-            <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
-          </Button>
-        </div>
-
-        <TableColumnSettingsDialog
-          open={columnOpen}
-          onOpenChange={setColumnOpen}
-          title="Управление столбцами"
-          description="Выберите видимые столбцы и порядок. Сохраняется для вашей учётной записи."
-          columns={COLUMN_META}
-          columnOrder={tablePrefs.columnOrder}
-          hiddenColumnIds={tablePrefs.hiddenColumnIds}
-          saving={tablePrefs.saving}
-          onSave={(next) => tablePrefs.saveColumnLayout(next)}
-          onReset={() => tablePrefs.resetColumnLayout()}
-        />
-
-        <div className="overflow-x-auto rounded-lg border">
+            <div className="overflow-x-auto">
           <table className="w-full min-w-[1100px] text-xs">
-            <thead className="bg-muted/50">
+            <thead className="app-table-thead">
               <tr>
                 {tablePrefs.visibleColumnOrder.map((colId) => {
                   const meta = COLUMN_META.find((c) => c.id === colId);
@@ -388,7 +393,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
                                 key={b.role}
                                 className="inline-block rounded-md bg-muted px-1.5 py-0.5 text-[10px]"
                               >
-                                {ROLE_LABELS[b.role] ?? b.role} — ({b.count})
+                                {ROLE_LABELS[b.role] ?? b.role} — ({formatGroupedInteger(b.count)})
                               </span>
                             ))}
                             {r.breakdown.length > 3 ? (
@@ -396,7 +401,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
                             ) : null}
                           </div>
                         ) : colId === "user_total" ? (
-                          r.user_total
+                          formatGroupedInteger(r.user_total)
                         ) : colId === "sort_order" ? (
                           r.sort_order ?? "—"
                         ) : colId === "code" ? (
@@ -449,36 +454,39 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
               )}
             </tbody>
           </table>
-        </div>
+            </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>
-            Показано {from} - {to} / {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ←
-            </Button>
-            <span className="tabular-nums">{page}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              →
-            </Button>
-          </div>
-        </div>
+            <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-xs text-muted-foreground sm:px-4">
+              <span>
+                Показано {formatGroupedInteger(from)} - {formatGroupedInteger(to)} / {formatGroupedInteger(total)}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ←
+                </Button>
+                <span className="tabular-nums">{formatGroupedInteger(page)}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  →
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <CashDeskFormDialog
         tenantSlug={tenantSlug}
@@ -497,7 +505,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
         canWrite={canWrite}
         onClose={() => setShiftDesk(null)}
       />
-    </div>
+    </>
   );
 }
 

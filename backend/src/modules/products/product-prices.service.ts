@@ -17,16 +17,26 @@ export async function getProductPrice(
   productId: number,
   priceType: string = DEFAULT_PRICE_TYPE
 ): Promise<string | null> {
+  const normalized = priceType.trim();
+  if (!normalized) return null;
   const row = await prisma.productPrice.findUnique({
     where: {
       tenant_id_product_id_price_type: {
         tenant_id: tenantId,
         product_id: productId,
-        price_type: priceType
+        price_type: normalized
       }
     }
   });
-  return row ? row.price.toString() : null;
+  if (row) return row.price.toString();
+  const ciRow = await prisma.productPrice.findFirst({
+    where: {
+      tenant_id: tenantId,
+      product_id: productId,
+      price_type: { equals: normalized, mode: "insensitive" }
+    }
+  });
+  return ciRow ? ciRow.price.toString() : null;
 }
 
 export async function listProductPrices(tenantId: number, productId: number): Promise<PriceRow[]> {

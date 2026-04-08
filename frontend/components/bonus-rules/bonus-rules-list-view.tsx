@@ -291,7 +291,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="border-b bg-muted/60">
+                <thead className="app-table-thead">
                   <tr>
                     {tablePrefs.visibleColumnOrder.map((colId) => {
                       const meta = BONUS_RULE_DATA_COLUMNS.find((c) => c.id === colId);

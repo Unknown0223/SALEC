@@ -3,9 +3,9 @@
 import type { ReactNode } from "react";
 
 /**
- * Ichki sozlamalar kontenti uchun kenglik chegaramasi.
- * Ikkinchi yon panel endi `settings/layout.tsx` → SettingsShell da.
+ * Sozlamalar asosiy maydoni — to‘liq kenglik (jadval/katalog uchun).
+ * Torroq forma kerak bo‘lsa, sahifa ichida `max-w-*` qo‘llanadi.
  */
 export function SettingsWorkspace({ children }: { children: ReactNode }) {
-  return <div className="mx-auto w-full max-w-6xl">{children}</div>;
+  return <div className="w-full min-w-0 max-w-none">{children}</div>;
 }

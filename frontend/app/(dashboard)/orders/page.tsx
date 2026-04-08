@@ -21,6 +21,7 @@ import { QueryErrorState } from "@/components/common/query-error-state";
 import { getUserFacingError } from "@/lib/error-utils";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
+import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
 import {
   ORDER_LIST_COLUMNS,
   ORDER_LIST_COLUMN_IDS,
@@ -71,6 +72,49 @@ type OrdersUrlFilters = {
   client_id: string;
   product_id: string;
   client_category: string;
+};
+
+type OrdersFilterVisibility = {
+  status: boolean;
+  orderType: boolean;
+  nakladnoyType: boolean;
+  paymentMethod: boolean;
+  priceType: boolean;
+  day: boolean;
+  clientCategory: boolean;
+  clientId: boolean;
+  productCategory: boolean;
+  product: boolean;
+  warehouse: boolean;
+  agent: boolean;
+  expeditor: boolean;
+  consignment: boolean;
+  tradeDirection: boolean;
+  territory1: boolean;
+  territory2: boolean;
+  territory3: boolean;
+};
+
+const ORDERS_FILTER_VISIBILITY_STORAGE_KEY = "salesdoc.orders.filter-visibility.v1";
+const DEFAULT_ORDERS_FILTER_VISIBILITY: OrdersFilterVisibility = {
+  status: true,
+  orderType: true,
+  nakladnoyType: true,
+  paymentMethod: true,
+  priceType: true,
+  day: true,
+  clientCategory: true,
+  clientId: true,
+  productCategory: true,
+  product: true,
+  warehouse: true,
+  agent: true,
+  expeditor: true,
+  consignment: true,
+  tradeDirection: true,
+  territory1: true,
+  territory2: true,
+  territory3: true
 };
 
 function parseOrdersUrl(searchParams: URLSearchParams): OrdersUrlFilters {
@@ -217,10 +261,51 @@ function OrdersPageContent() {
   const [totalsDialogOpen, setTotalsDialogOpen] = useState(false);
   const [bulkExpeditorChoice, setBulkExpeditorChoice] = useState<string>("");
   const [bulkExpFeedback, setBulkExpFeedback] = useState<string | null>(null);
+  const [filterVisibilityOpen, setFilterVisibilityOpen] = useState(false);
+  const [filterVisibility, setFilterVisibility] = useState<OrdersFilterVisibility>(
+    DEFAULT_ORDERS_FILTER_VISIBILITY
+  );
+  const filterPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setNakladnoyPrefs(loadNakladnoyExportPrefs());
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(ORDERS_FILTER_VISIBILITY_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<OrdersFilterVisibility>;
+      setFilterVisibility({
+        ...DEFAULT_ORDERS_FILTER_VISIBILITY,
+        ...parsed
+      });
+    } catch {
+      setFilterVisibility(DEFAULT_ORDERS_FILTER_VISIBILITY);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        ORDERS_FILTER_VISIBILITY_STORAGE_KEY,
+        JSON.stringify(filterVisibility)
+      );
+    } catch {
+      // noop: localStorage unavailable
+    }
+  }, [filterVisibility]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      if (!filterVisibilityOpen) return;
+      const target = e.target as Node | null;
+      if (target && filterPanelRef.current?.contains(target)) return;
+      setFilterVisibilityOpen(false);
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [filterVisibilityOpen]);
 
   const canBulkCatalog = effectiveRole === "admin" || effectiveRole === "operator";
 
@@ -411,6 +496,27 @@ function OrdersPageContent() {
     () => buildPaymentPrefillFromSelection(rows, selectedOrderIds),
     [rows, selectedOrderIds]
   );
+
+  const filterVisibilityItems: Array<{ key: keyof OrdersFilterVisibility; label: string }> = [
+    { key: "status", label: "Статус" },
+    { key: "orderType", label: "Тип" },
+    { key: "nakladnoyType", label: "Тип накладной" },
+    { key: "paymentMethod", label: "Способ оплаты" },
+    { key: "priceType", label: "Тип цены" },
+    { key: "day", label: "День" },
+    { key: "clientCategory", label: "Категория клиента" },
+    { key: "clientId", label: "Клиенты (ID)" },
+    { key: "productCategory", label: "Категория продукта" },
+    { key: "product", label: "Продукт" },
+    { key: "warehouse", label: "Склад" },
+    { key: "agent", label: "Агент" },
+    { key: "expeditor", label: "Экспедиторы" },
+    { key: "consignment", label: "Консигнация" },
+    { key: "tradeDirection", label: "Направление торговли" },
+    { key: "territory1", label: "Территория 1" },
+    { key: "territory2", label: "Территория 2" },
+    { key: "territory3", label: "Территория 3" }
+  ];
 
   const rowStatusMut = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
@@ -628,14 +734,14 @@ function OrdersPageContent() {
           </Link>
         );
       case "qty":
-        return <span className="tabular-nums">{o.qty}</span>;
+        return <span className="tabular-nums">{formatNumberGrouped(o.qty, { maxFractionDigits: 3 })}</span>;
       case "total_sum":
-        return <span className="tabular-nums">{o.total_sum}</span>;
+        return <span className="tabular-nums">{formatNumberGrouped(o.total_sum, { maxFractionDigits: 2 })}</span>;
       case "discount_sum": {
         const n = parseNumField(o.discount_sum ?? "0");
         return (
           <span className="tabular-nums text-xs text-amber-900 dark:text-amber-200">
-            {n > 0 ? n.toLocaleString("uz-UZ", { maximumFractionDigits: 0 }) : "—"}
+            {n > 0 ? formatNumberGrouped(n, { maxFractionDigits: 0 }) : "—"}
           </span>
         );
       }
@@ -643,14 +749,14 @@ function OrdersPageContent() {
         const n = parseNumField(o.bonus_qty ?? "0");
         return (
           <span className="tabular-nums text-xs text-emerald-800 dark:text-emerald-300">
-            {n > 0 ? n.toLocaleString("uz-UZ", { maximumFractionDigits: 3 }) : "—"}
+            {n > 0 ? formatNumberGrouped(n, { maxFractionDigits: 3 }) : "—"}
           </span>
         );
       }
       case "balance":
-        return o.balance ?? "—";
+        return o.balance == null ? "—" : formatNumberGrouped(o.balance, { maxFractionDigits: 2 });
       case "debt":
-        return o.debt ?? "—";
+        return o.debt == null ? "—" : formatNumberGrouped(o.debt, { maxFractionDigits: 2 });
       case "price_type":
         return o.price_type ?? "—";
       case "warehouse_name":
@@ -701,7 +807,7 @@ function OrdersPageContent() {
         </div>
       ) : null}
 
-      <div className="orders-hub-section orders-hub-section--filters">
+      <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
         <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
           <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between xl:gap-6">
@@ -709,7 +815,7 @@ function OrdersPageContent() {
               <h1 className="text-xl font-semibold tracking-tight text-foreground">Заявки</h1>
               {data ? (
                 <span className="text-sm text-foreground/75">
-                  Всего: <span className="font-medium text-foreground">{data.total}</span>
+                  Всего: <span className="font-medium text-foreground">{formatNumberGrouped(data.total)}</span>
                 </span>
               ) : null}
             </div>
@@ -748,6 +854,67 @@ function OrdersPageContent() {
             </div>
 
             <div className="flex flex-wrap items-end gap-2 xl:justify-end">
+              <div ref={filterPanelRef} className="relative">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-1"
+                  onClick={() => setFilterVisibilityOpen((v) => !v)}
+                >
+                  <Settings className="h-4 w-4" />
+                  Фильтры
+                </Button>
+                {filterVisibilityOpen ? (
+                  <div className="absolute right-0 z-30 mt-2 w-72 rounded-md border border-border bg-popover p-2 shadow-lg">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">Показать поля</span>
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => setFilterVisibility(DEFAULT_ORDERS_FILTER_VISIBILITY)}
+                        >
+                          Все
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() =>
+                            setFilterVisibility((prev) =>
+                              Object.fromEntries(Object.keys(prev).map((k) => [k, false])) as OrdersFilterVisibility
+                            )
+                          }
+                        >
+                          Скрыть
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
+                      {filterVisibilityItems.map((item) => (
+                        <label
+                          key={item.key}
+                          className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/70"
+                        >
+                          <input
+                            type="checkbox"
+                            className="size-3.5"
+                            checked={filterVisibility[item.key]}
+                            onChange={(e) =>
+                              setFilterVisibility((prev) => ({ ...prev, [item.key]: e.target.checked }))
+                            }
+                          />
+                          <span className="text-foreground/90">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <label className="orders-filter-field-label">
                 <span className="sr-only">С даты</span>
                 <Input
@@ -794,6 +961,7 @@ function OrdersPageContent() {
           {tenantSlug ? (
             <>
               <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10">
+                {filterVisibility.status ? (
                 <label className="orders-filter-field-label">
                   Статус
                   <select
@@ -809,6 +977,8 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
+                ) : null}
+                {filterVisibility.orderType ? (
                 <label className="orders-filter-field-label">
                   Тип
                   <select
@@ -824,10 +994,12 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <OrdersFilterStubSelect label="Тип накладной" />
-                <OrdersFilterStubSelect label="Способ оплаты" />
-                <OrdersFilterStubSelect label="Тип цены" />
-                <OrdersFilterStubSelect label="День" />
+                ) : null}
+                {filterVisibility.nakladnoyType ? <OrdersFilterStubSelect label="Тип накладной" /> : null}
+                {filterVisibility.paymentMethod ? <OrdersFilterStubSelect label="Способ оплаты" /> : null}
+                {filterVisibility.priceType ? <OrdersFilterStubSelect label="Тип цены" /> : null}
+                {filterVisibility.day ? <OrdersFilterStubSelect label="День" /> : null}
+                {filterVisibility.clientCategory ? (
                 <label className="orders-filter-field-label">
                   Категория клиента
                   <Input
@@ -838,6 +1010,8 @@ function OrdersPageContent() {
                     onChange={(e) => replaceOrdersQuery({ client_category: e.target.value, page: 1 })}
                   />
                 </label>
+                ) : null}
+                {filterVisibility.clientId ? (
                 <label className="orders-filter-field-label">
                   Клиенты (ID)
                   <Input
@@ -851,7 +1025,9 @@ function OrdersPageContent() {
                     }}
                   />
                 </label>
-                <OrdersFilterStubSelect label="Категория продукта" />
+                ) : null}
+                {filterVisibility.productCategory ? <OrdersFilterStubSelect label="Категория продукта" /> : null}
+                {filterVisibility.product ? (
                 <label className="orders-filter-field-label">
                   Продукт
                   <select
@@ -868,6 +1044,7 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 xl:items-end">
@@ -976,70 +1153,6 @@ function OrdersPageContent() {
         </Card>
       </div>
 
-      {tenantSlug ? (
-        <div
-          className="orders-hub-section orders-hub-section--toolbar table-toolbar mt-4 flex flex-wrap items-center gap-2 px-3 py-2"
-          role="toolbar"
-          aria-label="Таблица: поиск и экспорт"
-        >
-          <label className="flex items-center gap-1.5 text-xs font-medium text-foreground/85">
-            <select
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-              value={tablePrefs.pageSize}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                tablePrefs.setPageSize(n);
-                replaceOrdersQuery({ page: 1 });
-              }}
-            >
-              {[15, 20, 30, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="relative min-w-[12rem] max-w-md flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Поиск"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="h-9 pl-9"
-              title="Номер, клиент, комментарий"
-            />
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setColumnDialogOpen(true)}>
-            <ListOrdered className="mr-1 h-4 w-4" />
-            Колонки
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={rows.length === 0}
-            onClick={() => {
-              const order = tablePrefs.visibleColumnOrder;
-              const headers = order.map(
-                (id) => ORDER_LIST_COLUMNS.find((c) => c.id === id)?.label ?? id
-              );
-              const dataRows = rows.map((o) => order.map((colId) => orderListExportCell(o, colId)));
-              downloadXlsxSheet(
-                `zakazlar_${new Date().toISOString().slice(0, 10)}.xlsx`,
-                "Zakazlar",
-                headers,
-                dataRows
-              );
-            }}
-          >
-            Excel
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
-            <RefreshCw className="mr-1 h-4 w-4" />
-          </Button>
-        </div>
-      ) : null}
-
       <TableColumnSettingsDialog
         open={columnDialogOpen}
         onOpenChange={setColumnDialogOpen}
@@ -1061,24 +1174,107 @@ function OrdersPageContent() {
             Войти снова
           </Link>
         </p>
-      ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Загрузка…</p>
-      ) : isError ? (
-        <QueryErrorState message={getUserFacingError(error, "Zakazlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {data?.total === 0
-            ? "Filtr yoki qidiruv bo‘yicha zakaz topilmadi."
-            : "Hozircha zakaz yo‘q."}
-        </p>
       ) : (
         <div className="orders-hub-section orders-hub-section--table">
           <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
-          <CardContent className="p-0">
+            <CardContent className="p-0">
+              <div
+                className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4"
+                role="toolbar"
+                aria-label="Таблица: поиск и экспорт"
+              >
+                <label className="shrink-0 text-xs font-medium text-foreground/85">
+                  <span className="sr-only">Строк на странице</span>
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={tablePrefs.pageSize}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      tablePrefs.setPageSize(n);
+                      replaceOrdersQuery({ page: 1 });
+                    }}
+                  >
+                    {[15, 20, 30, 50, 100].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="relative min-w-[12rem] max-w-md flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Поиск"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    className="h-9 bg-background pl-9 text-foreground"
+                    title="Номер, клиент, комментарий"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 gap-1"
+                  onClick={() => setColumnDialogOpen(true)}
+                >
+                  <ListOrdered className="h-4 w-4" />
+                  Колонки
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0"
+                  disabled={rows.length === 0}
+                  onClick={() => {
+                    const order = tablePrefs.visibleColumnOrder;
+                    const headers = order.map(
+                      (id) => ORDER_LIST_COLUMNS.find((c) => c.id === id)?.label ?? id
+                    );
+                    const dataRows = rows.map((o) => order.map((colId) => orderListExportCell(o, colId)));
+                    downloadXlsxSheet(
+                      `zakazlar_${new Date().toISOString().slice(0, 10)}.xlsx`,
+                      "Zakazlar",
+                      headers,
+                      dataRows
+                    );
+                  }}
+                >
+                  Excel
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-9 shrink-0 p-0"
+                  onClick={() => void refetch()}
+                >
+                  <RefreshCw className="mx-auto h-4 w-4" />
+                </Button>
+              </div>
+
+              {isLoading ? (
+                <p className="px-3 py-6 text-sm text-muted-foreground sm:px-4">Загрузка…</p>
+              ) : isError ? (
+                <div className="p-4 sm:p-5">
+                  <QueryErrorState
+                    message={getUserFacingError(error, "Zakazlarni yuklab bo'lmadi.")}
+                    onRetry={() => void refetch()}
+                  />
+                </div>
+              ) : rows.length === 0 ? (
+                <p className="px-3 py-6 text-sm text-muted-foreground sm:px-4">
+                  {data?.total === 0
+                    ? "Filtr yoki qidiruv bo‘yicha zakaz topilmadi."
+                    : "Hozircha zakaz yo‘q."}
+                </p>
+              ) : (
+                <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[960px] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/60 text-left text-xs font-medium text-foreground/82">
+                <thead className="app-table-thead">
+                  <tr className="text-left">
                     <th className="w-10 px-3 py-2">
                       <input
                         type="checkbox"
@@ -1104,7 +1300,7 @@ function OrdersPageContent() {
                         </th>
                       );
                     })}
-                    <th className={cn("text-foreground/82", dataTableStickyActionsThSingle)}>
+                    <th className={cn(dataTableStickyActionsThSingle)}>
                       <span className="sr-only">Tafsilot</span>
                     </th>
                   </tr>
@@ -1183,9 +1379,12 @@ function OrdersPageContent() {
                 <span className="text-foreground/80">
                   Страница{" "}
                   <span className="font-medium tabular-nums text-foreground">
-                    {Math.min(filters.page, orderListTotalPages)}
+                    {formatGroupedInteger(Math.min(filters.page, orderListTotalPages))}
                   </span>{" "}
-                  / <span className="tabular-nums text-foreground">{orderListTotalPages}</span>
+                  /{" "}
+                  <span className="tabular-nums text-foreground">
+                    {formatGroupedInteger(orderListTotalPages)}
+                  </span>
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1209,7 +1408,9 @@ function OrdersPageContent() {
                 </div>
               </div>
             ) : null}
-          </CardContent>
+                </>
+              )}
+            </CardContent>
           </Card>
         </div>
       )}
@@ -1218,7 +1419,8 @@ function OrdersPageContent() {
         <div className="flex flex-col gap-0 rounded-lg border border-border bg-muted/50 text-sm shadow-sm">
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
             <span className="font-medium text-foreground">
-              Guruh ishlashi: <span className="tabular-nums">{selectedOrderIds.size}</span> ta zakaz
+              Guruh ishlashi:{" "}
+              <span className="tabular-nums">{formatGroupedInteger(selectedOrderIds.size)}</span> ta zakaz
             </span>
             <label className="flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground">Holatni o‘zgartirish</span>
@@ -1486,30 +1688,32 @@ function OrdersPageContent() {
           <dl className="grid gap-2 text-sm">
             <div className="flex justify-between gap-4 border-b border-border/60 py-1">
               <dt className="text-muted-foreground">Zakazlar soni</dt>
-              <dd className="font-medium tabular-nums">{selectionTotals.count}</dd>
+              <dd className="font-medium tabular-nums">
+                {formatGroupedInteger(selectionTotals.count)}
+              </dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-border/60 py-1">
               <dt className="text-muted-foreground">Jami miqdor (qty)</dt>
               <dd className="font-medium tabular-nums">
-                {selectionTotals.qty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                {formatNumberGrouped(selectionTotals.qty, { maxFractionDigits: 3 })}
               </dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-border/60 py-1">
               <dt className="text-muted-foreground">Jami summa</dt>
               <dd className="font-medium tabular-nums">
-                {selectionTotals.total.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+                {formatNumberGrouped(selectionTotals.total, { maxFractionDigits: 2 })}
               </dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-border/60 py-1">
               <dt className="text-muted-foreground">Jami skidka</dt>
               <dd className="font-medium tabular-nums">
-                {selectionTotals.discount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
+                {formatNumberGrouped(selectionTotals.discount, { maxFractionDigits: 2 })}
               </dd>
             </div>
             <div className="flex justify-between gap-4 py-1">
               <dt className="text-muted-foreground">Jami bonus (dona)</dt>
               <dd className="font-medium tabular-nums">
-                {selectionTotals.bonusQty.toLocaleString("ru-RU", { maximumFractionDigits: 3 })}
+                {formatNumberGrouped(selectionTotals.bonusQty, { maxFractionDigits: 3 })}
               </dd>
             </div>
           </dl>

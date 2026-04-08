@@ -3,6 +3,7 @@
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
+import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
@@ -66,7 +67,7 @@ export default function PricesOverviewSettingsPage() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Цена"
         description="Narx turlari bo‘yicha oxirgi yangilanish sanasi. Ommaviy tahrir — «Narxni o‘rnatish» sahifasi."
@@ -89,32 +90,40 @@ export default function PricesOverviewSettingsPage() {
       />
 
       <SettingsWorkspace>
-        <div className="mb-3 flex gap-2">
-          <button
-            type="button"
-            className={cn(
-              "rounded px-3 py-1 text-sm",
-              kind === "sale" ? "bg-primary text-primary-foreground" : "bg-muted"
-            )}
-            onClick={() => setKind("sale")}
-          >
-            Продажа
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "rounded px-3 py-1 text-sm",
-              kind === "purchase" ? "bg-primary text-primary-foreground" : "bg-muted"
-            )}
-            onClick={() => setKind("purchase")}
-          >
-            Закуп
-          </button>
-        </div>
+        <div className="orders-hub-section orders-hub-section--table">
+          <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+            <CardContent className="p-0">
+              <div className="flex flex-wrap gap-1 border-b border-border bg-muted/25 px-3 py-2 sm:px-4">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    kind === "sale" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setKind("sale")}
+                >
+                  Продажа
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    kind === "purchase" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setKind("purchase")}
+                >
+                  Закуп
+                </button>
+              </div>
 
-        <div className="overflow-hidden rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-left">
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed text-sm">
+                  <colgroup>
+                    <col style={{ width: "34%" }} />
+                    <col style={{ width: "33%" }} />
+                    <col />
+                  </colgroup>
+            <thead className="app-table-thead text-left">
               <tr>
                 <th className="px-3 py-2 font-medium">Тип цены</th>
                 <th className="px-3 py-2 font-medium">Способ оплаты</th>
@@ -148,12 +157,18 @@ export default function PricesOverviewSettingsPage() {
                 ))
               )}
             </tbody>
-          </table>
-        </div>
+                </table>
+              </div>
 
-        <p className="mt-4 text-xs text-muted-foreground">
-          «Установить наценку»: foizli narx oshirish keyingi versiyada; hozir Excel import yoki matritsadan tahrirlang.
-        </p>
+              <div className="border-t border-border/80 bg-muted/15 px-3 py-3 sm:px-4">
+                <p className="text-xs text-muted-foreground">
+                  «Установить наценку»: foizli narx oshirish keyingi versiyada; hozir Excel import yoki matritsadan
+                  tahrirlang.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </SettingsWorkspace>
     </PageShell>
   );

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import * as XLSX from "xlsx";
 import { prisma } from "../../config/database";
 
 function startOfUtcDay(d: Date) {
@@ -55,6 +56,65 @@ function serializeVisit(v: {
     agent: v.agent,
     client: v.client
   };
+}
+
+const VISITS_EXPORT_MAX = 10_000;
+
+export async function exportAgentVisitsXlsx(
+  tenantId: number,
+  opts: { agent_id?: number; client_id?: number }
+): Promise<Buffer> {
+  const where: Prisma.AgentVisitWhereInput = { tenant_id: tenantId };
+  if (opts.agent_id) where.agent_id = opts.agent_id;
+  if (opts.client_id) where.client_id = opts.client_id;
+
+  const rows = await prisma.agentVisit.findMany({
+    where,
+    orderBy: { checked_in_at: "desc" },
+    take: VISITS_EXPORT_MAX,
+    include: {
+      agent: { select: { id: true, name: true, login: true } },
+      client: { select: { id: true, name: true } }
+    }
+  });
+
+  const aoa: (string | number)[][] = [
+    [
+      "ID",
+      "Kirish (UTC)",
+      "Chiqish (UTC)",
+      "Agent ID",
+      "Agent",
+      "Login",
+      "Mijoz ID",
+      "Mijoz",
+      "Kenglik",
+      "Uzunlik",
+      "Izoh",
+      "Holat"
+    ]
+  ];
+  for (const v of rows) {
+    aoa.push([
+      v.id,
+      v.checked_in_at.toISOString(),
+      v.checked_out_at?.toISOString() ?? "",
+      v.agent_id,
+      v.agent.name,
+      v.agent.login,
+      v.client_id ?? "",
+      v.client?.name ?? "",
+      v.latitude != null ? String(v.latitude) : "",
+      v.longitude != null ? String(v.longitude) : "",
+      v.notes ?? "",
+      v.checked_out_at ? "Yakunlangan" : "Faol"
+    ]);
+  }
+
+  const sheet = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, "Tashriflar");
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
 export async function createAgentVisit(
@@ -115,6 +175,79 @@ export async function checkoutAgentVisit(tenantId: number, id: number) {
     }
   });
   return serializeVisit(updated);
+}
+
+// ── Agent GPS pings (trek) ───────────────────────────────────────────────
+
+export type AgentLocationPingRow = {
+  id: number;
+  agent_id: number;
+  latitude: string;
+  longitude: string;
+  accuracy_meters: number | null;
+  recorded_at: string;
+};
+
+export async function recordAgentLocationPing(
+  tenantId: number,
+  agentId: number,
+  input: { latitude: number; longitude: number; accuracy_meters?: number | null }
+): Promise<AgentLocationPingRow> {
+  const agent = await prisma.user.findFirst({
+    where: { id: agentId, tenant_id: tenantId, role: "agent", is_active: true },
+    select: { id: true }
+  });
+  if (!agent) throw new Error("AgentNotFound");
+
+  const row = await prisma.agentLocationPing.create({
+    data: {
+      tenant_id: tenantId,
+      agent_id: agentId,
+      latitude: new Prisma.Decimal(input.latitude),
+      longitude: new Prisma.Decimal(input.longitude),
+      accuracy_meters:
+        input.accuracy_meters != null && Number.isFinite(input.accuracy_meters)
+          ? input.accuracy_meters
+          : null
+    }
+  });
+  return {
+    id: row.id,
+    agent_id: row.agent_id,
+    latitude: row.latitude.toString(),
+    longitude: row.longitude.toString(),
+    accuracy_meters: row.accuracy_meters,
+    recorded_at: row.recorded_at.toISOString()
+  };
+}
+
+export async function listAgentLocationPings(
+  tenantId: number,
+  opts: { agent_id: number; from: Date; to: Date; limit: number }
+): Promise<{ data: AgentLocationPingRow[]; truncated: boolean }> {
+  const take = Math.min(Math.max(opts.limit, 1), 5000);
+  const rows = await prisma.agentLocationPing.findMany({
+    where: {
+      tenant_id: tenantId,
+      agent_id: opts.agent_id,
+      recorded_at: { gte: opts.from, lte: opts.to }
+    },
+    orderBy: { recorded_at: "asc" },
+    take: take + 1
+  });
+  const truncated = rows.length > take;
+  const sliced = truncated ? rows.slice(0, take) : rows;
+  return {
+    data: sliced.map((r) => ({
+      id: r.id,
+      agent_id: r.agent_id,
+      latitude: r.latitude.toString(),
+      longitude: r.longitude.toString(),
+      accuracy_meters: r.accuracy_meters,
+      recorded_at: r.recorded_at.toISOString()
+    })),
+    truncated
+  };
 }
 
 /** --- Tasks --- */

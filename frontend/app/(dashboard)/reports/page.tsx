@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -146,7 +147,7 @@ function renderAbcTable(title: string, rows: AbcRow[], tone: "amber" | "slate" |
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] border-collapse text-sm">
-              <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
+              <thead className="app-table-thead text-xs">
                 <tr>
                   <th className="px-3 py-2 text-left">Mijoz</th>
                   <th className="px-3 py-2 text-right">Summa</th>
@@ -203,7 +204,7 @@ function renderXyzTable(title: string, desc: string, rows: XyzRow[], tone: "emer
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] border-collapse text-sm">
-              <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
+              <thead className="app-table-thead text-xs">
                 <tr>
                   <th className="px-3 py-2 text-left">Mijoz</th>
                   <th className="px-3 py-2 text-right">O‘rtacha</th>
@@ -219,7 +220,9 @@ function renderXyzTable(title: string, desc: string, rows: XyzRow[], tone: "emer
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtMoney(r.avg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.cv.toFixed(3)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      {formatNumberGrouped(r.cv, { minFractionDigits: 3, maxFractionDigits: 3 })}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -245,15 +248,11 @@ function formatDate(d: Date) {
 }
 
 function fmt(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat("uz-UZ").format(n);
+  return formatNumberGrouped(s, { maxFractionDigits: 0 });
 }
 
 function fmtMoney(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat("uz-UZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  return formatNumberGrouped(s, { minFractionDigits: 2, maxFractionDigits: 2 });
 }
 
 function statusLabel(status: string): string {
@@ -640,7 +639,7 @@ function ReportsContent() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[400px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">Agent</th>
                         <th className="px-3 py-2 text-right">Zakazlar</th>
@@ -695,7 +694,9 @@ function ReportsContent() {
                             style={{ width: `${totalStatusCount > 0 ? (s.count / totalStatusCount) * 100 : 0}%` }}
                           />
                         </div>
-                        <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{s.count}</span>
+                        <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
+                          {fmt(s.count)}
+                        </span>
                       </div>
                     ))}
                 </div>
@@ -767,7 +768,7 @@ function ReportsContent() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[700px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">#</th>
                         <th className="px-3 py-2 text-left">Kod</th>
@@ -847,7 +848,7 @@ function ReportsContent() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[600px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">#</th>
                         <th className="px-3 py-2 text-left">Mijoz</th>
@@ -921,7 +922,7 @@ function ReportsContent() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[750px] border-collapse text-sm">
-                    <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">Agent</th>
                         <th className="px-3 py-2 text-right">Mijozlar</th>
@@ -1008,7 +1009,7 @@ function ReportsContent() {
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[400px] border-collapse text-sm">
-                          <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                          <thead className="app-table-thead text-xs">
                             <tr>
                               <th className="px-3 py-2 text-left">Kanal</th>
                               <th className="px-3 py-2 text-right">Zakazlar</th>
@@ -1040,7 +1041,7 @@ function ReportsContent() {
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[400px] border-collapse text-sm">
-                          <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                          <thead className="app-table-thead text-xs">
                             <tr>
                               <th className="px-3 py-2 text-left">Yo‘nalish</th>
                               <th className="px-3 py-2 text-right">Zakazlar</th>
@@ -1227,7 +1228,7 @@ function ReportsContent() {
                   </p>
                   <div className="overflow-x-auto rounded-md border">
                     <table className="w-full min-w-[720px] border-collapse text-sm">
-                      <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                      <thead className="app-table-thead text-xs">
                         <tr>
                           <th className="px-3 py-2 text-left">Mijoz</th>
                           <th className="px-3 py-2 text-left">Telefon</th>
@@ -1409,7 +1410,7 @@ function ReportsContent() {
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[520px] border-collapse text-sm">
-                        <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
+                        <thead className="app-table-thead text-xs">
                           <tr>
                             <th className="px-3 py-2 text-left">Mijoz</th>
                             <th className="px-3 py-2 text-right">Oxirgi zakaz</th>

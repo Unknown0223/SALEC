@@ -148,6 +148,9 @@ function parseAgentListFilters(q: Record<string, string | undefined>): ListStaff
   if (q.branch?.trim()) filters.branch = q.branch.trim();
   if (q.trade_direction?.trim()) filters.trade_direction = q.trade_direction.trim();
   if (q.position?.trim()) filters.position = q.position.trim();
+  if (q.territory?.trim()) filters.territory = q.territory.trim();
+  if (q.territory_oblast?.trim()) filters.territory_oblast = q.territory_oblast.trim();
+  if (q.territory_city?.trim()) filters.territory_city = q.territory_city.trim();
   return filters;
 }
 

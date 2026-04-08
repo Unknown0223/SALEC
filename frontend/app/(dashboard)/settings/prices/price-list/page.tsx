@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { formatGroupedDecimal } from "@/lib/format-numbers";
+import { formatGroupedDecimal, formatNumberGrouped } from "@/lib/format-numbers";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Package, Search } from "lucide-react";
@@ -135,7 +135,7 @@ export default function PriceListPage() {
   }
 
   return (
-    <PageShell className="max-w-[100vw] xl:max-w-[1600px]">
+    <PageShell>
       <PageHeader
         title="Прайс-лист"
         description="Mahsulotlar va profildagi narx turlari ustunlari (product_prices)."
@@ -169,7 +169,9 @@ export default function PriceListPage() {
             />
           </div>
           <p className="text-sm text-muted-foreground">
-            Jami: <span className="font-medium text-foreground">{total.toLocaleString("uz-UZ")}</span> ta mahsulot
+            Jami:{" "}
+            <span className="font-medium text-foreground">{formatNumberGrouped(total, { maxFractionDigits: 0 })}</span>{" "}
+            ta mahsulot
           </p>
         </div>
 
@@ -218,7 +220,7 @@ export default function PriceListPage() {
           <>
             <div className="overflow-x-auto rounded-lg border bg-card">
               <table className="w-max min-w-full border-collapse text-sm">
-                <thead>
+                <thead className="app-table-thead">
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="whitespace-nowrap px-3 py-2 font-medium">SKU</th>
                     <th className="min-w-[12rem] px-3 py-2 font-medium">Nomi</th>

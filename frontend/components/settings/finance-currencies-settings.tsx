@@ -176,7 +176,7 @@ export function FinanceCurrenciesSettings() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Валюты"
         description="Standart valyuta bittasi; kodlar mahsulot narxlari (currency) bilan mos keladi."
@@ -216,7 +216,7 @@ export function FinanceCurrenciesSettings() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Название</th>
                   <th className="px-3 py-2 font-medium">Код</th>

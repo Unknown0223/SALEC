@@ -199,7 +199,7 @@ export function ClientRefSettingsPage({ config }: { config: ClientRefSettingsCon
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title={title}
         description="Активный / не активный, modal orqali qo‘shish va tahrirlash."
@@ -239,7 +239,7 @@ export function ClientRefSettingsPage({ config }: { config: ClientRefSettingsCon
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Названия</th>
                   {showColor ? <th className="px-3 py-2 font-medium">Цвет</th> : null}

@@ -196,12 +196,13 @@ export async function bulkUpsertPrices(
     try {
       await prisma.priceMatrix.upsert({
         where: {
-          tenant_id_product_id_client_category_client_type_sales_channe: {
+          tenant_id_product_id_client_category_client_type_sales_channel_currency: {
             tenant_id: tenantId,
             product_id: item.product_id,
             client_category: item.client_category,
-            client_type: item.client_type ?? null,
-            sales_channel: item.sales_channel ?? null
+            client_type: item.client_type ?? "",
+            sales_channel: item.sales_channel ?? "",
+            currency: item.currency ?? "UZS"
           }
         },
         update: data,

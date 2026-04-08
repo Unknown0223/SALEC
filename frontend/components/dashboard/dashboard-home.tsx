@@ -27,6 +27,7 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { DashboardDayActivityChart } from "@/components/charts/analytics-charts";
+import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
 
 type DashboardStats = {
   day_utc: string;
@@ -113,28 +114,34 @@ export function DashboardHome({
           <Card className="border-border/90">
             <CardHeader className="pb-1">
               <CardDescription className="text-xs">Заказов сегодня ({statsQ.data.day_utc})</CardDescription>
-              <CardTitle className="text-2xl tabular-nums">{statsQ.data.orders_today}</CardTitle>
+              <CardTitle className="text-2xl tabular-nums">
+                {formatGroupedInteger(statsQ.data.orders_today)}
+              </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              В работе: {statsQ.data.orders_active}
+              В работе: {formatGroupedInteger(statsQ.data.orders_active)}
             </CardContent>
           </Card>
           <Card className="border-border/90">
             <CardHeader className="pb-1">
               <CardDescription className="text-xs">Платежей сегодня</CardDescription>
-              <CardTitle className="text-2xl tabular-nums">{statsQ.data.payments_today}</CardTitle>
+              <CardTitle className="text-2xl tabular-nums">
+                {formatGroupedInteger(statsQ.data.payments_today)}
+              </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
               Сумма:{" "}
               <span className="font-medium text-foreground tabular-nums">
-                {statsQ.data.payments_sum_today}
+                {formatNumberGrouped(statsQ.data.payments_sum_today, { maxFractionDigits: 2 })}
               </span>
             </CardContent>
           </Card>
           <Card className="border-border/90">
             <CardHeader className="pb-1">
               <CardDescription className="text-xs">Возвратов сегодня</CardDescription>
-              <CardTitle className="text-2xl tabular-nums">{statsQ.data.returns_today}</CardTitle>
+              <CardTitle className="text-2xl tabular-nums">
+                {formatGroupedInteger(statsQ.data.returns_today)}
+              </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">Количество оформленных возвратов</CardContent>
           </Card>
@@ -142,13 +149,14 @@ export function DashboardHome({
             <CardHeader className="pb-1">
               <CardDescription className="text-xs">Каталог / открытая задолженность</CardDescription>
               <CardTitle className="text-lg tabular-nums leading-snug">
-                {statsQ.data.clients_total} клиентов · {statsQ.data.products_active} товаров
+                {formatGroupedInteger(statsQ.data.clients_total)} клиентов ·{" "}
+                {formatGroupedInteger(statsQ.data.products_active)} товаров
               </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
               Сумма открытых заказов:{" "}
               <span className="font-medium text-foreground tabular-nums">
-                {statsQ.data.open_orders_total}
+                {formatNumberGrouped(statsQ.data.open_orders_total, { maxFractionDigits: 2 })}
               </span>
             </CardContent>
           </Card>

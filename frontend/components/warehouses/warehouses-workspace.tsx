@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { cn } from "@/lib/utils";
+import { formatGroupedInteger } from "@/lib/format-numbers";
 import type { AxiosError } from "axios";
 import {
   RoleLinkPickerGrid,
@@ -147,7 +149,7 @@ function RoleBreakdownCell({ breakdown }: { breakdown: { role: string; count: nu
           key={b.role}
           className="inline-flex items-center rounded-md border border-border/80 bg-muted/50 px-1.5 py-0.5 text-[11px] text-foreground"
         >
-          {roleLabel(b.role)} — ({b.count})
+          {roleLabel(b.role)} — ({formatGroupedInteger(b.count)})
         </span>
       ))}
       {rest.length > 0 ? (
@@ -160,7 +162,7 @@ function RoleBreakdownCell({ breakdown }: { breakdown: { role: string; count: nu
               {rest.map((b) => (
                 <li key={b.role} className="flex justify-between gap-4">
                   <span>{roleLabel(b.role)}</span>
-                  <span className="tabular-nums text-muted-foreground">{b.count}</span>
+                  <span className="tabular-nums text-muted-foreground">{formatGroupedInteger(b.count)}</span>
                 </li>
               ))}
             </ul>
@@ -736,85 +738,89 @@ export function WarehousesWorkspace({ tenantSlug, canWrite }: Props) {
         }
       />
 
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-2 border-b border-border">
-            <button
-              type="button"
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-                tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-              )}
-              onClick={() => setTab("active")}
-            >
-              Активный
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-                tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
-              )}
-              onClick={() => setTab("inactive")}
-            >
-              Не активный
-            </button>
-          </div>
-        </div>
+      <TableColumnSettingsDialog
+        open={columnOpen}
+        onOpenChange={setColumnOpen}
+        title="Управление столбцами"
+        description="Видимые столбцы и порядок сохраняются для вашей учётной записи."
+        columns={COLUMN_META}
+        columnOrder={tablePrefs.columnOrder}
+        hiddenColumnIds={tablePrefs.hiddenColumnIds}
+        saving={tablePrefs.saving}
+        onSave={(next) => tablePrefs.saveColumnLayout(next)}
+        onReset={() => tablePrefs.resetColumnLayout()}
+      />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-            value={limit}
-            onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
-          >
-            {[10, 20, 25, 50, 100].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <div className="relative flex-1 basis-[200px] sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Поиск"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8 pl-8 text-xs"
-            />
-          </div>
-          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={exportRows}>
-            Excel
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="h-8 w-8"
-            onClick={() => void listQ.refetch()}
-          >
-            <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
-          </Button>
-        </div>
+      <div className="orders-hub-section orders-hub-section--table">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/25 px-3 py-0 sm:px-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("active")}
+                >
+                  Активный
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                    tab === "inactive" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                  onClick={() => setTab("inactive")}
+                >
+                  Не активный
+                </button>
+              </div>
+            </div>
 
-        {feedback ? <p className="text-sm text-destructive">{feedback}</p> : null}
+            <div className="table-toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+                value={limit}
+                onChange={(e) => tablePrefs.setPageSize(Number.parseInt(e.target.value, 10))}
+              >
+                {[10, 20, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <div className="relative flex-1 basis-[200px] sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 pl-8 text-xs"
+                />
+              </div>
+              <Button type="button" variant="outline" size="sm" className="h-9 text-xs" onClick={exportRows}>
+                Excel
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="h-9 w-9"
+                onClick={() => void listQ.refetch()}
+              >
+                <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
+              </Button>
+            </div>
 
-        <TableColumnSettingsDialog
-          open={columnOpen}
-          onOpenChange={setColumnOpen}
-          title="Управление столбцами"
-          description="Видимые столбцы и порядок сохраняются для вашей учётной записи."
-          columns={COLUMN_META}
-          columnOrder={tablePrefs.columnOrder}
-          hiddenColumnIds={tablePrefs.hiddenColumnIds}
-          saving={tablePrefs.saving}
-          onSave={(next) => tablePrefs.saveColumnLayout(next)}
-          onReset={() => tablePrefs.resetColumnLayout()}
-        />
+            {feedback ? (
+              <p className="border-b border-border/60 px-3 py-2 text-sm text-destructive sm:px-4">{feedback}</p>
+            ) : null}
 
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] border-collapse text-sm">
-            <thead>
+            <thead className="app-table-thead">
               <tr className="border-b border-border bg-muted/40 text-left text-xs font-medium text-muted-foreground">
                 {tablePrefs.visibleColumnOrder.map((colId) => (
                   <th key={colId} className="whitespace-nowrap px-3 py-2.5">
@@ -879,7 +885,7 @@ export function WarehousesWorkspace({ tenantSlug, canWrite }: Props) {
                         ) : colId === "roles" ? (
                           <RoleBreakdownCell breakdown={r.breakdown} />
                         ) : colId === "user_total" ? (
-                          <span className="tabular-nums">{r.user_total}</span>
+                          <span className="tabular-nums">{formatGroupedInteger(r.user_total)}</span>
                         ) : colId === "payment_method" ? (
                           r.payment_method ?? "—"
                         ) : colId === "location" ? (
@@ -941,55 +947,57 @@ export function WarehousesWorkspace({ tenantSlug, canWrite }: Props) {
               )}
             </tbody>
           </table>
-        </div>
+            </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>
-            Показано {from} - {to} / {total}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ←
-            </Button>
-            {(() => {
-              const buttons: number[] = [];
-              const windowSize = 5;
-              let start = Math.max(1, page - Math.floor(windowSize / 2));
-              const end = Math.min(totalPages, start + windowSize - 1);
-              start = Math.max(1, end - windowSize + 1);
-              for (let p = start; p <= end; p++) buttons.push(p);
-              return buttons.map((p) => (
+            <div className="table-content-footer flex flex-wrap items-center justify-between gap-2 border-t border-border/80 bg-muted/25 px-3 py-3 text-xs text-muted-foreground sm:px-4">
+              <span>
+                Показано {from} - {to} / {total}
+              </span>
+              <div className="flex items-center gap-1">
                 <Button
-                  key={p}
                   type="button"
-                  variant={page === p ? "default" : "outline"}
+                  variant="outline"
                   size="sm"
-                  className="h-7 min-w-7 px-2"
-                  onClick={() => setPage(p)}
+                  className="h-7 px-2"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  {p}
+                  ←
                 </Button>
-              ));
-            })()}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              →
-            </Button>
-          </div>
-        </div>
+                {(() => {
+                  const buttons: number[] = [];
+                  const windowSize = 5;
+                  let start = Math.max(1, page - Math.floor(windowSize / 2));
+                  const end = Math.min(totalPages, start + windowSize - 1);
+                  start = Math.max(1, end - windowSize + 1);
+                  for (let p = start; p <= end; p++) buttons.push(p);
+                  return buttons.map((p) => (
+                    <Button
+                      key={p}
+                      type="button"
+                      variant={page === p ? "default" : "outline"}
+                      size="sm"
+                      className="h-7 min-w-7 px-2"
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </Button>
+                  ));
+                })()}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  →
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <WarehouseFormDialog

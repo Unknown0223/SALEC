@@ -148,7 +148,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
   if (hideSettingsAside) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 md:px-6 md:py-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-4 md:py-5">
           {children}
         </main>
       </div>
@@ -159,7 +159,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
       <aside
         className={cn(
-          "flex shrink-0 flex-col border-border/80 bg-card md:w-[min(100%,300px)] md:shrink-0",
+          "scrollbar-none flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-border/80 bg-card md:w-[min(100%,300px)] md:shrink-0",
           "max-h-[min(40vh,320px)] border-b md:max-h-none md:border-b-0 md:border-r"
         )}
       >
@@ -188,7 +188,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav
-          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 md:px-3 md:py-3"
+          className="scrollbar-none min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 md:px-3 md:py-3"
           aria-label="Внутреннее меню настроек"
         >
           {filteredSections.map((section, sectionIndex) => (
@@ -282,7 +282,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         </nav>
       </aside>
 
-      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 md:px-6 md:py-6">
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 md:px-4 md:py-5">
         {children}
       </main>
     </div>

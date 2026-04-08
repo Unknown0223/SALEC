@@ -303,7 +303,7 @@ export default function BranchesSettingsPage() {
   if (!tenantSlug) return <PageShell><p className="text-sm text-destructive"><Link href="/login" className="underline">Kirish</Link></p></PageShell>;
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Филиалы"
         description="Filiallar, territoriya/shahar va kassa bog'lanishi."
@@ -327,7 +327,7 @@ export default function BranchesSettingsPage() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Названия</th>
                   <th className="px-3 py-2 font-medium">Территория</th>

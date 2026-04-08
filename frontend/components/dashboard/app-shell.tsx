@@ -127,21 +127,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { tenantSlug, clearSession } = useAuthStore();
   const effectiveRole = useEffectiveRole();
-  const [usersOpen, setUsersOpen] = useState(false);
-  const [stockOpen, setStockOpen] = useState(false);
-  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [openSection, setOpenSection] = useState<"orders" | "stock" | "users" | null>(null);
+  const usersOpen = openSection === "users";
+  const stockOpen = openSection === "stock";
+  const ordersOpen = openSection === "orders";
 
   useEffect(() => {
-    if (usersNavChildActive(pathname)) setUsersOpen(true);
+    if (ordersNavModuleOpen(pathname)) {
+      setOpenSection("orders");
+      return;
+    }
+    if (stockNavChildActive(pathname)) {
+      setOpenSection("stock");
+      return;
+    }
+    if (usersNavChildActive(pathname)) {
+      setOpenSection("users");
+      return;
+    }
+    setOpenSection(null);
   }, [pathname]);
 
-  useEffect(() => {
-    if (stockNavChildActive(pathname)) setStockOpen(true);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (ordersNavModuleOpen(pathname)) setOrdersOpen(true);
-  }, [pathname]);
+  function toggleSection(section: "orders" | "stock" | "users") {
+    setOpenSection((prev) => (prev === section ? null : section));
+  }
 
   function logout() {
     clearSession();
@@ -156,7 +165,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh w-full overflow-hidden">
       <OrderSseListener />
-      <aside className="hidden w-[15.5rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[2px_0_12px_rgba(0,0,0,0.06)] md:flex md:min-h-0">
+      <aside className="scrollbar-none hidden min-h-0 w-[15.5rem] shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-[2px_0_12px_rgba(0,0,0,0.06)] md:flex">
         <div className="border-b border-sidebar-border/80 px-3 py-4">
           <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-primary/25 text-sidebar-primary-foreground">
             <ClientLucideIcon icon={Package} className="size-5 opacity-90" />
@@ -168,7 +177,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {tenantSlug ?? "—"}
           </p>
         </div>
-        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden p-2 overscroll-contain">
+        <nav className="scrollbar-none flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden p-2 overscroll-contain">
           {dashboardSidebarLayout.map((entry, idx) => {
             if (entry.kind === "link") {
               const { href, label } = entry.item;
@@ -196,7 +205,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div key="orders" className="flex flex-col gap-0.5">
                   <button
                     type="button"
-                    onClick={() => setOrdersOpen((o) => !o)}
+                    onClick={() => toggleSection("orders")}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
                       ordersNavModuleOpen(pathname)
@@ -255,7 +264,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div key="stock" className="flex flex-col gap-0.5">
                   <button
                     type="button"
-                    onClick={() => setStockOpen((o) => !o)}
+                    onClick={() => toggleSection("stock")}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
                       stockNavChildActive(pathname)
@@ -303,7 +312,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div key="users" className="flex flex-col gap-0.5">
                   <button
                     type="button"
-                    onClick={() => setUsersOpen((o) => !o)}
+                    onClick={() => toggleSection("users")}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
                       usersNavChildActive(pathname)
@@ -378,7 +387,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Выход
             </Button>
           </div>
-          <nav className="flex gap-1.5 overflow-x-auto pb-0.5">
+          <nav className="scrollbar-none flex gap-1.5 overflow-x-auto pb-0.5">
             {mobileItems.map((item) => {
               const active = orderNavItemActive(pathname, searchParams, item.href);
               return (
@@ -407,10 +416,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <div
             className={cn(
-              "min-h-0 flex-1",
+              "min-h-0 flex-1 flex flex-col",
               isSettingsRoute
-                ? "flex flex-col overflow-hidden"
-                : "overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-7"
+                ? "overflow-hidden"
+                : "overflow-y-auto overflow-x-hidden overscroll-contain px-2 py-3 sm:px-3 sm:py-5 md:px-4 md:py-6"
             )}
           >
             {children}

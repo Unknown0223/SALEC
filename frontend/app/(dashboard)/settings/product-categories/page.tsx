@@ -321,7 +321,7 @@ export default function ProductCategoriesSettingsPage() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Категория продукта"
         description="Uch daraja: kategoriya → guruh → pastki kategoriya. Mahsulot formasi xuddi shu ro‘yxatdan foydalanadi."
@@ -398,7 +398,7 @@ export default function ProductCategoriesSettingsPage() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Названия</th>
                   {mainTab === "group" ? <th className="px-3 py-2 font-medium">Категория</th> : null}

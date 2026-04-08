@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { PaymentAllocateDialog } from "@/components/payments/payment-allocate-dialog";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { useState } from "react";
 
 type PaymentRow = {
@@ -84,8 +85,9 @@ export default function PaymentsPage() {
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[720px] border-collapse text-sm">
-            <thead className="border-b bg-muted/60 text-left text-xs text-muted-foreground">
+            <thead className="app-table-thead text-left text-xs">
               <tr>
+                <th className="px-3 py-2">№</th>
                 <th className="px-3 py-2">Sana</th>
                 <th className="px-3 py-2">Mijoz</th>
                 <th className="px-3 py-2">Zakaz</th>
@@ -99,6 +101,14 @@ export default function PaymentsPage() {
             <tbody>
               {(listQ.data?.data ?? []).map((r) => (
                 <tr key={r.id} className="border-b border-border last:border-0">
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Link
+                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                      href={`/payments/${r.id}`}
+                    >
+                      {r.id}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
                     {new Date(r.created_at).toLocaleString()}
                   </td>
@@ -117,7 +127,9 @@ export default function PaymentsPage() {
                     )}
                   </td>
                   <td className="px-3 py-2">{r.payment_type}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">{r.amount}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">
+                    {formatNumberGrouped(r.amount, { maxFractionDigits: 2 })}
+                  </td>
                   <td className="px-3 py-2 max-w-[200px] truncate text-xs text-muted-foreground">
                     {r.note ?? "—"}
                   </td>
@@ -135,7 +147,11 @@ export default function PaymentsPage() {
                       type="button"
                       className="text-xs text-destructive underline underline-offset-2 hover:text-destructive/80"
                       onClick={() => {
-                        if (confirm(`To‘lov #${r.id} (${r.amount} so‘m) o‘chirish? Balans qaytariladi.`)) {
+                        if (
+                          confirm(
+                            `To‘lov #${r.id} (${formatNumberGrouped(r.amount, { maxFractionDigits: 2 })} so‘m) o‘chirish? Balans qaytariladi.`
+                          )
+                        ) {
                           deleteMut.mutate(r.id);
                         }
                       }}

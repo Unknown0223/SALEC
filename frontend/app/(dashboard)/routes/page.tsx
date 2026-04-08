@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { agentDisplayName, type AgentListItem } from "@/lib/agent-display";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -27,7 +28,7 @@ export default function RoutesPage() {
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
-      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
+      const { data } = await api.get<{ data: AgentListItem[] }>(
         `/api/${tenantSlug}/agents?${params}`
       );
       return data.data;
@@ -98,7 +99,7 @@ export default function RoutesPage() {
               <option value="">—</option>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name}
+                  {agentDisplayName(a)}
                 </option>
               ))}
             </select>

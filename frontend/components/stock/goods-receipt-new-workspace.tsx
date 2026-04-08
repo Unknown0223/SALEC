@@ -371,7 +371,7 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
   const productsLoading = productQueries.some((q) => q.isLoading);
 
   return (
-    <PageShell className="max-w-[1600px]">
+    <PageShell>
       <PageHeader
         title="Добавить поступление"
         description="Тип цены и склад; дата прихода ставится автоматически при сохранении. В колонке «Блок» — число упаковок; «Кол-во» считается из карточки товара (шт/блок), если задано."
@@ -521,7 +521,7 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
 
           <div className={tableShell}>
             <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-muted/50 border-b">
+              <thead className="app-table-thead">
                 <tr>
                   <th
                     scope="col"

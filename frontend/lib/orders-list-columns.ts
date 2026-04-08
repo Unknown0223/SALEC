@@ -1,5 +1,6 @@
 import type { OrderListRow } from "@/components/orders/order-detail-view";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 
 /** Zakazlar ro‘yxati — `useUserTablePrefs` / TableColumnSettingsDialog */
 export const ORDERS_LIST_TABLE_ID = "orders.list.v1";
@@ -96,17 +97,17 @@ export function orderListExportCell(o: OrderListRow, colId: string): string {
     case "client_id":
       return String(o.client_id);
     case "qty":
-      return String(o.qty);
+      return formatNumberGrouped(o.qty, { maxFractionDigits: 3 });
     case "total_sum":
-      return String(o.total_sum);
+      return formatNumberGrouped(o.total_sum, { maxFractionDigits: 2 });
     case "discount_sum":
-      return String(o.discount_sum ?? "0");
+      return formatNumberGrouped(o.discount_sum ?? "0", { maxFractionDigits: 2 });
     case "bonus_qty":
-      return String(o.bonus_qty ?? "0");
+      return formatNumberGrouped(o.bonus_qty ?? "0", { maxFractionDigits: 3 });
     case "balance":
-      return o.balance ?? "";
+      return o.balance == null ? "" : formatNumberGrouped(o.balance, { maxFractionDigits: 2 });
     case "debt":
-      return o.debt ?? "";
+      return o.debt == null ? "" : formatNumberGrouped(o.debt, { maxFractionDigits: 2 });
     case "price_type":
       return o.price_type ?? "";
     case "warehouse_name":

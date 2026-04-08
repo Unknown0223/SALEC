@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { ProductRow } from "@/lib/product-types";
 import { OrderPrintView } from "./order-print-view";
 import axios, { type AxiosError } from "axios";
@@ -616,14 +617,18 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                     To‘lov (mahsulot)
                   </th>
-                  <td className="px-4 py-3 tabular-nums font-medium">{data.total_sum}</td>
+                  <td className="px-4 py-3 tabular-nums font-medium">
+                    {formatNumberGrouped(data.total_sum, { maxFractionDigits: 2 })}
+                  </td>
                 </tr>
                 <tr className="border-b border-border">
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
                     Skidka
                   </th>
                   <td className="px-4 py-3 tabular-nums font-medium text-amber-800 dark:text-amber-200">
-                    {Number(data.discount_sum ?? 0) > 0 ? data.discount_sum : "—"}
+                    {Number(data.discount_sum ?? 0) > 0
+                      ? formatNumberGrouped(data.discount_sum, { maxFractionDigits: 0 })
+                      : "—"}
                   </td>
                 </tr>
                 <tr className="border-b border-border">
@@ -631,7 +636,9 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                     Bonus (mahsulot, dona)
                   </th>
                   <td className="px-4 py-3 tabular-nums font-medium text-emerald-700 dark:text-emerald-400">
-                    {Number(data.bonus_qty ?? 0) > 0 ? data.bonus_qty : "—"}
+                    {Number(data.bonus_qty ?? 0) > 0
+                      ? formatNumberGrouped(data.bonus_qty, { maxFractionDigits: 3 })
+                      : "—"}
                   </td>
                 </tr>
                 <tr>
@@ -639,7 +646,9 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                     Bonus qiymati (narx)
                   </th>
                   <td className="px-4 py-3 tabular-nums text-sm text-muted-foreground">
-                    {Number(data.bonus_sum) > 0 ? data.bonus_sum : "—"}
+                    {Number(data.bonus_sum) > 0
+                      ? formatNumberGrouped(data.bonus_sum, { maxFractionDigits: 2 })
+                      : "—"}
                   </td>
                 </tr>
                 <tr className="border-t border-border">
@@ -699,7 +708,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
               ) : (
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[480px] border-collapse text-xs">
-                    <thead className="border-b bg-muted/50 text-left text-muted-foreground">
+                    <thead className="app-table-thead text-left">
                       <tr>
                         <th className="px-3 py-2">Sana</th>
                         <th className="px-3 py-2">Tur</th>
@@ -713,7 +722,9 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                             {new Date(p.created_at).toLocaleString()}
                           </td>
                           <td className="px-3 py-2">{p.payment_type}</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-medium">{p.amount}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium">
+                            {formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -730,7 +741,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
               ) : (
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[480px] border-collapse text-xs">
-                    <thead className="border-b bg-muted/50 text-left text-muted-foreground">
+                    <thead className="app-table-thead text-left">
                       <tr>
                         <th className="px-3 py-2">Raqam</th>
                         <th className="px-3 py-2">Sana</th>
@@ -744,7 +755,11 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                           <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
                             {new Date(r.created_at).toLocaleString()}
                           </td>
-                          <td className="px-3 py-2 text-right tabular-nums">{r.refund_amount ?? "—"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.refund_amount == null
+                              ? "—"
+                              : formatNumberGrouped(r.refund_amount, { maxFractionDigits: 2 })}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -949,7 +964,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
               <h2 className="text-base font-semibold tracking-tight">Holat tarixi</h2>
               <div className="overflow-x-auto rounded-lg border max-h-48 overflow-y-auto shadow-sm">
                 <table className="w-full min-w-[560px] border-collapse text-xs">
-                  <thead>
+                  <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground sticky top-0">
                       <th className="px-3 py-2 font-medium">Oldin</th>
                       <th className="px-3 py-2 font-medium">Keyin</th>
@@ -987,7 +1002,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
               </p>
               <div className="overflow-x-auto rounded-lg border max-h-48 overflow-y-auto shadow-sm">
                 <table className="w-full min-w-[640px] border-collapse text-xs">
-                  <thead>
+                  <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground sticky top-0">
                       <th className="px-3 py-2 font-medium">Vaqt</th>
                       <th className="px-3 py-2 font-medium">Foydalanuvchi</th>
@@ -1050,7 +1065,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                 ) : null}
                 <div className="overflow-x-auto rounded-md border bg-background">
                   <table className="w-full min-w-[560px] border-collapse text-xs">
-                    <thead>
+                    <thead className="app-table-thead">
                       <tr className="border-b bg-muted/50 text-left text-muted-foreground">
                         <th className="px-3 py-2 font-medium">Mahsulot</th>
                         <th className="px-3 py-2 font-medium w-28">Miqdor</th>
@@ -1144,7 +1159,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
 
             <div className="overflow-x-auto rounded-lg border shadow-sm">
               <table className="w-full min-w-[720px] border-collapse text-sm">
-                <thead>
+                <thead className="app-table-thead">
                   <tr className="border-b bg-muted/50 text-left text-xs font-medium text-muted-foreground">
                     <th className="px-4 py-3">SKU</th>
                     <th className="px-4 py-3">Mahsulot</th>
@@ -1175,9 +1190,15 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                           <span className="text-muted-foreground">To‘lov</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{i.qty}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{i.price}</td>
-                      <td className="px-4 py-3 text-right tabular-nums font-medium">{i.total}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatNumberGrouped(i.qty, { maxFractionDigits: 3 })}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatNumberGrouped(i.price, { maxFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums font-medium">
+                        {formatNumberGrouped(i.total, { maxFractionDigits: 2 })}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

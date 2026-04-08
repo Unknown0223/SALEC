@@ -127,6 +127,7 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 | Metod | Yo‘l |
 |-------|------|
 | GET, POST | `/payments` |
+| GET | `/payments/:id` — to‘lov kartochkasi + taqsimotlar (`allocated_total`, `unallocated`) |
 | GET | `/payments/:id/allocations` — taqsimot qatorlari |
 | POST | `/payments/:id/allocate` — FIFO bo‘yicha zakazlarga taqsimlash |
 | DELETE | `/payments/:id` |
@@ -209,7 +210,10 @@ Profil `references` ichida valyuta, to‘lov usuli, narx turlari va boshqa sprav
 | Metod | Yo‘l |
 |-------|------|
 | GET, POST | `/agent-visits` |
+| GET | `/agent-visits/export` — tashriflar **Excel** `.xlsx` (max 10000; `agent_id` / `client_id`; agent roli faqat o‘zi) |
 | POST | `/agent-visits/:id/checkout` |
+| GET | `/agent-locations` — agent treki (`agent_id`, `from`/`to` ISO, `limit`; agent roli faqat o‘zi) |
+| POST | `/agent-locations` — GPS ping (`latitude`, `longitude`, ixtiyoriy `accuracy_meters`; agent o‘zi; admin/operator/supervisor: `agent_id` majburiy) |
 | GET, POST, PATCH | `/tenant-tasks` |
 | GET, PUT | `/agent-route-days`, `/agent-route-days/one` |
 

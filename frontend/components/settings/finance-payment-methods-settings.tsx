@@ -193,7 +193,7 @@ export function FinancePaymentMethodsSettings() {
   }
 
   return (
-    <PageShell className="max-w-6xl">
+    <PageShell>
       <PageHeader
         title="Способ оплаты"
         description="Har bir usul valyutaga bog‘langan; saqlanganda kompaniya «to‘lov turlari» ro‘yxati yangilanadi."
@@ -236,7 +236,7 @@ export function FinancePaymentMethodsSettings() {
 
           <div className="overflow-hidden rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
+              <thead className="app-table-thead text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Название</th>
                   <th className="px-3 py-2 font-medium">Валюта</th>

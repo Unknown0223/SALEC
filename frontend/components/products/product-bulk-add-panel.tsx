@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { cn } from "@/lib/utils";
 import {
   PRODUCT_UNIT_CUSTOM,
@@ -48,7 +49,7 @@ function formatVolumeM3(r: RowState): string {
   const v = L * W * T;
   if (v === 0) return "0";
   if (v < 0.0001) return v.toExponential(2);
-  return new Intl.NumberFormat("uz-UZ", { maximumFractionDigits: 4 }).format(v);
+  return formatNumberGrouped(v, { maxFractionDigits: 4 });
 }
 
 function emptyRow(): RowState {
@@ -240,7 +241,7 @@ export function ProductBulkAddPanel({
       <CardContent className={showCardHeader ? "space-y-2" : "space-y-2 pt-4"}>
         <div className="overflow-x-auto rounded border">
           <table className="w-full min-w-[1120px] text-xs">
-            <thead className="bg-muted/50 text-left">
+            <thead className="app-table-thead text-left">
               <tr>
                 <th className="w-[9.5rem] min-w-[9.5rem] max-w-[9.5rem] px-1 py-2 align-top">
                   <div className="flex flex-col gap-2">

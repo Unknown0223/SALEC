@@ -280,7 +280,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
           aria-labelledby={presetTab === "active" ? "tab-preset-active" : "tab-preset-inactive"}
         >
           <table className="w-full min-w-[880px] table-fixed text-sm">
-            <thead className="border-b border-border/60 bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+            <thead className="app-table-thead text-left text-xs">
               <tr>
                 <th className="w-9 px-1.5 py-2.5">№</th>
                 <th className="w-[200px] max-w-[200px] px-2 py-2.5">Lavozim nomi</th>

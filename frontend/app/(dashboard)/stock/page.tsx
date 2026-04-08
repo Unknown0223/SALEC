@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api, apiBaseURL } from "@/lib/api";
@@ -60,9 +61,11 @@ function renderStockCell(row: StockRow, colId: string): ReactNode {
     case "product_name":
       return row.product_name;
     case "qty":
-      return <span className="tabular-nums">{row.qty}</span>;
+      return <span className="tabular-nums">{formatNumberGrouped(row.qty, { maxFractionDigits: 3 })}</span>;
     case "reserved_qty":
-      return <span className="tabular-nums">{row.reserved_qty}</span>;
+      return (
+        <span className="tabular-nums">{formatNumberGrouped(row.reserved_qty, { maxFractionDigits: 3 })}</span>
+      );
     default:
       return "—";
   }
@@ -351,7 +354,7 @@ function StockPageContent() {
                   </tbody>
                 ) : (
                   <>
-                    <thead className="bg-muted/50 text-xs font-medium text-muted-foreground">
+                    <thead className="app-table-thead text-xs">
                       <tr>
                         {visibleStockCols.map((colId) => (
                           <th

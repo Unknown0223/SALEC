@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
@@ -151,27 +152,30 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
     kind === "agent" ? "Добавить агент" : kind === "supervisor" ? "Добавить супервайзер" : "Добавить";
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-0">
+      <div className="orders-hub-section orders-hub-section--toolbar table-toolbar flex flex-wrap items-end gap-2 px-3 py-2">
         <Input
           placeholder="Qidiruv..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
+          className="h-9 max-w-xs bg-background text-foreground"
         />
-        <Link href={newHref} className={cn(buttonVariants({ size: "sm" }))}>
+        <Link href={newHref} className={cn(buttonVariants({ size: "sm" }), "inline-flex h-9 items-center")}>
           {addLabel}
         </Link>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="orders-hub-section orders-hub-section--table mt-4">
+        <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
         <table
           className={cn("w-full text-xs", kind === "supervisor" ? "min-w-[32rem]" : "min-w-[1200px]")}
         >
-          <thead className="bg-muted/50">
+          <thead className="app-table-thead">
             <tr>
               {columns.map((c) => (
-                <th key={c} className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
+                <th key={c} className="whitespace-nowrap px-2 py-2 text-left">
                   {c}
                 </th>
               ))}
@@ -251,6 +255,9 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
             ))}
           </tbody>
         </table>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

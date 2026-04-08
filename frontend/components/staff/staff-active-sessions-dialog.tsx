@@ -154,7 +154,7 @@ export function StaffActiveSessionsDialog({
               ) : null}
               {!sessionsQ.isLoading && !sessionsQ.isError ? (
               <table className="w-full text-xs">
-                <thead className="bg-muted/50">
+                <thead className="app-table-thead">
                   <tr>
                     <th className="w-8 px-2 py-2" />
                     <th className="px-2 py-2 text-left">Устройство</th>

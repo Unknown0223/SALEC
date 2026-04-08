@@ -17,11 +17,12 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
 
 const PIE_FILL = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b", "#06b6d4", "#84cc16"];
 
 function moneyTooltip(v: number) {
-  return new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v) + " сум";
+  return formatNumberGrouped(v, { maxFractionDigits: 0 }) + " сум";
 }
 
 type DayActivityProps = {
@@ -46,7 +47,7 @@ export function DashboardDayActivityChart({ ordersToday, ordersActive, paymentsT
         <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={36} className="text-muted-foreground" />
         <Tooltip
           contentStyle={{ borderRadius: 8, fontSize: 12 }}
-          formatter={(v: number) => [v, "Кол-во"]}
+          formatter={(v: number) => [formatGroupedInteger(v), "Кол-во"]}
         />
         <Bar dataKey="soni" fill="var(--primary)" radius={[4, 4, 0, 0]} />
       </BarChart>
@@ -65,7 +66,10 @@ export function ReportsTrendCharts({ rows }: { rows: TrendRow[] }) {
           <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
           <XAxis dataKey="dateShort" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
           <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={36} />
-          <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v: number) => [v, "Заказы"]} />
+          <Tooltip
+            contentStyle={{ borderRadius: 8, fontSize: 12 }}
+            formatter={(v: number) => [formatGroupedInteger(v), "Заказы"]}
+          />
           <Line type="monotone" dataKey="orders" stroke="var(--primary)" strokeWidth={2} dot={false} name="Заказы" />
         </LineChart>
       </ResponsiveContainer>
@@ -105,7 +109,10 @@ export function ReportsStatusPie({ slices }: { slices: StatusSlice[] }) {
             <Cell key={slices[i].status} fill={PIE_FILL[i % PIE_FILL.length]} />
           ))}
         </Pie>
-        <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v: number) => [v, "Заказы"]} />
+        <Tooltip
+          contentStyle={{ borderRadius: 8, fontSize: 12 }}
+          formatter={(v: number) => [formatGroupedInteger(v), "Заказы"]}
+        />
         <Legend wrapperStyle={{ fontSize: 11 }} />
       </PieChart>
     </ResponsiveContainer>
@@ -139,7 +146,10 @@ export function ReportsChannelOrdersBar({ items }: { items: ChannelBar[] }) {
         <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" horizontal={false} />
         <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
         <YAxis type="category" dataKey="label" width={100} tick={{ fontSize: 10 }} />
-        <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v: number) => [v, "Заказы"]} />
+        <Tooltip
+          contentStyle={{ borderRadius: 8, fontSize: 12 }}
+          formatter={(v: number) => [formatGroupedInteger(v), "Заказы"]}
+        />
         <Bar dataKey="orders" fill="#0d9488" radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>

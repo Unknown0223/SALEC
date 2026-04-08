@@ -1,8 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { filterPanelSelectClassName } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { RefSelectOption } from "@/lib/ref-select-options";
 import { Filter, ListOrdered, Search } from "lucide-react";
 
@@ -17,9 +19,7 @@ export type ClientsToolbarFilterVisibility = {
   expeditor: boolean;
 };
 
-type Props = {
-  search: string;
-  onSearchChange: (v: string) => void;
+type FiltersProps = {
   activeFilter: "all" | "true" | "false";
   onActiveFilterChange: (v: "all" | "true" | "false") => void;
   categoryFilter: string;
@@ -47,18 +47,22 @@ type Props = {
   salesChannelSelectOptions: RefSelectOption[];
   agentOptions: Array<{ id: number; name: string; login: string }>;
   expeditorOptions: Array<{ id: number; name: string; login: string }>;
-  /** Qaysi qo‘shimcha filtrlarni ko‘rsatish (spravochnikda qiymat bo‘lsa) */
   filterVisibility: ClientsToolbarFilterVisibility;
-  pageLimit: number;
-  onPageLimitChange: (v: number) => void;
   filtersVisible: boolean;
   onFiltersVisibleChange: (v: boolean) => void;
-  onOpenColumnSettings: () => void;
 };
 
-export function ClientsTableToolbar({
-  search,
-  onSearchChange,
+export type ClientsTableListToolbarStripProps = {
+  search: string;
+  onSearchChange: (v: string) => void;
+  pageLimit: number;
+  onPageLimitChange: (v: number) => void;
+  onOpenColumnSettings: () => void;
+  /** Jadval kartochkasi ichida — pastki border bilan ajratiladi */
+  totalRecords?: number;
+};
+
+export function ClientsTableFilters({
   activeFilter,
   onActiveFilterChange,
   categoryFilter,
@@ -87,30 +91,16 @@ export function ClientsTableToolbar({
   agentOptions,
   expeditorOptions,
   filterVisibility,
-  pageLimit,
-  onPageLimitChange,
   filtersVisible,
-  onFiltersVisibleChange,
-  onOpenColumnSettings
-}: Props) {
+  onFiltersVisibleChange
+}: FiltersProps) {
   const fv = filterVisibility;
 
   return (
-    <div className="flex flex-col gap-0">
-      <div className="rounded-lg border-2 border-border bg-muted/40 px-3 py-3 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
-          <div className="relative flex min-w-[200px] flex-1 max-w-md">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Поиск: наименование, телефон, ИНН, адрес…"
-              className="h-10 border-2 pl-9 font-medium"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 font-semibold">
+    <div className="orders-hub-section orders-hub-section--filters orders-hub-section--stack-tight">
+      <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
+        <CardContent className="space-y-4 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center gap-2 font-semibold text-foreground">
             <Button
               type="button"
               variant={filtersVisible ? "secondary" : "outline"}
@@ -123,10 +113,10 @@ export function ClientsTableToolbar({
               Фильтры
             </Button>
 
-            <label className="flex items-center gap-1.5 text-sm text-foreground">
+            <label className="flex items-center gap-1.5 text-sm font-medium text-foreground">
               <span className="whitespace-nowrap">Статус</span>
               <select
-                className="h-9 min-w-[6.5rem] rounded-md border-2 border-input bg-background px-2 text-sm font-medium shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-9 min-w-[6.5rem] rounded-md border border-input bg-background px-2 text-sm font-medium text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={activeFilter}
                 onChange={(e) => onActiveFilterChange(e.target.value as "all" | "true" | "false")}
               >
@@ -135,191 +125,226 @@ export function ClientsTableToolbar({
                 <option value="false">Неактивен</option>
               </select>
             </label>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1 font-semibold"
-              onClick={onOpenColumnSettings}
-              title="Колонки (порядок и видимость)"
-            >
-              <ListOrdered className="h-4 w-4" />
-              Колонки
-            </Button>
-
-            <label className="flex items-center gap-1 text-sm text-foreground">
-              <span className="whitespace-nowrap">На стр.</span>
-              <select
-                className="h-9 min-w-[4.5rem] rounded-md border-2 border-input bg-background px-2 text-sm font-medium shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={pageLimit}
-                onChange={(e) => onPageLimitChange(Number(e.target.value))}
-              >
-                {[10, 20, 30, 50, 100].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
-        </div>
+
+          {filtersVisible ? (
+            <div className="grid grid-cols-2 gap-3 border-t border-border/60 pt-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {fv.category ? (
+                <label className="orders-filter-field-label">
+                  Категория
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={categoryFilter}
+                    onChange={(e) => onCategoryFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {categorySelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.region ? (
+                <label className="orders-filter-field-label">
+                  Территория (область)
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={regionFilter}
+                    onChange={(e) => onRegionFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {regionSelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.city ? (
+                <label className="orders-filter-field-label">
+                  Город (код в БД)
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={cityFilter}
+                    onChange={(e) => onCityFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {citySelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.clientType ? (
+                <label className="orders-filter-field-label">
+                  Тип клиента
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={clientTypeFilter}
+                    onChange={(e) => onClientTypeFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {clientTypeSelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.clientFormat ? (
+                <label className="orders-filter-field-label">
+                  Формат
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={clientFormatFilter}
+                    onChange={(e) => onClientFormatFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {clientFormatSelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.salesChannel ? (
+                <label className="orders-filter-field-label">
+                  Канал продаж
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={salesChannelFilter}
+                    onChange={(e) => onSalesChannelFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {salesChannelSelectOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.agent ? (
+                <label className="orders-filter-field-label">
+                  Агент (любой слот)
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={agentFilter}
+                    onChange={(e) => onAgentFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {agentOptions.map((u) => (
+                      <option key={u.id} value={String(u.id)}>
+                        {u.name} ({u.login})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {fv.expeditor ? (
+                <label className="orders-filter-field-label">
+                  Экспедитор
+                  <select
+                    className={filterPanelSelectClassName}
+                    value={expeditorFilter}
+                    onChange={(e) => onExpeditorFilterChange(e.target.value)}
+                  >
+                    <option value="">Все</option>
+                    {expeditorOptions.map((u) => (
+                      <option key={`ex-${u.id}`} value={String(u.id)}>
+                        {u.name} ({u.login})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <p className="col-span-full text-[11px] leading-snug text-foreground/72">
+                ИНН и телефон — через поле поиска. Сортировка — по заголовкам таблицы (↑↓). Пустые
+                справочники скрыты.
+              </p>
+              <div className="col-span-full flex flex-wrap items-center justify-end gap-2 border-t border-border/60 pt-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-teal-700 text-white hover:bg-teal-800"
+                  onClick={() => {
+                    onApplyToolbar?.();
+                  }}
+                >
+                  Применить и свернуть
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+export function ClientsTableListToolbarStrip({
+  search,
+  onSearchChange,
+  pageLimit,
+  onPageLimitChange,
+  onOpenColumnSettings,
+  totalRecords
+}: ClientsTableListToolbarStripProps) {
+  return (
+    <div
+      className="table-toolbar orders-hub-section--toolbar flex flex-wrap items-end gap-2 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4"
+      role="toolbar"
+      aria-label="Таблица: поиск и колонки"
+    >
+      <label className="grid shrink-0 gap-1 text-xs font-medium text-foreground/85">
+        <span className="whitespace-nowrap leading-none">На стр.</span>
+        <select
+          className="h-9 min-w-[4.5rem] rounded-md border border-input bg-background px-2 text-sm font-medium text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={pageLimit}
+          onChange={(e) => onPageLimitChange(Number(e.target.value))}
+        >
+          {[10, 20, 30, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="relative flex min-w-[200px] flex-1 max-w-md">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder="Поиск: наименование, телефон, ИНН, адрес…"
+          className="h-9 border pl-9 font-medium text-foreground"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+        />
       </div>
-
-      {filtersVisible ? (
-        <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-dashed border-border/80 bg-muted/25 p-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {fv.category ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Категория
-              <select
-                className={filterPanelSelectClassName}
-                value={categoryFilter}
-                onChange={(e) => onCategoryFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {categorySelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.region ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Территория (область)
-              <select
-                className={filterPanelSelectClassName}
-                value={regionFilter}
-                onChange={(e) => onRegionFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {regionSelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.city ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Город (код в БД)
-              <select
-                className={filterPanelSelectClassName}
-                value={cityFilter}
-                onChange={(e) => onCityFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {citySelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.clientType ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Тип клиента
-              <select
-                className={filterPanelSelectClassName}
-                value={clientTypeFilter}
-                onChange={(e) => onClientTypeFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {clientTypeSelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.clientFormat ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Формат
-              <select
-                className={filterPanelSelectClassName}
-                value={clientFormatFilter}
-                onChange={(e) => onClientFormatFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {clientFormatSelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.salesChannel ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Канал продаж
-              <select
-                className={filterPanelSelectClassName}
-                value={salesChannelFilter}
-                onChange={(e) => onSalesChannelFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {salesChannelSelectOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.agent ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Агент (любой слот)
-              <select
-                className={filterPanelSelectClassName}
-                value={agentFilter}
-                onChange={(e) => onAgentFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {agentOptions.map((u) => (
-                  <option key={u.id} value={String(u.id)}>
-                    {u.name} ({u.login})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {fv.expeditor ? (
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Экспедитор
-              <select
-                className={filterPanelSelectClassName}
-                value={expeditorFilter}
-                onChange={(e) => onExpeditorFilterChange(e.target.value)}
-              >
-                <option value="">Все</option>
-                {expeditorOptions.map((u) => (
-                  <option key={`ex-${u.id}`} value={String(u.id)}>
-                    {u.name} ({u.login})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <p className="col-span-full text-[11px] leading-snug text-muted-foreground">
-            ИНН и телефон — через поле поиска. Сортировка — по заголовкам таблицы (↑↓). Пустые справочники
-            скрыты.
-          </p>
-          <div className="col-span-full flex flex-wrap items-center justify-end gap-2 border-t border-border/60 pt-3">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                onApplyToolbar?.();
-              }}
-            >
-              Применить и свернуть
-            </Button>
-          </div>
-        </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 shrink-0 gap-1 font-semibold"
+        onClick={onOpenColumnSettings}
+        title="Колонки (порядок и видимость)"
+      >
+        <ListOrdered className="h-4 w-4" />
+        Колонки
+      </Button>
+      {totalRecords != null ? (
+        <span className="ml-auto self-end pb-0.5 text-sm text-foreground/80">
+          Всего записей:{" "}
+          <span className="font-semibold tabular-nums text-foreground">
+            {formatNumberGrouped(totalRecords, { maxFractionDigits: 0 })}
+          </span>
+        </span>
       ) : null}
     </div>
   );
