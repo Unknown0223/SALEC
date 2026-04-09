@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -17,18 +16,21 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
     pathname === `${BR}/inactive` ||
     pathname === `${BR}/strategy`;
 
+  const isActiveList = pathname === `${BR}/active` || pathname === BR;
+  const isInactiveList = pathname === `${BR}/inactive`;
+  const isStrategy = pathname === `${BR}/strategy`;
+
   return (
     <div className="w-full">
       {showTabs ? (
-        <div className="mb-4 flex w-full min-w-0 flex-wrap items-center gap-2 border-b border-border/80 pb-3">
+        <div className="mb-4 flex w-full min-w-0 flex-wrap gap-1 border-b border-border bg-muted/25 px-2 py-0 sm:px-3">
           <Link
             href={`${BR}/active`}
             className={cn(
-              buttonVariants({
-                variant: pathname === `${BR}/active` ? "default" : "ghost",
-                size: "sm"
-              }),
-              pathname === `${BR}/active` ? "" : "text-muted-foreground"
+              "-mb-px inline-flex border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              isActiveList
+                ? "border-teal-600 text-teal-800 dark:border-teal-500 dark:text-teal-400"
+                : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
             Faol
@@ -36,11 +38,10 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
           <Link
             href={`${BR}/inactive`}
             className={cn(
-              buttonVariants({
-                variant: pathname === `${BR}/inactive` ? "default" : "ghost",
-                size: "sm"
-              }),
-              pathname === `${BR}/inactive` ? "" : "text-muted-foreground"
+              "-mb-px inline-flex border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              isInactiveList
+                ? "border-teal-600 text-teal-800 dark:border-teal-500 dark:text-teal-400"
+                : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
             Nofaol
@@ -48,11 +49,10 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
           <Link
             href={`${BR}/strategy`}
             className={cn(
-              buttonVariants({
-                variant: pathname === `${BR}/strategy` ? "default" : "ghost",
-                size: "sm"
-              }),
-              pathname === `${BR}/strategy` ? "" : "text-muted-foreground"
+              "-mb-px inline-flex border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              isStrategy
+                ? "border-teal-600 text-teal-800 dark:border-teal-500 dark:text-teal-400"
+                : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
             Strategiya

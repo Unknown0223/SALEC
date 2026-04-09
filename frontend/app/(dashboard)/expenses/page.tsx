@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,8 +10,15 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { apiFetch, useTenant } from "@/lib/api-client";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
+import {
+  activeRefSelectOptions,
+  refEntryLabelByStored,
+} from "@/lib/profile-ref-entries";
 
 interface Expense {
   id: number;
@@ -35,6 +44,23 @@ const typeMap: Record<string, string> = {
   office: "Ofis", other: "Boshqa", draft: "Qoralama", approved: "Tasdiqlangan", rejected: "Rad etilgan"
 };
 
+type SettingsProfile = {
+  references: {
+    finance_category_entries?: unknown;
+    currency_entries?: Array<{ code?: string; is_default?: boolean; active?: boolean }>;
+  };
+};
+
+function pickDefaultCurrency(refs: SettingsProfile["references"] | undefined): string {
+  const list = refs?.currency_entries;
+  if (!Array.isArray(list)) return "UZS";
+  const active = list.filter((c) => c && typeof c === "object" && (c as { active?: boolean }).active !== false);
+  const def = active.find((c) => (c as { is_default?: boolean }).is_default);
+  const row = (def ?? active[0]) as { code?: string } | undefined;
+  const s = typeof row?.code === "string" ? row.code.trim().toUpperCase() : "";
+  return s || "UZS";
+}
+
 export default function ExpensesPage() {
   const tenant = useTenant();
   const [loading, setLoading] = useState(true);
@@ -43,6 +69,28 @@ export default function ExpensesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [newAmount, setNewAmount] = useState("");
+  const [newType, setNewType] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [createBusy, setCreateBusy] = useState(false);
+  const [categorySelectKey, setCategorySelectKey] = useState(0);
+
+  const profileQ = useQuery({
+    queryKey: ["settings", "profile", tenant, "expenses-page"],
+    enabled: Boolean(tenant),
+    staleTime: STALE.profile,
+    queryFn: async () => apiFetch<SettingsProfile>(`/api/${tenant}/settings/profile`)
+  });
+
+  const financeCategoryOptions = useMemo(
+    () => activeRefSelectOptions(profileQ.data?.references?.finance_category_entries),
+    [profileQ.data]
+  );
+
+  const defaultCurrency = useMemo(
+    () => pickDefaultCurrency(profileQ.data?.references),
+    [profileQ.data]
+  );
 
   const fetchAll = useCallback(async () => {
     try {
@@ -69,9 +117,106 @@ export default function ExpensesPage() {
     fetchAll();
   };
 
+  const expenseTypeLabel = useCallback(
+    (stored: string) =>
+      refEntryLabelByStored(profileQ.data?.references?.finance_category_entries, stored) ??
+      typeMap[stored] ??
+      stored,
+    [profileQ.data]
+  );
+
+  const handleCreateExpense = async () => {
+    const raw = newAmount.replace(/\s/g, "").replace(",", ".");
+    const amount = Number(raw);
+    if (!tenant || !Number.isFinite(amount) || amount <= 0) return;
+    const t = newType.trim();
+    if (!t) return;
+    try {
+      setCreateBusy(true);
+      await apiFetch(`/api/${tenant}/expenses`, {
+        method: "POST",
+        body: JSON.stringify({
+          expense_type: t,
+          amount,
+          currency: defaultCurrency,
+          note: newNote.trim() || null
+        })
+      });
+      setNewAmount("");
+      setNewType("");
+      setNewNote("");
+      setCategorySelectKey((k) => k + 1);
+      await fetchAll();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Chiqimlar (Expenses)</h1>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Yangi chiqim</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Tur —{" "}
+            <Link href="/settings/reasons/finance-categories" className="text-primary underline-offset-4 hover:underline">
+              «Категория доходов/расходов»
+            </Link>{" "}
+            katalogidan; bo‘sh bo‘lsa, quyida qo‘lda yozish mumkin.
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label>Tur / kategoriya</Label>
+            {financeCategoryOptions.length > 0 ? (
+              <Select
+                key={categorySelectKey}
+                value={newType || undefined}
+                onValueChange={(v) => setNewType(v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Tanlang" />
+                </SelectTrigger>
+                <SelectContent>
+                  {financeCategoryOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                placeholder="masalan: transport, marketing"
+                value={newType}
+                onChange={(e) => setNewType(e.target.value)}
+              />
+            )}
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Summa ({defaultCurrency})</Label>
+            <Input
+              inputMode="decimal"
+              placeholder="0"
+              value={newAmount}
+              onChange={(e) => setNewAmount(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5 sm:col-span-2 lg:col-span-1">
+            <Label>Izoh (ixtiyoriy)</Label>
+            <Input value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="—" />
+          </div>
+          <div className="flex items-end">
+            <Button type="button" disabled={createBusy || !tenant} onClick={() => void handleCreateExpense()}>
+              {createBusy ? "Jo‘natilmoqda…" : "Qoralama sifatida yaratish"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* PnL Summary */}
       {pnl && (
@@ -124,7 +269,7 @@ export default function ExpensesPage() {
                   <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Ma’lumot yo‘q</TableCell></TableRow>
                 ) : expenses.map((e) => (
                   <TableRow key={e.id}>
-                    <TableCell>{typeMap[e.expense_type] || e.expense_type}</TableCell>
+                    <TableCell>{expenseTypeLabel(e.expense_type)}</TableCell>
                     <TableCell className="font-medium tabular-nums">{formatNumberGrouped(e.amount, { maxFractionDigits: 2 })} {e.currency}</TableCell>
                     <TableCell>{e.agent_name || "—"}</TableCell>
                     <TableCell>

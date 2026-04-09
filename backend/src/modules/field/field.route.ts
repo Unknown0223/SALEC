@@ -252,6 +252,7 @@ export async function registerFieldRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().min(1).max(500),
+        task_type_ref: z.string().trim().max(128).nullable().optional(),
         description: z.string().max(8000).nullable().optional(),
         priority: z.string().max(16).optional(),
         due_at: z.string().max(40).nullable().optional(),
@@ -278,6 +279,7 @@ export async function registerFieldRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().min(1).max(500).optional(),
+        task_type_ref: z.string().trim().max(128).nullable().optional(),
         description: z.string().max(8000).nullable().optional(),
         status: z.string().max(32).optional(),
         priority: z.string().max(16).optional(),

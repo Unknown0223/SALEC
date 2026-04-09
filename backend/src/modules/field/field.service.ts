@@ -283,6 +283,7 @@ export async function listTenantTasks(
 function serializeTask(t: {
   id: number;
   title: string;
+  task_type_ref: string | null;
   description: string | null;
   status: string;
   priority: string;
@@ -295,6 +296,7 @@ function serializeTask(t: {
   return {
     id: t.id,
     title: t.title,
+    task_type_ref: t.task_type_ref ?? null,
     description: t.description,
     status: t.status,
     priority: t.priority,
@@ -311,6 +313,7 @@ export async function createTenantTask(
   actorUserId: number | undefined,
   body: {
     title: string;
+    task_type_ref?: string | null;
     description?: string | null;
     priority?: string;
     due_at?: string | null;
@@ -324,10 +327,15 @@ export async function createTenantTask(
     });
     if (!u) throw new Error("AssigneeNotFound");
   }
+  const ttr =
+    body.task_type_ref != null && String(body.task_type_ref).trim()
+      ? String(body.task_type_ref).trim().slice(0, 128)
+      : null;
   const row = await prisma.tenantTask.create({
     data: {
       tenant_id: tenantId,
       title: body.title.trim().slice(0, 500),
+      task_type_ref: ttr,
       description: body.description?.trim() || null,
       priority: (body.priority ?? "normal").slice(0, 16),
       due_at: body.due_at ? new Date(body.due_at) : null,
@@ -358,6 +366,7 @@ export async function patchTenantTask(
   id: number,
   body: Partial<{
     title: string;
+    task_type_ref: string | null;
     description: string | null;
     status: string;
     priority: string;
@@ -376,6 +385,12 @@ export async function patchTenantTask(
   }
   const data: Prisma.TenantTaskUpdateInput = {};
   if (body.title !== undefined) data.title = body.title.trim().slice(0, 500);
+  if (body.task_type_ref !== undefined) {
+    data.task_type_ref =
+      body.task_type_ref != null && String(body.task_type_ref).trim()
+        ? String(body.task_type_ref).trim().slice(0, 128)
+        : null;
+  }
   if (body.description !== undefined) data.description = body.description?.trim() || null;
   if (body.status !== undefined) data.status = body.status.slice(0, 32);
   if (body.priority !== undefined) data.priority = body.priority.slice(0, 16);

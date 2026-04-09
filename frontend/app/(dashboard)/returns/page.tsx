@@ -12,6 +12,10 @@ import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import {
+  activeRefSelectOptions,
+  refEntryLabelByStored,
+} from "@/lib/profile-ref-entries";
 import { isDatabaseSchemaMismatchError } from "@/lib/api-errors";
 import { DatabaseSchemaMismatchCallout } from "@/components/system/database-schema-mismatch-callout";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -29,6 +33,7 @@ type ReturnRow = {
   status: string;
   refund_amount: string | null;
   note: string | null;
+  refusal_reason_ref?: string | null;
   created_at: string;
 };
 
@@ -80,6 +85,7 @@ function ReturnsPageContent() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [note, setNote] = useState("");
+  const [refusalReasonRef, setRefusalReasonRef] = useState("");
   const [returnLines, setReturnLines] = useState<{ product_id: string; qty: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -98,6 +104,22 @@ function ReturnsPageContent() {
   });
 
   // Return warehouses
+  const profileRefsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "returns-refusal"],
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data } = await api.get<{
+        references: { refusal_reason_entries?: unknown };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data;
+    }
+  });
+  const refusalOptions = useMemo(
+    () => activeRefSelectOptions(profileRefsQ.data?.references?.refusal_reason_entries),
+    [profileRefsQ.data]
+  );
+
   const warehouseQuery = useQuery({
     queryKey: ["warehouses", tenantSlug, "returns"],
     enabled: Boolean(tenantSlug),
@@ -225,6 +247,7 @@ function ReturnsPageContent() {
       if (dateFrom) body.date_from = dateFrom;
       if (dateTo) body.date_to = dateTo;
       if (note.trim()) body.note = note.trim();
+      if (refusalReasonRef.trim()) body.refusal_reason_ref = refusalReasonRef.trim();
       await api.post(`/api/${tenantSlug}/returns/period`, body);
       router.push("/returns");
     } catch (e: unknown) {
@@ -418,11 +441,36 @@ function ReturnsPageContent() {
                 </div>
 
                 {/* Submit */}
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1 space-y-1">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {refusalOptions.length > 0 ? (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">
+                        Rad etish sababi (spravochnik) —{" "}
+                        <Link href="/settings/reasons/refusal-reasons" className="text-primary underline">
+                          sozlash
+                        </Link>
+                      </label>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+                        value={refusalReasonRef}
+                        onChange={(e) => setRefusalReasonRef(e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {refusalOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  <div className="space-y-1 sm:col-span-2">
                     <label className="text-xs text-muted-foreground">Izoh</label>
                     <Input value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} placeholder="Sabab…" />
                   </div>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1" />
                   <Button type="button" disabled={submitting || totalReturnQty === 0} onClick={handleSubmit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {submitting ? "Saqlanmoqda…" : "Yaratish"}
                   </Button>
@@ -472,6 +520,7 @@ function ReturnsPageContent() {
                         <th className="px-3 py-2">Ombor</th>
                         <th className="px-3 py-2">Mijoz</th>
                         <th className="px-3 py-2">Zakaz</th>
+                        <th className="px-3 py-2">Rad sababi</th>
                         <th className="px-3 py-2 text-right">Qaytarilgan pul</th>
                       </tr>
                     </thead>
@@ -494,6 +543,14 @@ function ReturnsPageContent() {
                                 {r.order_number}
                               </Link>
                             ) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">
+                            {r.refusal_reason_ref?.trim()
+                              ? refEntryLabelByStored(
+                                  profileRefsQ.data?.references?.refusal_reason_entries,
+                                  r.refusal_reason_ref
+                                ) ?? r.refusal_reason_ref
+                              : "—"}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums">
                             {r.refund_amount == null ? "—" : formatNumberGrouped(r.refund_amount, { maxFractionDigits: 2 })}

@@ -22,6 +22,7 @@ import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
 import { messageFromStaffCreateError } from "@/lib/staff-api-errors";
+import { SearchableMultiSelectPanel } from "@/components/ui/searchable-multi-select-panel";
 import { Eye, Link2, ListOrdered, MonitorSmartphone, Pencil, RefreshCw, UserMinus } from "lucide-react";
 
 export type ExpeditorAssignmentRules = {
@@ -1450,44 +1451,6 @@ const WEEKDAY_LABELS: Record<number, string> = {
   7: "Вс"
 };
 
-function MultiSelectBlock({
-  title,
-  options,
-  selected,
-  onToggle,
-  search,
-  onSearchChange
-}: {
-  title: string;
-  options: string[];
-  selected: Set<string>;
-  onToggle: (v: string, checked: boolean) => void;
-  search: string;
-  onSearchChange: (s: string) => void;
-}) {
-  const q = search.trim().toLowerCase();
-  const filtered = options.filter((p) => p.toLowerCase().includes(q));
-  return (
-    <div className="flex min-h-[11rem] flex-col rounded-md border">
-      <div className="border-b p-2 text-sm font-medium">{title}</div>
-      <Input placeholder="Поиск" className="m-2" value={search} onChange={(e) => onSearchChange(e.target.value)} />
-      <div className="max-h-40 min-h-0 flex-1 overflow-y-auto p-2">
-        {filtered.map((p) => (
-          <label key={p} className="flex items-center gap-2 py-1 text-sm">
-            <input
-              type="checkbox"
-              checked={selected.has(p)}
-              onChange={(e) => onToggle(p, e.target.checked)}
-            />
-            {p}
-          </label>
-        ))}
-        {filtered.length === 0 && <p className="text-xs text-muted-foreground">Нет вариантов</p>}
-      </div>
-    </div>
-  );
-}
-
 function ExpeditorAssignmentDialog({
   row,
   onClose,
@@ -1536,6 +1499,43 @@ function ExpeditorAssignmentDialog({
     setS5("");
   }, [row]);
 
+  const filteredPt = useMemo(() => {
+    const q = s1.trim().toLowerCase();
+    return priceTypes.filter((p) => !q || p.toLowerCase().includes(q));
+  }, [priceTypes, s1]);
+
+  const filteredAgents = useMemo(() => {
+    const q = s2.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter((a) =>
+      `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(q)
+    );
+  }, [agents, s2]);
+
+  const filteredWh = useMemo(() => {
+    const q = s3.trim().toLowerCase();
+    return warehouses.filter((w) => !q || w.name.toLowerCase().includes(q));
+  }, [warehouses, s3]);
+
+  const filteredTd = useMemo(() => {
+    const q = s4.trim().toLowerCase();
+    return tradeDirections.filter((p) => !q || p.toLowerCase().includes(q));
+  }, [tradeDirections, s4]);
+
+  const filteredTr = useMemo(() => {
+    const q = s5.trim().toLowerCase();
+    return territoryOptions.filter((p) => !q || p.toLowerCase().includes(q));
+  }, [territoryOptions, s5]);
+
+  const weekdayItems = useMemo(
+    () =>
+      ([1, 2, 3, 4, 5, 6, 7] as const).map((d) => ({
+        id: d,
+        title: WEEKDAY_LABELS[d]
+      })),
+    []
+  );
+
   if (!row) return null;
 
   const save = async () => {
@@ -1568,123 +1568,74 @@ function ExpeditorAssignmentDialog({
           </p>
         </DialogHeader>
         <div className="grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2">
-          <MultiSelectBlock
-            title="Тип цены"
-            options={priceTypes}
-            selected={ptSel}
-            onToggle={(p, c) => {
-              const n = new Set(ptSel);
-              if (c) n.add(p);
-              else n.delete(p);
-              setPtSel(n);
-            }}
+          <SearchableMultiSelectPanel<string>
+            label="Тип цены"
+            searchPlaceholder="Поиск"
             search={s1}
             onSearchChange={setS1}
+            items={filteredPt.map((p) => ({ id: p, title: p }))}
+            selected={ptSel}
+            onSelectedChange={setPtSel}
+            emptyMessage="Нет вариантов"
           />
-          <div className="flex min-h-[11rem] flex-col rounded-md border">
-            <div className="border-b p-2 text-sm font-medium">Агент</div>
-            <Input placeholder="Поиск" className="m-2" value={s2} onChange={(e) => setS2(e.target.value)} />
-            <div className="max-h-40 overflow-y-auto p-2">
-              {agents
-                .filter(
-                  (a) =>
-                    !s2.trim() ||
-                    `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(s2.trim().toLowerCase())
-                )
-                .map((a) => (
-                  <label key={a.id} className="flex items-center gap-2 py-1 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={agSel.has(a.id)}
-                      onChange={(e) => {
-                        const n = new Set(agSel);
-                        if (e.target.checked) n.add(a.id);
-                        else n.delete(a.id);
-                        setAgSel(n);
-                      }}
-                    />
-                    <span className="font-mono text-xs text-muted-foreground">{a.id}</span>
-                    {a.fio}
-                    {a.code ? <span className="text-muted-foreground"> ({a.code})</span> : null}
-                  </label>
-                ))}
-            </div>
-          </div>
-          <div className="flex min-h-[11rem] flex-col rounded-md border">
-            <div className="border-b p-2 text-sm font-medium">Склад</div>
-            <Input placeholder="Поиск" className="m-2" value={s3} onChange={(e) => setS3(e.target.value)} />
-            <div className="max-h-40 overflow-y-auto p-2">
-              {warehouses
-                .filter((w) => !s3.trim() || w.name.toLowerCase().includes(s3.trim().toLowerCase()))
-                .map((w) => (
-                  <label key={w.id} className="flex items-center gap-2 py-1 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={whSel.has(w.id)}
-                      onChange={(e) => {
-                        const n = new Set(whSel);
-                        if (e.target.checked) n.add(w.id);
-                        else n.delete(w.id);
-                        setWhSel(n);
-                      }}
-                    />
-                    {w.name}
-                  </label>
-                ))}
-            </div>
-          </div>
+          <SearchableMultiSelectPanel
+            label="Агент"
+            searchPlaceholder="Поиск по ФИО, коду, ID"
+            search={s2}
+            onSearchChange={setS2}
+            items={filteredAgents.map((a) => ({
+              id: a.id,
+              subtitle: a.code != null && String(a.code).trim() !== "" ? String(a.code) : `#${a.id}`,
+              title: a.fio
+            }))}
+            selected={agSel}
+            onSelectedChange={setAgSel}
+            emptyMessage="Нет агентов"
+          />
+          <SearchableMultiSelectPanel
+            label="Склад"
+            searchPlaceholder="Поиск"
+            search={s3}
+            onSearchChange={setS3}
+            items={filteredWh.map((w) => ({ id: w.id, title: w.name }))}
+            selected={whSel}
+            onSelectedChange={setWhSel}
+            emptyMessage="Нет складов"
+          />
           {tradeDirections.length > 0 ? (
-            <MultiSelectBlock
-              title="Направление торговли"
-              options={tradeDirections}
-              selected={tdSel}
-              onToggle={(p, c) => {
-                const n = new Set(tdSel);
-                if (c) n.add(p);
-                else n.delete(p);
-                setTdSel(n);
-              }}
+            <SearchableMultiSelectPanel<string>
+              label="Направление торговли"
+              searchPlaceholder="Поиск"
               search={s4}
               onSearchChange={setS4}
+              items={filteredTd.map((p) => ({ id: p, title: p }))}
+              selected={tdSel}
+              onSelectedChange={setTdSel}
+              emptyMessage="Нет вариантов"
             />
           ) : (
-            <div className="flex min-h-[11rem] flex-col justify-center rounded-md border p-4 text-sm text-muted-foreground">
+            <div className="flex min-h-[5rem] flex-col justify-center rounded-md border p-4 text-sm text-muted-foreground">
               Нет значений зоны в фильтрах. Направление берётся из поля «Зона» у агента в заказе.
             </div>
           )}
-          <MultiSelectBlock
-            title="Территория"
-            options={territoryOptions}
-            selected={trSel}
-            onToggle={(p, c) => {
-              const n = new Set(trSel);
-              if (c) n.add(p);
-              else n.delete(p);
-              setTrSel(n);
-            }}
+          <SearchableMultiSelectPanel<string>
+            label="Территория"
+            searchPlaceholder="Поиск"
             search={s5}
             onSearchChange={setS5}
+            items={filteredTr.map((p) => ({ id: p, title: p }))}
+            selected={trSel}
+            onSelectedChange={setTrSel}
+            emptyMessage="Нет вариантов"
           />
-          <div className="flex flex-col rounded-md border">
-            <div className="border-b p-2 text-sm font-medium">День недели</div>
-            <div className="flex flex-wrap gap-2 p-3">
-              {([1, 2, 3, 4, 5, 6, 7] as const).map((d) => (
-                <label key={d} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={wdSel.has(d)}
-                    onChange={(e) => {
-                      const n = new Set(wdSel);
-                      if (e.target.checked) n.add(d);
-                      else n.delete(d);
-                      setWdSel(n);
-                    }}
-                  />
-                  {WEEKDAY_LABELS[d]}
-                </label>
-              ))}
-            </div>
-          </div>
+          <SearchableMultiSelectPanel
+            label="День недели"
+            searchable={false}
+            items={weekdayItems}
+            selected={wdSel}
+            onSelectedChange={setWdSel}
+            emptyMessage="—"
+          />
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>

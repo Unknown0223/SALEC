@@ -9,10 +9,11 @@ import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import { activeRefSelectOptions } from "@/lib/profile-ref-entries";
 
 type PaymentDetailRow = {
   id: number;
@@ -55,9 +56,26 @@ export default function PaymentDetailPage() {
   const effectiveRole = useEffectiveRole();
   const qc = useQueryClient();
   const [allocateOpen, setAllocateOpen] = useState(false);
+  const [cancelReasonRef, setCancelReasonRef] = useState("");
 
   const invalid = !Number.isFinite(paymentId) || paymentId < 1;
   const canDelete = effectiveRole === "admin";
+
+  const profileCancelQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "payment-cancel-reasons"],
+    enabled: Boolean(tenantSlug) && hydrated && canDelete,
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data } = await api.get<{
+        references: { cancel_payment_reason_entries?: unknown };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data;
+    }
+  });
+  const cancelReasonOptions = useMemo(
+    () => activeRefSelectOptions(profileCancelQ.data?.references?.cancel_payment_reason_entries),
+    [profileCancelQ.data]
+  );
 
   const detailQ = useQuery({
     queryKey: ["payment-detail", tenantSlug, paymentId],
@@ -71,7 +89,9 @@ export default function PaymentDetailPage() {
 
   const deleteMut = useMutation({
     mutationFn: async () => {
-      await api.delete(`/api/${tenantSlug}/payments/${paymentId}`);
+      const params =
+        cancelReasonRef.trim().length > 0 ? { cancel_reason_ref: cancelReasonRef.trim() } : undefined;
+      await api.delete(`/api/${tenantSlug}/payments/${paymentId}`, { params });
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
@@ -124,22 +144,40 @@ export default function PaymentDetailPage() {
                   Zakazlarga taqsimlash
                 </button>
                 {canDelete ? (
-                  <button
-                    type="button"
-                    className={cn(buttonVariants({ variant: "destructive", size: "sm" }))}
-                    disabled={deleteMut.isPending}
-                    onClick={() => {
-                      if (
-                        confirm(
-                          `To‘lov #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}) o‘chirish? Balans va taqsimotlar qaytariladi.`
-                        )
-                      ) {
-                        deleteMut.mutate();
-                      }
-                    }}
-                  >
-                    O‘chirish
-                  </button>
+                  <>
+                    {cancelReasonOptions.length > 0 ? (
+                      <select
+                        className="h-9 max-w-[220px] rounded-md border border-input bg-background px-2 text-xs"
+                        value={cancelReasonRef}
+                        onChange={(e) => setCancelReasonRef(e.target.value)}
+                        title="Bekor qilish sababi (audit)"
+                        aria-label="To‘lovni bekor qilish sababi"
+                      >
+                        <option value="">Sabab (ixtiyoriy)</option>
+                        {cancelReasonOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={cn(buttonVariants({ variant: "destructive", size: "sm" }))}
+                      disabled={deleteMut.isPending}
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `To‘lov #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}) o‘chirish? Balans va taqsimotlar qaytariladi.`
+                          )
+                        ) {
+                          deleteMut.mutate();
+                        }
+                      }}
+                    >
+                      O‘chirish
+                    </button>
+                  </>
                 ) : null}
               </div>
             }

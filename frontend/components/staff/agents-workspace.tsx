@@ -32,6 +32,7 @@ import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { StaffActiveSessionsDialog } from "@/components/staff/staff-active-sessions-dialog";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { SearchableMultiSelectPanel } from "@/components/ui/searchable-multi-select-panel";
 
 export type AgentRow = {
   id: number;
@@ -1462,45 +1463,16 @@ function RestrictionsDialog({
           <p className="text-sm text-muted-foreground">Агент: {agent.fio}</p>
         </DialogHeader>
         <div className="grid max-h-[65vh] grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="flex min-h-0 flex-col rounded-md border">
-            <div className="border-b p-2 text-sm font-medium">Тип цены</div>
-            <Input
-              placeholder="Поиск"
-              className="m-2"
-              value={ptSearch}
-              onChange={(e) => setPtSearch(e.target.value)}
-            />
-            <label className="flex items-center gap-2 border-b px-2 py-1 text-xs">
-              <input
-                type="checkbox"
-                checked={filteredPt.length > 0 && filteredPt.every((p) => ptSel.has(p))}
-                onChange={(e) => {
-                  const n = new Set(ptSel);
-                  if (e.target.checked) filteredPt.forEach((p) => n.add(p));
-                  else filteredPt.forEach((p) => n.delete(p));
-                  setPtSel(n);
-                }}
-              />
-              Выбрать все
-            </label>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {filteredPt.map((p) => (
-                <label key={p} className="flex items-center gap-2 py-1 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={ptSel.has(p)}
-                    onChange={(e) => {
-                      const n = new Set(ptSel);
-                      if (e.target.checked) n.add(p);
-                      else n.delete(p);
-                      setPtSel(n);
-                    }}
-                  />
-                  {p}
-                </label>
-              ))}
-            </div>
-          </div>
+          <SearchableMultiSelectPanel<string>
+            label="Тип цены"
+            searchPlaceholder="Поиск"
+            search={ptSearch}
+            onSearchChange={setPtSearch}
+            items={filteredPt.map((p) => ({ id: p, title: p }))}
+            selected={ptSel}
+            onSelectedChange={setPtSel}
+            emptyMessage="Нет вариантов"
+          />
           <div className="flex min-h-0 flex-col rounded-md border">
             <div className="border-b p-2 text-sm font-medium">Продукт</div>
             <Input

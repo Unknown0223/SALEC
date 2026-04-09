@@ -19,6 +19,11 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import {
+  activeRefSelectOptions,
+  refEntryLabelByStored,
+} from "@/lib/profile-ref-entries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Props = {
   tenantSlug: string | null;
@@ -78,6 +83,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const [expeditorUserId, setExpeditorUserId] = useState("");
   const [priceType, setPriceType] = useState("retail");
   const [orderComment, setOrderComment] = useState("");
+  const [requestTypeRef, setRequestTypeRef] = useState("");
+  const [orderNotePreset, setOrderNotePreset] = useState("");
+  const [refSelectKey, setRefSelectKey] = useState(0);
   const [showZeroStock, setShowZeroStock] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [orderOpenedAt] = useState(() => new Date());
@@ -181,6 +189,30 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       return data;
     }
   });
+
+  const profileRefsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "order-create-refs"],
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data } = await api.get<{
+        references: {
+          request_type_entries?: unknown;
+          order_note_entries?: unknown;
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data;
+    }
+  });
+
+  const requestTypeOptions = useMemo(
+    () => activeRefSelectOptions(profileRefsQ.data?.references?.request_type_entries),
+    [profileRefsQ.data]
+  );
+  const orderNoteOptions = useMemo(
+    () => activeRefSelectOptions(profileRefsQ.data?.references?.order_note_entries),
+    [profileRefsQ.data]
+  );
 
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "order-form"],
@@ -371,6 +403,15 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
 
       const validatedOrderType =
         orderType && (ORDER_TYPE_VALUES as readonly string[]).includes(orderType) ? orderType : "order";
+      const freeComment = orderComment.trim();
+      const presetStored = orderNotePreset.trim();
+      let commentOut: string | null = freeComment || null;
+      if (presetStored) {
+        const presetLabel =
+          refEntryLabelByStored(profileRefsQ.data?.references?.order_note_entries, presetStored) ??
+          presetStored;
+        commentOut = freeComment ? `${presetLabel}\n${freeComment}` : presetLabel;
+      }
       const body: Record<string, unknown> = {
         client_id: cid,
         warehouse_id: wid,
@@ -378,7 +419,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         price_type: priceType.trim() || "retail",
         order_type: validatedOrderType,
         apply_bonus: applyBonus,
-        comment: orderComment.trim() || null,
+        comment: commentOut,
+        request_type_ref: requestTypeRef.trim() || null,
         items
       };
       const expRaw = expeditorUserId.trim();
@@ -392,6 +434,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      setRequestTypeRef("");
+      setOrderNotePreset("");
+      setRefSelectKey((k) => k + 1);
       onCreated();
     },
     onError: (e: Error) => {
@@ -523,7 +568,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     qtyByProductId,
     expeditorUserId,
     priceType,
-    orderComment
+    orderComment,
+    requestTypeRef,
+    orderNotePreset
   ]);
 
   if (!tenantSlug) {
@@ -881,7 +928,62 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             </div>
           </div>
 
-          <div className="mt-6 space-y-2 border-t border-border/70 pt-5">
+          <div className="mt-6 space-y-4 border-t border-border/70 pt-5">
+            <p className="text-xs text-muted-foreground">
+              Spravochniklar:{" "}
+              <Link href="/settings/reasons/request-types" className="text-primary underline-offset-2 hover:underline">
+                причины заявок
+              </Link>
+              ,{" "}
+              <Link href="/settings/reasons/order-notes" className="text-primary underline-offset-2 hover:underline">
+                примечание к заказу
+              </Link>
+              .
+            </p>
+            {requestTypeOptions.length > 0 ? (
+              <div className="space-y-1.5">
+                <Label>Заявка / yetkazib berish turi</Label>
+                <Select
+                  key={`rt-${refSelectKey}`}
+                  value={requestTypeRef || undefined}
+                  onValueChange={(v) => setRequestTypeRef(v === "__none__" ? "" : v)}
+                >
+                  <SelectTrigger id="oc-request-type" className="max-w-md">
+                    <SelectValue placeholder="Tanlash ixtiyoriy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">—</SelectItem>
+                    {requestTypeOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            {orderNoteOptions.length > 0 ? (
+              <div className="space-y-1.5">
+                <Label>Tayyor izoh shabloni</Label>
+                <Select
+                  key={`on-${refSelectKey}`}
+                  value={orderNotePreset || undefined}
+                  onValueChange={(v) => setOrderNotePreset(v === "__none__" ? "" : v)}
+                >
+                  <SelectTrigger id="oc-order-note-preset" className="max-w-md">
+                    <SelectValue placeholder="Shablon tanlang (ixtiyoriy)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">—</SelectItem>
+                    {orderNoteOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <Label htmlFor="oc-comment">Izoh (ichki)</Label>
             <textarea
               id="oc-comment"

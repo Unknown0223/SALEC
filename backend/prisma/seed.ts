@@ -29,6 +29,108 @@ async function ensureCategory(tenantId: number, name: string, parentId: number |
   });
 }
 
+type RefEntrySeed = {
+  id: string;
+  name: string;
+  code: string | null;
+  sort_order: number;
+  comment: null;
+  active: boolean;
+  color: string | null;
+};
+
+function refE(
+  id: string,
+  name: string,
+  code: string | null,
+  sort_order: number,
+  color: string | null = null
+): RefEntrySeed {
+  return { id, name, code, sort_order, comment: null, active: true, color };
+}
+
+/** «Причины и категории» — bo‘sh tenantlar uchun test qiymatlari. */
+const SEED_REASON_REFERENCES: Record<string, RefEntrySeed[]> = {
+  request_type_entries: [
+    refE("seed-req-delivery", "Yetkazib berish", "DELIVERY", 0),
+    refE("seed-req-pickup", "Olib ketish (pickup)", "PICKUP", 1),
+    refE("seed-req-urgent", "Shoshilinch", "URGENT", 2)
+  ],
+  refusal_reason_entries: [
+    refE("seed-ref-client", "Mijoz rad etdi", "CLIENT_REF", 0),
+    refE("seed-ref-quality", "Sifat / muddati", "QUALITY", 1),
+    refE("seed-ref-price", "Narx kelishmovchiligi", "PRICE", 2)
+  ],
+  cancel_payment_reason_entries: [
+    refE("seed-can-wrong", "Noto‘g‘ri summa", "WRONG_AMOUNT", 0),
+    refE("seed-can-dup", "Dublikat to‘lov", "DUPLICATE", 1),
+    refE("seed-can-other", "Boshqa", "OTHER", 2)
+  ],
+  order_note_entries: [
+    refE("seed-on-urgent", "Shoshilinch yetkazish", "NOTE_URGENT", 0),
+    refE("seed-on-tomorrow", "Ertaga yetkazish", "NOTE_TOMORROW", 1),
+    refE("seed-on-call", "Oldindan qo‘ng‘iroq qilish", "NOTE_CALL", 2)
+  ],
+  task_type_entries: [
+    refE("seed-tt-call", "Qo‘ng‘iroq", "CALL", 0),
+    refE("seed-tt-visit", "Tashrif", "VISIT", 1),
+    refE("seed-tt-doc", "Hujjat", "DOC", 2)
+  ],
+  photo_category_entries: [
+    refE("seed-ph-shelf", "Do‘kon rafi", "SHELF", 0, "#22c55e"),
+    refE("seed-ph-front", "Do‘kon oldi", "STOREFRONT", 1, "#3b82f6"),
+    refE("seed-ph-merch", "Merchandising", "MERCH", 2, "#a855f7")
+  ],
+  finance_category_entries: [
+    refE("seed-fc-transport", "Transport", "TRANSPORT", 0, "#f97316"),
+    refE("seed-fc-marketing", "Marketing", "MARKETING", 1, "#ec4899"),
+    refE("seed-fc-office", "Ofis", "OFFICE", 2, "#64748b"),
+    refE("seed-fc-other", "Boshqa", "OTHER_FIN", 3, "#94a3b8")
+  ]
+};
+
+function activeStringsFromRefEntries(entries: RefEntrySeed[]): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.active === false) continue;
+    const v = (e.code && e.code.trim() ? e.code.trim() : e.name.trim()) || "";
+    if (v) out.push(v);
+  }
+  return [...new Set(out)].sort((a, b) => a.localeCompare(b, "uz"));
+}
+
+async function mergeDefaultReasonReferences(tenantId: number) {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const st = (tenant?.settings ?? {}) as Record<string, unknown>;
+  const prevRef =
+    typeof st.references === "object" && st.references != null && !Array.isArray(st.references)
+      ? { ...(st.references as Record<string, unknown>) }
+      : {};
+  const ref = { ...prevRef };
+
+  for (const [key, defaults] of Object.entries(SEED_REASON_REFERENCES)) {
+    const cur = ref[key];
+    if (!Array.isArray(cur) || cur.length === 0) {
+      ref[key] = defaults;
+    }
+  }
+
+  const refusal = ref.refusal_reason_entries;
+  if (Array.isArray(refusal) && refusal.length > 0) {
+    ref.return_reasons = activeStringsFromRefEntries(refusal as RefEntrySeed[]);
+  }
+
+  await prisma.tenant.update({
+    where: { id: tenantId },
+    data: {
+      settings: { ...st, references: ref } as Prisma.InputJsonValue
+    }
+  });
+}
+
 async function ensureClient(
   tenantId: number,
   name: string,
@@ -465,6 +567,9 @@ async function main() {
       update: { price: new Prisma.Decimal(12000) }
     });
   }
+
+  await mergeDefaultReasonReferences(test1.id);
+  await mergeDefaultReasonReferences(demo.id);
 }
 
 main()

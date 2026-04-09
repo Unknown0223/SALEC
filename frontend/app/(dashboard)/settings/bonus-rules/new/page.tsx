@@ -22,7 +22,7 @@ export default function NewBonusRulePage() {
       </Link>
       <PageHeader
         title="Yangi bonus qoidasi"
-        description="Barcha maydonlarni bosqichma-bosqich to‘ldiring. O‘ngdagi “Qisqacha” blokini tekshirib boring."
+        description="Asosiy ma’lumotlar, shartlar, muddat, filtrlar va mijozlar — bitta ustunda, keng joylashgan."
         actions={
           <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
             Панель управления

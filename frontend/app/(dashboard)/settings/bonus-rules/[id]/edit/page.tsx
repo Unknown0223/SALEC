@@ -39,7 +39,7 @@ export default function EditBonusRulePage() {
         href="/settings/bonus-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Список бонусных правил
+        ← Bonus qoidalari ro‘yxati
       </Link>
 
       {!authHydrated ? (
@@ -61,8 +61,8 @@ export default function EditBonusRulePage() {
       ) : data ? (
         <>
           <PageHeader
-            title="Редактирование бонусного правила"
-            description={`${data.name} · id #${data.id}`}
+            title="Bonus qoidasini tahrirlash"
+            description={`${data.name} · #${data.id}`}
             actions={
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
                 Панель управления

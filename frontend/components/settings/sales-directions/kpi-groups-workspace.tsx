@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { formatGroupedInteger } from "@/lib/format-numbers";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { Pencil, RefreshCw } from "lucide-react";
+import { SearchableMultiSelectPanel } from "@/components/ui/searchable-multi-select-panel";
 
 type KpiListRow = {
   id: number;
@@ -465,56 +466,42 @@ function KpiFormDialog({
               Название
               <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Название *" />
             </label>
-            <div className="rounded-md border">
-              <div className="border-b bg-muted/40 px-2 py-1.5 text-xs font-medium">Продукт</div>
-              <Input
-                placeholder="Поиск SKU / название"
-                className="m-2"
-                value={prodSearch}
-                onChange={(e) => setProdSearch(e.target.value)}
-              />
-              <div className="max-h-40 overflow-y-auto px-2 pb-2">
-                {products.map((p) => (
-                  <label key={p.id} className="flex items-center gap-2 py-0.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={prodSel.has(p.id)}
-                      onChange={(e) => {
-                        const n = new Set(prodSel);
-                        if (e.target.checked) n.add(p.id);
-                        else n.delete(p.id);
-                        setProdSel(n);
-                      }}
-                    />
-                    <span className="font-mono text-[10px] text-muted-foreground">{p.sku}</span>
-                    <span className="truncate">{p.name}</span>
-                  </label>
-                ))}
-                {products.length === 0 ? <p className="py-2 text-xs text-muted-foreground">Нет строк</p> : null}
-              </div>
-            </div>
-            <div className="rounded-md border">
-              <div className="border-b bg-muted/40 px-2 py-1.5 text-xs font-medium">Агенты</div>
-              <Input placeholder="Поиск" className="m-2" value={agSearch} onChange={(e) => setAgSearch(e.target.value)} />
-              <div className="max-h-40 overflow-y-auto px-2 pb-2">
-                {filteredAgents.map((a) => (
-                  <label key={a.id} className="flex items-center gap-2 py-0.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={agSel.has(a.id)}
-                      onChange={(e) => {
-                        const n = new Set(agSel);
-                        if (e.target.checked) n.add(a.id);
-                        else n.delete(a.id);
-                        setAgSel(n);
-                      }}
-                    />
-                    <span className="font-mono text-[10px]">{a.code ?? a.id}</span>
-                    <span className="truncate">{a.fio}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+            <SearchableMultiSelectPanel
+              label="Продукт"
+              searchPlaceholder="Поиск SKU / название"
+              search={prodSearch}
+              onSearchChange={setProdSearch}
+              items={products.map((p) => ({
+                id: p.id,
+                subtitle: p.sku,
+                title: p.name
+              }))}
+              selected={prodSel}
+              onSelectedChange={setProdSel}
+              loading={productsQ.isFetching}
+              emptyMessage="Нет строк — измените поиск"
+              maxListHeightClass="max-h-52"
+              selectAllLabel="Выбрать все на экране"
+              clearVisibleLabel="Снять на экране"
+            />
+            <SearchableMultiSelectPanel
+              label="Агенты"
+              searchPlaceholder="Поиск по коду, ФИО, ID"
+              search={agSearch}
+              onSearchChange={setAgSearch}
+              items={filteredAgents.map((a) => ({
+                id: a.id,
+                subtitle: a.code != null && String(a.code).trim() !== "" ? String(a.code) : `#${a.id}`,
+                title: a.fio
+              }))}
+              selected={agSel}
+              onSelectedChange={setAgSel}
+              loading={agentsQ.isFetching}
+              emptyMessage="Нет агентов — измените поиск"
+              maxListHeightClass="max-h-52"
+              selectAllLabel="Выбрать все на экране"
+              clearVisibleLabel="Снять на экране"
+            />
             <label className="text-xs text-muted-foreground">
               Код
               <Input className="mt-1 font-mono" value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} />

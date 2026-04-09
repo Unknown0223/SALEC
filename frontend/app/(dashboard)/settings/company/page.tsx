@@ -18,7 +18,6 @@ type TenantProfile = {
   feature_flags: Record<string, unknown>;
   references: {
     payment_types: string[];
-    return_reasons: string[];
     regions: string[];
   };
 };
@@ -42,7 +41,6 @@ export default function CompanySettingsPage() {
   const [logoUrl, setLogoUrl] = useState("");
   const [ordersSse, setOrdersSse] = useState(true);
   const [payTypes, setPayTypes] = useState("");
-  const [returnReasons, setReturnReasons] = useState("");
   const [regions, setRegions] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -64,7 +62,6 @@ export default function CompanySettingsPage() {
     setLogoUrl(data.logo_url ?? "");
     setOrdersSse(data.feature_flags?.orders_sse !== false);
     setPayTypes(data.references.payment_types.join("\n"));
-    setReturnReasons(data.references.return_reasons.join("\n"));
     setRegions(data.references.regions.join("\n"));
   }, [data]);
 
@@ -79,7 +76,6 @@ export default function CompanySettingsPage() {
         feature_flags: { orders_sse: ordersSse },
         references: {
           payment_types: splitLines(payTypes),
-          return_reasons: splitLines(returnReasons),
           regions: splitLines(regions)
         }
       });
@@ -180,14 +176,14 @@ export default function CompanySettingsPage() {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="co-ret">Qaytarish sabablari</Label>
-            <textarea
-              id="co-ret"
-              className="min-h-[72px] rounded-md border bg-background px-3 py-2 text-sm"
-              value={returnReasons}
-              onChange={(e) => setReturnReasons(e.target.value)}
-              disabled={!isAdmin || saveMut.isPending}
-            />
+            <Label>Qaytarish / rad etish sabablari</Label>
+            <p className="text-xs text-muted-foreground">
+              Jadval orqali boshqariladi (katalogdagi «Причины отказа» bilan bir xil):{" "}
+              <Link href="/settings/reasons/refusal-reasons" className="text-primary underline">
+                /settings/reasons/refusal-reasons
+              </Link>
+              .
+            </p>
           </div>
           <div id="ref-regions" className="scroll-mt-20 grid gap-1.5">
             <Label htmlFor="co-reg">Hududlar (viloyat / territoriya)</Label>

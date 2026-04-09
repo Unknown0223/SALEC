@@ -80,6 +80,36 @@ export function ruleMatchesOrderProductScope(
   return true;
 }
 
+/** Sotib olish doirasi: mahsulot yoki kategoriya tanlangan bo‘lsa — har SKU alohida; bo‘shsa — zakaz bo‘yicha umumiy miqdor. */
+export function ruleHasPurchaseScope(rule: BonusRuleRow): boolean {
+  return rule.product_ids.length > 0 || rule.product_category_ids.length > 0;
+}
+
+/** Umumiy miqdor (asortimentsiz qty) peeklarida `purchasedPid` o‘rniga. */
+export const QTY_AGGREGATE_PURCHASED_PID = 0;
+
+/**
+ * Qty bonus sovg‘a mahsuloti: `bonus_product_ids` bo‘lsa override ro‘yxatda bo‘lishi kerak;
+ * ro‘yxat bo‘shsa sovg‘a = sotilgan mahsulot (`purchasedPid`).
+ */
+export function resolveQtyGiftProductId(
+  rule: BonusRuleRow,
+  purchasedPid: number,
+  giftOverrides: ReadonlyMap<number, number>
+): number {
+  const allowed = rule.bonus_product_ids;
+  const override = giftOverrides.get(rule.id);
+  if (override !== undefined && Number.isFinite(override) && override > 0) {
+    if (allowed.length > 0) {
+      if (allowed.includes(override)) return override;
+    } else if (purchasedPid > 0 && override === purchasedPid) {
+      return override;
+    }
+  }
+  if (allowed.length > 0) return allowed[0]!;
+  return purchasedPid;
+}
+
 /** Mijoz uchun avval `once_per_client` qoidalar qaysi ID lar bilan qo‘llangan (faqat shu qatorlar). */
 export async function fetchClientUsedAutoBonusRuleIds(
   tx: Prisma.TransactionClient,
@@ -316,7 +346,8 @@ export type QtyBonusPeek = {
 };
 
 /**
- * Har bir sotib olingan mahsulot uchun eng yuqori `priority` li mos qty qoidasi (narx yo‘q).
+ * Qty bonus: (1) asortiment/kategoriya **bo‘sh** — zakazdagi **barcha** pullik qatorlar miqdori yig‘indisi bo‘yicha
+ * **bitta** eng yuqori priority mos qoida; (2) asortiment **bor** — har SKU bo‘yicha avvalgidek.
  */
 export async function findQtyBonusPeeks(
   tx: Prisma.TransactionClient,
@@ -324,7 +355,9 @@ export async function findQtyBonusPeeks(
   client: { id: number; category: string | null },
   qtyByProduct: ReadonlyMap<number, number>,
   productById: ReadonlyMap<number, ProductLite>,
-  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set()
+  orderedProductIds: ReadonlySet<number>,
+  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
+  giftOverrides: ReadonlyMap<number, number> = new Map()
 ): Promise<QtyBonusPeek[]> {
   const now = new Date();
   const raw = await tx.bonusRule.findMany({
@@ -339,20 +372,45 @@ export async function findQtyBonusPeeks(
 
   const peeks: QtyBonusPeek[] = [];
 
+  let totalPaidQty = 0;
+  for (const q of qtyByProduct.values()) {
+    if (q > 0) totalPaidQty += q;
+  }
+
+  for (const rule of rules) {
+    if (ruleHasPurchaseScope(rule)) continue;
+    if (!ruleMatchesClient(rule, client)) continue;
+    if (!ruleMatchesOrderProductScope(rule, orderedProductIds, productById)) continue;
+    if (rule.bonus_product_ids.length === 0) continue;
+
+    const bonusUnits = computeQtyBonusForRuleRow(rule, totalPaidQty);
+    if (bonusUnits <= 0) continue;
+
+    const giftPid = resolveQtyGiftProductId(rule, QTY_AGGREGATE_PURCHASED_PID, giftOverrides);
+    peeks.push({
+      rule,
+      purchasedPid: QTY_AGGREGATE_PURCHASED_PID,
+      giftPid,
+      bonusQty: bonusUnits
+    });
+    break;
+  }
+
+  const scopedRules = rules.filter((r) => ruleHasPurchaseScope(r));
+
   for (const [purchasedPid, purchasedQty] of qtyByProduct) {
     if (purchasedQty <= 0) continue;
     const product = productById.get(purchasedPid);
     if (!product) continue;
 
-    for (const rule of rules) {
+    for (const rule of scopedRules) {
       if (!ruleMatchesClient(rule, client)) continue;
       if (!ruleMatchesProduct(rule, product)) continue;
 
       const bonusUnits = computeQtyBonusForRuleRow(rule, purchasedQty);
       if (bonusUnits <= 0) continue;
 
-      const giftPid =
-        rule.bonus_product_ids.length > 0 ? rule.bonus_product_ids[0]! : purchasedPid;
+      const giftPid = resolveQtyGiftProductId(rule, purchasedPid, giftOverrides);
       peeks.push({ rule, purchasedPid, giftPid, bonusQty: bonusUnits });
       break;
     }
@@ -403,13 +461,16 @@ export async function computeAutoQtyBonusLines(
   productById: ReadonlyMap<number, ProductLite>,
   clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set()
 ): Promise<BonusLineDraft[]> {
+  const orderedProductIds = new Set(qtyByProduct.keys());
   const peeks = await findQtyBonusPeeks(
     tx,
     tenantId,
     client,
     qtyByProduct,
     productById,
-    clientUsedAutoBonusRuleIds
+    orderedProductIds,
+    clientUsedAutoBonusRuleIds,
+    new Map()
   );
   return materializeQtyPeeks(tenantId, peeks);
 }
@@ -439,7 +500,8 @@ export async function resolveOrderBonusesForCreate(
   productById: ReadonlyMap<number, ProductLite>,
   orderedProductIds: ReadonlySet<number>,
   stackPolicy: BonusStackPolicy,
-  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set()
+  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
+  qtyBonusGiftOverrides: ReadonlyMap<number, number> = new Map()
 ): Promise<{
   lines: PaidLineDraft[];
   total: PrismaClient.Decimal;
@@ -471,7 +533,9 @@ export async function resolveOrderBonusesForCreate(
     client,
     qtyByProduct,
     productById,
-    clientUsedAutoBonusRuleIds
+    orderedProductIds,
+    clientUsedAutoBonusRuleIds,
+    qtyBonusGiftOverrides
   );
 
   const slots: BonusSlot[] = [];

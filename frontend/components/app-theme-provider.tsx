@@ -6,7 +6,7 @@ import {
   type AppThemeId,
   normalizeAppThemeId
 } from "@/lib/app-theme";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState } from "react";
 
 type Ctx = {
   theme: AppThemeId;
@@ -40,13 +40,16 @@ function applyThemeToDocument(id: AppThemeId) {
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<AppThemeId>(DEFAULT_APP_THEME);
 
-  useEffect(() => {
-    setThemeState(readStoredTheme());
+  /**
+   * Bir martalik sinxron: localStorage dagi tema = asosiy manba.
+   * Avvalgi `useEffect([theme])` birinchi commitda DEFAULT bilan `applyTheme` qilib,
+   * `beforeInteractive` skript qo‘ygan `data-app-theme`ni bekor qilardi (yashil/teal «sekund» flash).
+   */
+  useLayoutEffect(() => {
+    const t = readStoredTheme();
+    setThemeState(t);
+    applyThemeToDocument(t);
   }, []);
-
-  useEffect(() => {
-    applyThemeToDocument(theme);
-  }, [theme]);
 
   const setTheme = useCallback((id: AppThemeId) => {
     setThemeState(id);

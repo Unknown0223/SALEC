@@ -39,7 +39,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <Script id="salec-app-theme-boot" strategy="beforeInteractive">
-          {`(function(){try{var A=${JSON.stringify([...APP_THEME_IDS])};var M=${JSON.stringify(APP_THEME_ALIASES)};var k=${JSON.stringify(APP_THEME_STORAGE_KEY)};var d=${JSON.stringify(DEFAULT_APP_THEME)};var v=localStorage.getItem(k);if(M[v])v=M[v];if(v==null||v===""||A.indexOf(v)<0){v=d;}localStorage.setItem(k,v);if(v!=="classic")document.documentElement.setAttribute("data-app-theme",v);}catch(e){}})();`}
+          {`(function(){try{var A=${JSON.stringify([...APP_THEME_IDS])};var M=${JSON.stringify(APP_THEME_ALIASES)};var k=${JSON.stringify(APP_THEME_STORAGE_KEY)};var d=${JSON.stringify(DEFAULT_APP_THEME)};var v=localStorage.getItem(k);if(M[v])v=M[v];if(v==null||v===""||A.indexOf(v)<0){v=d;}localStorage.setItem(k,v);var r=document.documentElement;if(v==="classic")r.removeAttribute("data-app-theme");else r.setAttribute("data-app-theme",v);}catch(e){}})();`}
         </Script>
         <Providers>{children}</Providers>
       </body>

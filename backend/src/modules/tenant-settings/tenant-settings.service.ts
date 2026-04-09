@@ -168,6 +168,14 @@ export type TenantProfileDto = {
     currency_entries: CurrencyEntryDto[];
     payment_method_entries: PaymentMethodEntryDto[];
     price_type_entries: PriceTypeEntryDto[];
+    /** Sozlamalar → «Причины и категории» (jadval + tanlovlar) */
+    request_type_entries: ClientRefEntryDto[];
+    refusal_reason_entries: ClientRefEntryDto[];
+    cancel_payment_reason_entries: ClientRefEntryDto[];
+    order_note_entries: ClientRefEntryDto[];
+    task_type_entries: ClientRefEntryDto[];
+    photo_category_entries: ClientRefEntryDto[];
+    finance_category_entries: ClientRefEntryDto[];
   };
 };
 
@@ -285,6 +293,13 @@ function resolveClientRefEntries(
   const parsed = clientRefEntriesFromUnknown(ref[key]);
   if (parsed.length > 0) return parsed;
   return legacyStringsToClientRefEntries(legacyStrings, legacyPrefix);
+}
+
+/** `return_reasons` qatorlari → `refusal_reason_entries` ga mos keladigan struktura. */
+function resolveRefusalReasonEntries(ref: Record<string, unknown>): ClientRefEntryDto[] {
+  const parsed = clientRefEntriesFromUnknown(ref.refusal_reason_entries);
+  if (parsed.length > 0) return parsed;
+  return legacyStringsToClientRefEntries(stringArrayFromUnknown(ref.return_reasons), "refusal");
 }
 
 type ClientRefEntryPatch = {
@@ -799,6 +814,8 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
   const payment_method_entries = resolvePaymentMethodEntries(ref, currency_entries);
   const price_type_entries = priceTypeEntriesFromUnknown(ref.price_type_entries);
 
+  const refusal_reason_entries = resolveRefusalReasonEntries(ref);
+
   const [dbSalesLabels, dbTradeLabels] = await Promise.all([
     listActiveSalesChannelLabels(tenantId),
     listActiveTradeDirectionLabels(tenantId)
@@ -826,7 +843,7 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
     feature_flags: ff,
     references: {
       payment_types: stringArrayFromUnknown(ref.payment_types),
-      return_reasons: stringArrayFromUnknown(ref.return_reasons),
+      return_reasons: activeValuesFromClientRefEntries(refusal_reason_entries),
       regions:
         territory_nodes.length > 0
           ? territoryRegionPickerNames({ ...ref, territory_nodes } as Record<string, unknown>)
@@ -852,7 +869,14 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
       territory_tree,
       currency_entries,
       payment_method_entries,
-      price_type_entries
+      price_type_entries,
+      refusal_reason_entries,
+      request_type_entries: clientRefEntriesFromUnknown(ref.request_type_entries),
+      cancel_payment_reason_entries: clientRefEntriesFromUnknown(ref.cancel_payment_reason_entries),
+      order_note_entries: clientRefEntriesFromUnknown(ref.order_note_entries),
+      task_type_entries: clientRefEntriesFromUnknown(ref.task_type_entries),
+      photo_category_entries: clientRefEntriesFromUnknown(ref.photo_category_entries),
+      finance_category_entries: clientRefEntriesFromUnknown(ref.finance_category_entries)
     }
   };
 }
@@ -890,6 +914,13 @@ export async function patchTenantProfile(
       currency_entries?: CurrencyEntryPatch[];
       payment_method_entries?: PaymentMethodEntryPatch[];
       price_type_entries?: PriceTypeEntryPatch[];
+      request_type_entries?: ClientRefEntryPatch[];
+      refusal_reason_entries?: ClientRefEntryPatch[];
+      cancel_payment_reason_entries?: ClientRefEntryPatch[];
+      order_note_entries?: ClientRefEntryPatch[];
+      task_type_entries?: ClientRefEntryPatch[];
+      photo_category_entries?: ClientRefEntryPatch[];
+      finance_category_entries?: ClientRefEntryPatch[];
     };
   }>,
   actorUserId: number | null = null
@@ -998,6 +1029,30 @@ export async function patchTenantProfile(
         const norm = patch.references.client_category_entries.map(toClientRefEntryDto);
         merged.client_category_entries = norm;
         merged.client_categories = activeValuesFromClientRefEntries(norm);
+      }
+      if (patch.references.request_type_entries != null) {
+        merged.request_type_entries = patch.references.request_type_entries.map(toClientRefEntryDto);
+      }
+      if (patch.references.refusal_reason_entries != null) {
+        const norm = patch.references.refusal_reason_entries.map(toClientRefEntryDto);
+        merged.refusal_reason_entries = norm;
+        merged.return_reasons = activeValuesFromClientRefEntries(norm);
+      }
+      if (patch.references.cancel_payment_reason_entries != null) {
+        merged.cancel_payment_reason_entries =
+          patch.references.cancel_payment_reason_entries.map(toClientRefEntryDto);
+      }
+      if (patch.references.order_note_entries != null) {
+        merged.order_note_entries = patch.references.order_note_entries.map(toClientRefEntryDto);
+      }
+      if (patch.references.task_type_entries != null) {
+        merged.task_type_entries = patch.references.task_type_entries.map(toClientRefEntryDto);
+      }
+      if (patch.references.photo_category_entries != null) {
+        merged.photo_category_entries = patch.references.photo_category_entries.map(toClientRefEntryDto);
+      }
+      if (patch.references.finance_category_entries != null) {
+        merged.finance_category_entries = patch.references.finance_category_entries.map(toClientRefEntryDto);
       }
       if (patch.references.territory_tree != null) {
         merged.territory_tree = patch.references.territory_tree;

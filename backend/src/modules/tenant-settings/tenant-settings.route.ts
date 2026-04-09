@@ -201,7 +201,14 @@ const profilePatchSchema = z
           .optional(),
         currency_entries: z.array(currencyEntrySchema).max(200).optional(),
         payment_method_entries: z.array(paymentMethodEntrySchema).max(500).optional(),
-        price_type_entries: z.array(priceTypeEntrySchema).max(500).optional()
+        price_type_entries: z.array(priceTypeEntrySchema).max(500).optional(),
+        request_type_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        refusal_reason_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        cancel_payment_reason_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        order_note_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        task_type_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        photo_category_entries: z.array(clientRefEntrySchema).max(2000).optional(),
+        finance_category_entries: z.array(clientRefEntrySchema).max(2000).optional()
       })
       .optional()
   })

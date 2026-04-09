@@ -16,6 +16,7 @@ export type SalesReturnListRow = {
   status: string;
   refund_amount: string | null;
   note: string | null;
+  refusal_reason_ref: string | null;
   created_at: string;
 };
 
@@ -58,6 +59,7 @@ export async function listSalesReturns(
       status: r.status,
       refund_amount: r.refund_amount?.toString() ?? null,
       note: r.note,
+      refusal_reason_ref: r.refusal_reason_ref ?? null,
       created_at: r.created_at.toISOString()
     }))
   };
@@ -85,6 +87,7 @@ export async function listSalesReturnsForOrder(tenantId: number, orderId: number
     status: r.status,
     refund_amount: r.refund_amount?.toString() ?? null,
     note: r.note,
+    refusal_reason_ref: r.refusal_reason_ref ?? null,
     created_at: r.created_at.toISOString()
   }));
 }
@@ -95,6 +98,7 @@ export type CreateSalesReturnInput = {
   order_id?: number | null;
   refund_amount?: number | null;
   note?: string | null;
+  refusal_reason_ref?: string | null;
   lines: { product_id: number; qty: number }[];
 };
 
@@ -158,6 +162,10 @@ export async function createSalesReturn(
         status: "posted",
         refund_amount: refund,
         note: input.note?.trim() || null,
+        refusal_reason_ref:
+          input.refusal_reason_ref != null && String(input.refusal_reason_ref).trim()
+            ? String(input.refusal_reason_ref).trim().slice(0, 128)
+            : null,
         created_by_user_id: uid,
         lines: {
           create: input.lines.map((l) => ({
@@ -244,6 +252,7 @@ export async function createSalesReturn(
     status: row.status,
     refund_amount: row.refund_amount?.toString() ?? null,
     note: row.note,
+    refusal_reason_ref: row.refusal_reason_ref ?? null,
     created_at: row.created_at.toISOString()
   };
 }

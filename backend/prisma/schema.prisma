@@ -744,9 +744,13 @@ model Order {
   updated_at                  DateTime         @updatedAt
   /// Faqat `once_per_client` bo‘lgan va shu zakazda avtomatik qo‘llangan qoidalar (takrorlanmasligi uchun)
   applied_auto_bonus_rule_ids Int[]            @default([])
+  /// Qty bonus: `bonus_rule_id` (string kalit) → tanlangan `bonus_product_id` (JSON obyekt)
+  bonus_gift_selections       Json             @default("{}")
   expeditor_user_id           Int?
   /// Operator izohi (ichki)
   comment                     String?
+  /// Sozlamalar → «Причины заявок» dan tanlangan kod/nom (test / filtr)
+  request_type_ref            String?          @db.VarChar(128)
   payments                    Payment[]
   change_logs                 OrderChangeLog[]
   items                       OrderItem[]
@@ -828,6 +832,8 @@ model SalesReturn {
   status             String            @default("posted") @db.VarChar(16)
   refund_amount      Decimal?          @db.Decimal(15, 2)
   note               String?
+  /// «Причины отказа» spravochnikidan kod/nom
+  refusal_reason_ref String?           @db.VarChar(128)
   created_by_user_id Int?
   created_at         DateTime          @default(now())
   /// Davr asosidagi vazvrat uchun
@@ -1195,6 +1201,8 @@ model TenantTask {
   id                 Int       @id @default(autoincrement())
   tenant_id          Int
   title              String    @db.VarChar(500)
+  /// «Типы задач» spravochnikidan kod/nom
+  task_type_ref      String?   @db.VarChar(128)
   description        String?
   status             String    @default("open") @db.VarChar(32)
   priority           String    @default("normal") @db.VarChar(16)

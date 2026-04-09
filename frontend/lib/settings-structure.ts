@@ -239,7 +239,7 @@ const existingHrefByItemTitle: Record<string, string> = {
   "бонусы": "/settings/bonus-rules",
   "скидки": "/settings/bonus-stack",
   "rlp бонусы": "/settings/bonus-stack",
-  "причины отказа": "/settings/company#ref-return-reasons",
+  "причины отказа": "/settings/reasons/refusal-reasons",
   "справочники": "/settings/spravochnik",
   "пользователи": "/settings/spravochnik/agents",
   "агент": "/settings/spravochnik/agents",

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { BonusRuleRow } from "../src/modules/bonus-rules/bonus-rules.service";
 import {
+  QTY_AGGREGATE_PURCHASED_PID,
+  resolveQtyGiftProductId,
+  ruleHasPurchaseScope,
   ruleMatchesClient,
   ruleMatchesOrderProductScope
 } from "../src/modules/orders/order-bonus-apply";
@@ -71,5 +74,37 @@ describe("ruleMatchesOrderProductScope", () => {
   it("product_category_ids bo‘lsa va mos kategoriya bor — true", () => {
     const r = rule({ product_ids: [], product_category_ids: [5] });
     expect(ruleMatchesOrderProductScope(r, new Set([10]), map)).toBe(true);
+  });
+});
+
+describe("ruleHasPurchaseScope", () => {
+  it("bo‘sh asortiment — false (umumiy miqdor rejimi)", () => {
+    expect(ruleHasPurchaseScope(rule({ product_ids: [], product_category_ids: [] }))).toBe(false);
+  });
+  it("product_ids bor — true", () => {
+    expect(ruleHasPurchaseScope(rule({ product_ids: [1], product_category_ids: [] }))).toBe(true);
+  });
+  it("faqat kategoriya — true", () => {
+    expect(ruleHasPurchaseScope(rule({ product_ids: [], product_category_ids: [2] }))).toBe(true);
+  });
+});
+
+describe("resolveQtyGiftProductId", () => {
+  it("override ro‘yxatda — override", () => {
+    const r = rule({ id: 7, bonus_product_ids: [10, 20] });
+    const m = new Map([[7, 20]]);
+    expect(resolveQtyGiftProductId(r, 99, m)).toBe(20);
+  });
+  it("override noto‘g‘ri — birinchi default", () => {
+    const r = rule({ id: 7, bonus_product_ids: [10, 20] });
+    expect(resolveQtyGiftProductId(r, 99, new Map([[7, 999]]))).toBe(10);
+  });
+  it("bonus ro‘yxat bo‘sh — sotilgan mahsulot", () => {
+    const r = rule({ bonus_product_ids: [] });
+    expect(resolveQtyGiftProductId(r, 55, new Map())).toBe(55);
+  });
+  it("aggregate placeholder bilan", () => {
+    const r = rule({ id: 3, bonus_product_ids: [8, 9] });
+    expect(resolveQtyGiftProductId(r, QTY_AGGREGATE_PURCHASED_PID, new Map([[3, 9]]))).toBe(9);
   });
 });

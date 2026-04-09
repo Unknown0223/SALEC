@@ -1,7 +1,7 @@
 "use client";
 
 import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
-import { BonusRuleProductScopePicker } from "@/components/bonus-rules/bonus-rule-product-scope-picker";
+import { BonusRuleProductDualPanels } from "@/components/bonus-rules/bonus-rule-product-dual-panels";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type BonusType = "qty" | "sum" | "discount";
 
@@ -22,6 +22,8 @@ type CondForm = {
   bonus_qty: string;
   max_bonus_qty: string;
 };
+
+type ClientRefEntry = { id: string; name: string; active?: boolean };
 
 function isoToLocalDatetime(iso: string | null): string {
   if (!iso) return "";
@@ -88,36 +90,6 @@ function parseCondRow(c: CondForm) {
   };
 }
 
-function liveSummary(
-  type: BonusType,
-  conditions: CondForm[],
-  minSum: string,
-  discountPct: string
-): string {
-  if (type === "sum") {
-    const n = Number.parseFloat(minSum);
-    return Number.isFinite(n) ? `Buyurtma summasi ≥ ${n}` : "Minimal summani kiriting";
-  }
-  if (type === "discount") {
-    const n = Number.parseFloat(discountPct);
-    return Number.isFinite(n) ? `Chegirma: ${n}%` : "Foizni kiriting";
-  }
-  try {
-    const rows = conditions.map(parseCondRow);
-    return rows
-      .map((r, i) => {
-        const range =
-          r.min_qty != null || r.max_qty != null
-            ? `[${r.min_qty ?? "—"}…${r.max_qty ?? "—"}] `
-            : "";
-        return `${i + 1}) ${range}har ${r.step_qty} ta → +${r.bonus_qty} bonus${r.max_bonus_qty != null ? ` (≤${r.max_bonus_qty})` : ""}`;
-      })
-      .join(" · ");
-  } catch {
-    return "Shart qatorlarini to‘liq va to‘g‘ri to‘ldiring";
-  }
-}
-
 type Props = {
   tenantSlug: string;
   initialRule: BonusRuleRow | null;
@@ -129,16 +101,22 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   const isEdit = Boolean(initialRule);
   const seedKey = initialRule?.id ?? "new";
 
-  const paymentMethodsQ = useQuery({
-    queryKey: ["settings", "profile", tenantSlug, "bonus-payment-methods"],
+  const profileRefsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "bonus-form-refs"],
     staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<{
-        references: { payment_method_entries?: { name: string; active?: boolean }[] };
+        references: {
+          payment_method_entries?: { name: string; active?: boolean }[];
+          client_category_entries?: ClientRefEntry[];
+        };
       }>(`/api/${tenantSlug}/settings/profile`);
-      return (data.references.payment_method_entries ?? []).filter((p) => p.active !== false).map((p) => p.name);
+      return data.references;
     }
   });
+
+  const paymentOptions = (profileRefsQ.data?.payment_method_entries ?? []).filter((p) => p.active !== false);
+  const clientCategoryOptions = (profileRefsQ.data?.client_category_entries ?? []).filter((c) => c.active !== false);
 
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "bonus-form"],
@@ -163,15 +141,16 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   const [clientType, setClientType] = useState("");
   const [salesChannel, setSalesChannel] = useState("");
   const [priceType, setPriceType] = useState("");
-  const [productIdsStr, setProductIdsStr] = useState("");
-  const [bonusProductIdsStr, setBonusProductIdsStr] = useState("");
+  const [triggerProductIds, setTriggerProductIds] = useState<number[]>([]);
+  const [bonusProductIds, setBonusProductIds] = useState<number[]>([]);
+  /** UI da ko‘rsatilmaydi — mavjud qoida kategoriya filtrini saqlash uchun */
   const [categoryIdsStr, setCategoryIdsStr] = useState("");
   const [targetAllClients, setTargetAllClients] = useState(true);
   const [selectedClientIdsStr, setSelectedClientIdsStr] = useState("");
   const [isManual, setIsManual] = useState(false);
-  const [inBlocks, setInBlocks] = useState(true);
+  const [inBlocks, setInBlocks] = useState(false);
   const [oncePerClient, setOncePerClient] = useState(false);
-  const [onePlusOne, setOnePlusOne] = useState(false);
+  const [onlyByAssortment, setOnlyByAssortment] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -212,15 +191,17 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       setClientType(rule.client_type ?? "");
       setSalesChannel(rule.sales_channel ?? "");
       setPriceType(rule.price_type ?? "");
-      setProductIdsStr(formatIdList(rule.product_ids ?? []));
-      setBonusProductIdsStr(formatIdList(rule.bonus_product_ids ?? []));
+      setTriggerProductIds([...(rule.product_ids ?? [])]);
+      setBonusProductIds([...(rule.bonus_product_ids ?? [])]);
       setCategoryIdsStr(formatIdList(rule.product_category_ids ?? []));
       setTargetAllClients(rule.target_all_clients ?? true);
       setSelectedClientIdsStr(formatIdList(rule.selected_client_ids ?? []));
       setIsManual(rule.is_manual ?? false);
-      setInBlocks(rule.in_blocks ?? true);
+      setInBlocks(rule.in_blocks ?? false);
       setOncePerClient(rule.once_per_client ?? false);
-      setOnePlusOne(rule.one_plus_one_gift ?? false);
+      const hasScope =
+        (rule.product_ids?.length ?? 0) > 0 || (rule.product_category_ids?.length ?? 0) > 0;
+      setOnlyByAssortment(hasScope);
     } else {
       setName("");
       setType("qty");
@@ -236,27 +217,23 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       setClientType("");
       setSalesChannel("");
       setPriceType("");
-      setProductIdsStr("");
-      setBonusProductIdsStr("");
+      setTriggerProductIds([]);
+      setBonusProductIds([]);
       setCategoryIdsStr("");
       setTargetAllClients(true);
       setSelectedClientIdsStr("");
       setIsManual(false);
-      setInBlocks(true);
+      setInBlocks(false);
       setOncePerClient(false);
-      setOnePlusOne(false);
+      setOnlyByAssortment(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- faqat id o‘zgarganda seed qilamiz (referens yangilanishi formani bekor qilmasin)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- faqat id o‘zgarganda seed
   }, [seedKey]);
-
-  const summaryLine = useMemo(
-    () => liveSummary(type, conditions, minSum, discountPct),
-    [type, conditions, minSum, discountPct]
-  );
 
   const mutation = useMutation({
     mutationFn: async () => {
       const p = Number.parseInt(priority, 10);
+      const product_ids = onlyByAssortment ? triggerProductIds : [];
       const payload: Record<string, unknown> = {
         name: name.trim(),
         type,
@@ -269,15 +246,15 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
         client_type: clientType.trim() || null,
         sales_channel: salesChannel.trim() || null,
         price_type: priceType.trim() || null,
-        product_ids: parseIdList(productIdsStr),
-        bonus_product_ids: parseIdList(bonusProductIdsStr),
+        product_ids,
+        bonus_product_ids: bonusProductIds,
         product_category_ids: parseIdList(categoryIdsStr),
         target_all_clients: targetAllClients,
         selected_client_ids: targetAllClients ? [] : parseIdList(selectedClientIdsStr),
         is_manual: isManual,
         in_blocks: inBlocks,
         once_per_client: oncePerClient,
-        one_plus_one_gift: onePlusOne
+        one_plus_one_gift: isEdit && initialRule ? initialRule.one_plus_one_gift : false
       };
 
       if (type === "qty") {
@@ -329,438 +306,502 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
     }
   });
 
-  const typeLabel =
-    type === "qty" ? "Miqdor (6+1, qatorlar)" : type === "sum" ? "Minimal summa" : "Chegirma %";
+  const submit = () => {
+    setLocalError(null);
+    if (!name.trim()) return;
+    if (onlyByAssortment) {
+      const hasCategoryScope = parseIdList(categoryIdsStr).length > 0;
+      if ((type === "qty" || type === "sum") && triggerProductIds.length === 0 && !hasCategoryScope) {
+        setLocalError(
+          "«Faqat assortiment» yoqilgan: chapdan mahsulot tanlang yoki (mavjud qoida) kategoriya filtri saqlangan bo‘lsa mahsulot qo‘shing."
+        );
+        return;
+      }
+      if (type === "discount" && triggerProductIds.length === 0 && !hasCategoryScope) {
+        setLocalError("Assortiment cheklovi uchun kamida bitta mahsulot tanlang yoki «Faqat assortiment»ni o‘chiring.");
+        return;
+      }
+    }
+    if ((type === "qty" || type === "sum") && bonusProductIds.length === 0) {
+      setLocalError("Kamida bitta bonus mahsulotni o‘ng ro‘yxatdan tanlang.");
+      return;
+    }
+    try {
+      if (type === "qty") {
+        for (const row of conditions) parseCondRow(row);
+      }
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : "Shartlarni tekshiring");
+      return;
+    }
+    mutation.mutate();
+  };
+
+  const showBonusColumn = type === "qty" || type === "sum";
+  const showTriggerColumn = type === "qty" || type === "sum" || (type === "discount" && onlyByAssortment);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
-      <div className="space-y-6 lg:col-span-8">
-        <Card className="shadow-panel">
-          <CardHeader>
-            <CardTitle>Asosiy</CardTitle>
-            <CardDescription>Nomi, tur va ustunlik — qoida ro‘yxatida tartiblash uchun.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label htmlFor="br-name">Nomi</Label>
-              <Input id="br-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="br-type">Tur</Label>
-              <select
-                id="br-type"
-                className={selectCls}
-                value={type}
-                onChange={(e) => setType(e.target.value as BonusType)}
-                disabled={mutation.isPending}
-              >
-                <option value="qty">Miqdor (6+1, qatorlar)</option>
-                <option value="sum">Minimal summa</option>
-                <option value="discount">Chegirma %</option>
-              </select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="br-priority">Ustunlik</Label>
-              <Input
-                id="br-priority"
-                className={inputCls}
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-            <label className="flex items-center gap-2 sm:col-span-2">
-              <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} disabled={mutation.isPending} />
-              <span className="text-sm">Faol</span>
-            </label>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-panel">
-          <CardHeader>
-            <CardTitle>Shartlar</CardTitle>
-            <CardDescription>
-              {type === "qty"
-                ? "Har bir qator alohida oraliq: min/max miqdor, qadam, bonus, ixtiyoriy maks. bonus."
-                : type === "sum"
-                  ? "Buyurtma umumiy summasi ushbu qiymatdan oshganda qoida ishlaydi."
-                  : "Buyurtmaga qo‘llanadigan chegirma foizi."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {type === "qty" ? (
-              <>
-                {conditions.map((row, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-lg border border-border/80 bg-muted/20 p-4"
-                  >
-                    <p className="mb-3 text-xs font-medium text-muted-foreground">Shart qatori #{idx + 1}</p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Min miqdor</Label>
-                        <Input
-                          className={inputCls}
-                          value={row.min_qty}
-                          onChange={(e) => {
-                            const next = [...conditions];
-                            next[idx] = { ...next[idx], min_qty: e.target.value };
-                            setConditions(next);
-                          }}
-                          disabled={mutation.isPending}
-                          placeholder="24"
-                        />
-                      </div>
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Max miqdor</Label>
-                        <Input
-                          className={inputCls}
-                          value={row.max_qty}
-                          onChange={(e) => {
-                            const next = [...conditions];
-                            next[idx] = { ...next[idx], max_qty: e.target.value };
-                            setConditions(next);
-                          }}
-                          disabled={mutation.isPending}
-                          placeholder="100"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Qadam</Label>
-                        <Input
-                          className={inputCls}
-                          value={row.step_qty}
-                          onChange={(e) => {
-                            const next = [...conditions];
-                            next[idx] = { ...next[idx], step_qty: e.target.value };
-                            setConditions(next);
-                          }}
-                          disabled={mutation.isPending}
-                        />
-                      </div>
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Bonus</Label>
-                        <Input
-                          className={inputCls}
-                          value={row.bonus_qty}
-                          onChange={(e) => {
-                            const next = [...conditions];
-                            next[idx] = { ...next[idx], bonus_qty: e.target.value };
-                            setConditions(next);
-                          }}
-                          disabled={mutation.isPending}
-                        />
-                      </div>
-                      <div className="grid gap-1.5">
-                        <Label className="text-xs">Maks. bonus</Label>
-                        <Input
-                          className={inputCls}
-                          value={row.max_bonus_qty}
-                          onChange={(e) => {
-                            const next = [...conditions];
-                            next[idx] = { ...next[idx], max_bonus_qty: e.target.value };
-                            setConditions(next);
-                          }}
-                          disabled={mutation.isPending}
-                        />
-                      </div>
-                    </div>
-                    {conditions.length > 1 ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full"
-                        onClick={() => setConditions(conditions.filter((_, i) => i !== idx))}
-                      >
-                        Ushbu qatorni o‘chirish
-                      </Button>
-                    ) : null}
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => setConditions([...conditions, emptyCond()])}
+    <div className="w-full space-y-6">
+      <Card className="shadow-panel">
+        <CardHeader className="border-b border-border/60 pb-4">
+          <CardTitle>Asosiy sozlamalar</CardTitle>
+          <CardDescription>
+            Yuqorida — nom, bonus turi, muddat va profil filtrlari; pastda — to‘lov, kim uchun, usul va belgilar
+            (ketma-ketlik uchun ustunlik oxirida).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 pt-6">
+          {/* 1-bo‘lim: 2 qator — siqilishsiz, barcha ustunlarda bir xil label→maydon tartibi */}
+          <div className="flex flex-col gap-5">
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(14rem,22rem)] md:items-start">
+              <div className="grid min-w-0 gap-1.5">
+                <Label htmlFor="br-name">Nomi</Label>
+                <Input
+                  id="br-name"
+                  className={inputCls}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+              <div className="grid min-w-0 gap-1.5">
+                <Label htmlFor="br-type">Bonus turi</Label>
+                <select
+                  id="br-type"
+                  className={selectCls}
+                  title="Qoida qanday hisoblanishini tanlang: miqdor, summa yoki foizli chegirma"
+                  value={type}
+                  onChange={(e) => setType(e.target.value as BonusType)}
                   disabled={mutation.isPending}
                 >
-                  + Yana shart qatori
-                </Button>
-              </>
-            ) : null}
+                  <option value="qty">Miqdor bo‘yicha bonus</option>
+                  <option value="sum">Buyurtma summasi bo‘yicha</option>
+                  <option value="discount">Chegirma (%)</option>
+                </select>
+              </div>
+            </div>
 
-            {type === "sum" ? (
-              <div className="grid gap-1.5">
-                <Label>Minimal summa</Label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(12.5rem,1.15fr)_minmax(12.5rem,1.15fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(5.25rem,5.5rem)]">
+              <div className="grid min-w-0 gap-1.5">
+                <Label htmlFor="br-valid-from">Amal boshlanishi</Label>
                 <Input
+                  id="br-valid-from"
                   className={inputCls}
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={minSum}
-                  onChange={(e) => setMinSum(e.target.value)}
+                  type="datetime-local"
+                  value={validFrom}
+                  onChange={(e) => setValidFrom(e.target.value)}
                   disabled={mutation.isPending}
                 />
               </div>
-            ) : null}
-
-            {type === "discount" ? (
-              <div className="grid gap-1.5">
-                <Label>Chegirma (%)</Label>
+              <div className="grid min-w-0 gap-1.5">
+                <Label htmlFor="br-valid-to">Amal tugashi</Label>
                 <Input
+                  id="br-valid-to"
                   className={inputCls}
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  value={discountPct}
-                  onChange={(e) => setDiscountPct(e.target.value)}
+                  type="datetime-local"
+                  value={validTo}
+                  onChange={(e) => setValidTo(e.target.value)}
                   disabled={mutation.isPending}
                 />
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+              <div className="grid min-w-0 gap-1.5 sm:col-span-2 lg:col-span-1 xl:col-span-1">
+                <Label htmlFor="br-client-cat">Mijoz kategoriyasi</Label>
+                <select
+                  id="br-client-cat"
+                  className={selectCls}
+                  value={
+                    clientCategory &&
+                    !clientCategoryOptions.some((c) => c.name === clientCategory)
+                      ? `__custom:${clientCategory}`
+                      : clientCategory
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setClientCategory(v.startsWith("__custom:") ? v.slice(11) : v);
+                  }}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">Barchasi</option>
+                  {clientCategory &&
+                  !clientCategoryOptions.some((c) => c.name === clientCategory) ? (
+                    <option value={`__custom:${clientCategory}`}>{clientCategory} (joriy qiymat)</option>
+                  ) : null}
+                  {clientCategoryOptions.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid min-w-0 gap-1.5 sm:col-span-2 lg:col-span-1 xl:col-span-1">
+                <Label htmlFor="br-price-type">Narx turi</Label>
+                <select
+                  id="br-price-type"
+                  className={selectCls}
+                  value={priceType}
+                  onChange={(e) => setPriceType(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">Barchasi</option>
+                  {(priceTypesQ.data ?? []).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid min-w-0 gap-1.5 sm:col-span-2 lg:col-span-1 xl:col-span-1">
+                <Label htmlFor="br-priority" title="Bir nechta qoida bo‘lsa, qaysi biri avval ishlashi">
+                  Ustunlik
+                </Label>
+                <Input
+                  id="br-priority"
+                  className={cn(inputCls, "max-w-full xl:max-w-[5.5rem]")}
+                  type="number"
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                  disabled={mutation.isPending}
+                />
+              </div>
+            </div>
+          </div>
 
-        <Card className="shadow-panel">
-          <CardHeader>
-            <CardTitle>Amal qilish muddati</CardTitle>
-            <CardDescription>Bo‘sh qoldirsangiz — vaqt cheklovsiz.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label>Kuchga kirish</Label>
-              <Input
-                className={inputCls}
-                type="datetime-local"
-                value={validFrom}
-                onChange={(e) => setValidFrom(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Tugash</Label>
-              <Input
-                className={inputCls}
-                type="datetime-local"
-                value={validTo}
-                onChange={(e) => setValidTo(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-panel">
-          <CardHeader>
-            <CardTitle>Filtrlar</CardTitle>
-            <CardDescription>
-              Bo‘sh maydonlar cheklov qo‘ymaydi. Mahsulot qamrovini pastdagi kategoriya tanlovi yoki ID matnidan
-              bering. <span className="text-foreground/90">Agar bir vaqtning o‘zida mahsulot ID va kategoriya ID
-              ikkalasini ham to‘ldirsangiz, backend ikkala shartni ham talab qiladi (AND).</span>
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Mijoz kategoriyasi</Label>
-              <Input className={inputCls} value={clientCategory} onChange={(e) => setClientCategory(e.target.value)} disabled={mutation.isPending} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs">To‘lov turi</Label>
-              <Input
-                className={inputCls}
-                list="bonus-rule-payment-types"
+          {/* 2-qator: to‘lov + yonma-yon guruhlar (kim / usul / holat / cheklovlar) */}
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-stretch">
+            <div className="grid min-w-0 shrink-0 gap-1.5 xl:w-52 xl:max-w-[14rem]">
+              <Label htmlFor="br-payment">To‘lov usuli</Label>
+              <select
+                id="br-payment"
+                className={selectCls}
                 value={paymentType}
                 onChange={(e) => setPaymentType(e.target.value)}
                 disabled={mutation.isPending}
-              />
-              <datalist id="bonus-rule-payment-types">
-                {(paymentMethodsQ.data ?? []).map((t) => (
-                  <option key={t} value={t} />
+              >
+                <option value="">Barchasi</option>
+                {paymentOptions.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Mijoz turi</Label>
-              <Input className={inputCls} value={clientType} onChange={(e) => setClientType(e.target.value)} disabled={mutation.isPending} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Sotish kanali</Label>
-              <Input className={inputCls} value={salesChannel} onChange={(e) => setSalesChannel(e.target.value)} disabled={mutation.isPending} />
-            </div>
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-xs">Narx turi</Label>
-              <Input
-                className={inputCls}
-                list="bonus-rule-price-types"
-                value={priceType}
-                onChange={(e) => setPriceType(e.target.value)}
-                disabled={mutation.isPending}
-              />
-              <datalist id="bonus-rule-price-types">
-                {(priceTypesQ.data ?? []).map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
-            </div>
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-sm font-medium">Qamrov: mahsulotlar</Label>
-              <BonusRuleProductScopePicker
-                tenantSlug={tenantSlug}
-                value={parseIdList(productIdsStr)}
-                onChange={(ids) => {
-                  setProductIdsStr(formatIdList(ids));
-                  setCategoryIdsStr("");
-                }}
-                onClearCategoryScope={() => setCategoryIdsStr("")}
-                disabled={mutation.isPending}
-              />
-              <Label className="text-xs text-muted-foreground">Qo‘lda mahsulot ID (ixtiyoriy)</Label>
-              <Input
-                className={inputCls}
-                value={productIdsStr}
-                onChange={(e) => setProductIdsStr(e.target.value)}
-                disabled={mutation.isPending}
-                placeholder="1, 2, 5"
-              />
-            </div>
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-xs">Bonus mahsulot ID</Label>
-              <Input
-                className={inputCls}
-                value={bonusProductIdsStr}
-                onChange={(e) => setBonusProductIdsStr(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-xs">Mahsulot kategoriya ID</Label>
-              <Input
-                className={inputCls}
-                value={categoryIdsStr}
-                onChange={(e) => setCategoryIdsStr(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="shadow-panel">
-          <CardHeader>
-            <CardTitle>Mijozlar va qo‘llanish</CardTitle>
-            <CardDescription>Bloklar, qo‘lda qo‘llash va boshqa maxsus rejimlar.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <label className="flex items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:bg-muted/40">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={targetAllClients}
-                onChange={(e) => setTargetAllClients(e.target.checked)}
-                disabled={mutation.isPending}
-              />
-              <span>Barcha mijozlar</span>
-            </label>
-            {!targetAllClients ? (
-              <div className="grid gap-1.5 pl-6">
-                <Label className="text-xs">Tanlangan mijoz ID</Label>
-                <Input
-                  className={inputCls}
-                  value={selectedClientIdsStr}
-                  onChange={(e) => setSelectedClientIdsStr(e.target.value)}
-                  disabled={mutation.isPending}
-                  placeholder="10, 20"
-                />
-              </div>
-            ) : null}
-            <label className="flex items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:bg-muted/40">
-              <input type="checkbox" className="mt-1" checked={isManual} onChange={(e) => setIsManual(e.target.checked)} disabled={mutation.isPending} />
-              <span>Qo‘lda qo‘llash (manual)</span>
-            </label>
-            <label className="flex items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:bg-muted/40">
-              <input type="checkbox" className="mt-1" checked={inBlocks} onChange={(e) => setInBlocks(e.target.checked)} disabled={mutation.isPending} />
-              <span>Bloklarda (har to‘liq qadam uchun bonus)</span>
-            </label>
-            <label className="flex items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:bg-muted/40">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={oncePerClient}
-                onChange={(e) => setOncePerClient(e.target.checked)}
-                disabled={mutation.isPending}
-              />
-              <span>Har mijozga faqat bir marta</span>
-            </label>
-            <label className="flex items-start gap-2 rounded-lg border border-transparent px-1 py-1 hover:bg-muted/40">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={onePlusOne}
-                onChange={(e) => setOnePlusOne(e.target.checked)}
-                disabled={mutation.isPending}
-              />
-              <span>1+1 sovg‘a (avtomatik qadam 1, bonus 1)</span>
-            </label>
-          </CardContent>
-        </Card>
-
-        {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
-
-        <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push("/settings/bonus-rules/active")}
-            disabled={mutation.isPending}
-          >
-            Bekor
-          </Button>
-          <Button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending || !name.trim()}>
-            {mutation.isPending ? "Saqlanmoqda…" : isEdit ? "O‘zgarishlarni saqlash" : "Qoidani yaratish"}
-          </Button>
-        </div>
-      </div>
-
-      <aside className="lg:col-span-4">
-        <div className="lg:sticky lg:top-4 space-y-4">
-          <Card className="border-primary/20 bg-primary/5 shadow-panel">
-            <CardHeader>
-              <CardTitle className="text-primary">Qisqacha</CardTitle>
-              <CardDescription>Maydonlarga qarab yangilanadi</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Tur</p>
-                <p className="font-medium">{typeLabel}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Nomi</p>
-                <p className="font-medium">{name.trim() || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Shart / hisob</p>
-                <p className="whitespace-pre-wrap break-words text-muted-foreground">{summaryLine}</p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {isActive ? (
-                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-700 dark:text-emerald-400">Faol</span>
-                ) : (
-                  <span className="rounded-full bg-muted px-2 py-0.5">Nofaol</span>
-                )}
-                {inBlocks && type === "qty" ? (
-                  <span className="rounded-full bg-muted px-2 py-0.5">Bloklar</span>
+            <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Kim uchun
+                </p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="br-target-clients"
+                      className="h-4 w-4 accent-primary"
+                      checked={targetAllClients}
+                      onChange={() => setTargetAllClients(true)}
+                      disabled={mutation.isPending}
+                    />
+                    Barcha mijozlar
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="br-target-clients"
+                      className="h-4 w-4 accent-primary"
+                      checked={!targetAllClients}
+                      onChange={() => setTargetAllClients(false)}
+                      disabled={mutation.isPending}
+                    />
+                    Tanlangan mijozlar
+                  </label>
+                </div>
+                {!targetAllClients ? (
+                  <div className="mt-3 grid gap-1.5 border-t border-border/60 pt-3">
+                    <Label className="text-xs">Mijoz ID (vergul bilan)</Label>
+                    <Input
+                      className={inputCls}
+                      value={selectedClientIdsStr}
+                      onChange={(e) => setSelectedClientIdsStr(e.target.value)}
+                      disabled={mutation.isPending}
+                      placeholder="10, 20, 30"
+                    />
+                  </div>
                 ) : null}
-                {isManual ? <span className="rounded-full bg-muted px-2 py-0.5">Manual</span> : null}
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      </aside>
+
+              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Usul</p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="br-method"
+                      className="h-4 w-4 accent-primary"
+                      checked={!isManual}
+                      onChange={() => setIsManual(false)}
+                      disabled={mutation.isPending}
+                    />
+                    Avtomatik
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="br-method"
+                      className="h-4 w-4 accent-primary"
+                      checked={isManual}
+                      onChange={() => setIsManual(true)}
+                      disabled={mutation.isPending}
+                    />
+                    Qo‘lda
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Holat</p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={isActive}
+                      onChange={(e) => setIsActive(e.target.checked)}
+                      disabled={mutation.isPending}
+                    />
+                    Faol
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={inBlocks}
+                      onChange={(e) => setInBlocks(e.target.checked)}
+                      disabled={mutation.isPending}
+                    />
+                    Bloklarda
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Cheklovlar
+                </p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={onlyByAssortment}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        setOnlyByAssortment(v);
+                        if (!v) setTriggerProductIds([]);
+                      }}
+                      disabled={mutation.isPending}
+                    />
+                    Faqat assortiment
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={oncePerClient}
+                      onChange={(e) => setOncePerClient(e.target.checked)}
+                      disabled={mutation.isPending}
+                    />
+                    Har mijozga bir marta
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-panel">
+        <CardHeader className="border-b border-border/60 pb-4">
+          <CardTitle>Shartlar</CardTitle>
+          <CardDescription>
+            {type === "qty"
+              ? "Minimal / maksimal miqdor oralig‘i, qadam, bonus va maks. bonus. «Yana qo‘shish» bilan bir nechta pog‘ona."
+              : type === "sum"
+                ? "Buyurtma summasi ushbu qiymatdan oshganda."
+                : "Buyurtmaga qo‘llanadigan chegirma foizi."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-6">
+          {type === "qty" ? (
+            <>
+              {conditions.map((row, idx) => (
+                <div key={idx} className="rounded-xl border border-border/80 bg-muted/20 p-4">
+                  <p className="mb-3 text-xs font-medium text-muted-foreground">Shart #{idx + 1}</p>
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">Minimal miqdor</Label>
+                      <Input
+                        className={inputCls}
+                        value={row.min_qty}
+                        onChange={(e) => {
+                          const next = [...conditions];
+                          next[idx] = { ...next[idx], min_qty: e.target.value };
+                          setConditions(next);
+                        }}
+                        disabled={mutation.isPending}
+                        placeholder="masalan 24"
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">Maks. miqdor (oralig‘)</Label>
+                      <Input
+                        className={inputCls}
+                        value={row.max_qty}
+                        onChange={(e) => {
+                          const next = [...conditions];
+                          next[idx] = { ...next[idx], max_qty: e.target.value };
+                          setConditions(next);
+                        }}
+                        disabled={mutation.isPending}
+                        placeholder="masalan 100"
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">Qadam (har nechta)</Label>
+                      <Input
+                        className={inputCls}
+                        value={row.step_qty}
+                        onChange={(e) => {
+                          const next = [...conditions];
+                          next[idx] = { ...next[idx], step_qty: e.target.value };
+                          setConditions(next);
+                        }}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">Bonus miqdori</Label>
+                      <Input
+                        className={inputCls}
+                        value={row.bonus_qty}
+                        onChange={(e) => {
+                          const next = [...conditions];
+                          next[idx] = { ...next[idx], bonus_qty: e.target.value };
+                          setConditions(next);
+                        }}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs">Maks. bonus (jami chegara)</Label>
+                      <Input
+                        className={inputCls}
+                        value={row.max_bonus_qty}
+                        onChange={(e) => {
+                          const next = [...conditions];
+                          next[idx] = { ...next[idx], max_bonus_qty: e.target.value };
+                          setConditions(next);
+                        }}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                  </div>
+                  {conditions.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setConditions(conditions.filter((_, i) => i !== idx))}
+                    >
+                      Ushbu shartni o‘chirish
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+              <Button
+                type="button"
+                className="w-full sm:w-auto"
+                onClick={() => setConditions([...conditions, emptyCond()])}
+                disabled={mutation.isPending}
+              >
+                Yana shart qo‘shish
+              </Button>
+            </>
+          ) : null}
+
+          {type === "sum" ? (
+            <div className="grid max-w-md gap-1.5">
+              <Label>Minimal summa</Label>
+              <Input
+                className={inputCls}
+                type="number"
+                min={0}
+                step="0.01"
+                value={minSum}
+                onChange={(e) => setMinSum(e.target.value)}
+                disabled={mutation.isPending}
+              />
+            </div>
+          ) : null}
+
+          {type === "discount" ? (
+            <div className="grid max-w-md gap-1.5">
+              <Label>Chegirma (%)</Label>
+              <Input
+                className={inputCls}
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                value={discountPct}
+                onChange={(e) => setDiscountPct(e.target.value)}
+                disabled={mutation.isPending}
+              />
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {showTriggerColumn || showBonusColumn ? (
+        <Card className="shadow-panel">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <CardTitle>Mahsulotlar</CardTitle>
+            <CardDescription>
+              Chapda trigger, o‘ngda bonus mahsulotlari — faol mahsulotlar kategoriya bo‘yicha ochiladi. «Faqat
+              assortiment» o‘chiq bo‘lsa ham ro‘yxat ko‘rinadi; tanlov saqlanmaydi, barcha mahsulotlar trigger hisoblanadi.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <BonusRuleProductDualPanels
+              tenantSlug={tenantSlug}
+              triggerProductIds={triggerProductIds}
+              bonusProductIds={bonusProductIds}
+              onTriggerChange={setTriggerProductIds}
+              onBonusChange={setBonusProductIds}
+              onlyByAssortment={onlyByAssortment}
+              showTriggerColumn={showTriggerColumn}
+              showBonusColumn={showBonusColumn}
+              disabled={mutation.isPending}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
+
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-6">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.push("/settings/bonus-rules/active")}
+          disabled={mutation.isPending}
+        >
+          Bekor
+        </Button>
+        <Button type="button" onClick={submit} disabled={mutation.isPending || !name.trim()}>
+          {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
+        </Button>
+      </div>
     </div>
   );
 }

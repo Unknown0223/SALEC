@@ -55,6 +55,7 @@ export type CreatePeriodReturnInput = {
   date_to?: string;
   lines: { product_id: number; qty: number }[];
   note?: string | null;
+  refusal_reason_ref?: string | null;
 };
 
 export type PeriodReturnResult = {
@@ -476,6 +477,10 @@ export async function createPeriodReturn(
         date_from: input.date_from ? new Date(input.date_from) : null,
         date_to: input.date_to ? new Date(input.date_to) : null,
         note: input.note?.trim() || null,
+        refusal_reason_ref:
+          input.refusal_reason_ref != null && String(input.refusal_reason_ref).trim()
+            ? String(input.refusal_reason_ref).trim().slice(0, 128)
+            : null,
         created_by_user_id: uid,
         lines: {
           create: retLines.map(rl => ({
@@ -599,6 +604,7 @@ export type FullReturnInput = {
   warehouse_id?: number;
   note?: string | null;
   refund_amount?: number;
+  refusal_reason_ref?: string | null;
 };
 
 export async function createFullReturnFromOrder(
@@ -628,8 +634,14 @@ export async function createFullReturnFromOrder(
         tenant_id: tenantId, number,
         client_id: order.client_id, order_id: order.id,
         warehouse_id: warehouseId, status: "posted",
-        refund_amount: refund, return_type: "order_full",
-        note: input.note?.trim() || null, created_by_user_id: uid,
+        refund_amount: refund,
+        return_type: "order_full",
+        note: input.note?.trim() || null,
+        refusal_reason_ref:
+          input.refusal_reason_ref != null && String(input.refusal_reason_ref).trim()
+            ? String(input.refusal_reason_ref).trim().slice(0, 128)
+            : null,
+        created_by_user_id: uid,
         lines: {
           create: order.items.map(it => ({
             product_id: it.product_id, qty: it.qty,

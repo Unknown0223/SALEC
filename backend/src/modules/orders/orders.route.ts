@@ -25,7 +25,16 @@ const createBodySchema = z.object({
   /** Hujjat tipi: order | return | exchange | partial_return | return_by_order */
   order_type: z.enum(["order", "return", "exchange", "partial_return", "return_by_order"]).optional(),
   apply_bonus: z.boolean().optional(),
+  bonus_gift_overrides: z
+    .array(
+      z.object({
+        bonus_rule_id: z.number().int().positive(),
+        bonus_product_id: z.number().int().positive()
+      })
+    )
+    .optional(),
   comment: z.string().max(4000).optional().nullable(),
+  request_type_ref: z.string().trim().max(128).optional().nullable(),
   items: z
     .array(
       z.object({
@@ -66,6 +75,14 @@ const patchOrderLinesBodySchema = z.object({
   warehouse_id: z.number().int().positive().nullable().optional(),
   agent_id: z.number().int().positive().nullable().optional(),
   apply_bonus: z.boolean().optional(),
+  bonus_gift_overrides: z
+    .array(
+      z.object({
+        bonus_rule_id: z.number().int().positive(),
+        bonus_product_id: z.number().int().positive()
+      })
+    )
+    .optional(),
   items: z
     .array(
       z.object({
@@ -270,6 +287,18 @@ export async function registerOrderRoutes(app: FastifyInstance) {
             order_total: ex.order_total
           });
         }
+        if (msg === "BAD_BONUS_GIFT_OVERRIDE") {
+          return reply.status(400).send({ error: "BadBonusGiftOverride" });
+        }
+        if (msg === "INSUFFICIENT_STOCK") {
+          const ex = e as Error & { product_id?: number; available?: string; requested?: string };
+          return reply.status(400).send({
+            error: "InsufficientStock",
+            product_id: ex.product_id,
+            available: ex.available,
+            requested: ex.requested
+          });
+        }
         throw e;
       }
     }
@@ -472,6 +501,9 @@ export async function registerOrderRoutes(app: FastifyInstance) {
             outstanding: ex.outstanding,
             order_total: ex.order_total
           });
+        }
+        if (msg === "BAD_BONUS_GIFT_OVERRIDE") {
+          return reply.status(400).send({ error: "BadBonusGiftOverride" });
         }
         throw e;
       }

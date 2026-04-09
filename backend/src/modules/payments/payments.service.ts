@@ -8,8 +8,13 @@ import { getPaymentAllocations, type PaymentAllocationRow } from "./payment-allo
 export async function deletePayment(
   tenantId: number,
   paymentId: number,
-  actorUserId: number | null
+  actorUserId: number | null,
+  cancelReasonRef?: string | null
 ): Promise<void> {
+  const reasonNote =
+    cancelReasonRef != null && String(cancelReasonRef).trim()
+      ? String(cancelReasonRef).trim().slice(0, 128)
+      : null;
   await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.findFirst({
       where: { id: paymentId, tenant_id: tenantId }
@@ -33,7 +38,9 @@ export async function deletePayment(
         data: {
           client_balance_id: bal.id,
           delta: payment.amount.neg(),
-          note: `To'lov #${payment.id} bekor qilindi`,
+          note: reasonNote
+            ? `To'lov #${payment.id} bekor qilindi — ${reasonNote}`
+            : `To'lov #${payment.id} bekor qilindi`,
           user_id: actorUserId
         }
       });
@@ -54,7 +61,7 @@ export async function deletePayment(
       entityType: AuditEntityType.finance,
       entityId: String(paymentId),
       action: "payment.delete",
-      payload: { payment_id: paymentId }
+      payload: { payment_id: paymentId, ...(reasonNote ? { cancel_reason_ref: reasonNote } : {}) }
     });
   }
 }

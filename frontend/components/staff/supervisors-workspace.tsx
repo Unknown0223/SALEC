@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { SearchableMultiSelectPanel } from "@/components/ui/searchable-multi-select-panel";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
@@ -768,11 +769,13 @@ function SupervisorEditDialog({
     }
   };
 
-  const filteredAgents = agents.filter((a) => {
+  const filteredAgents = useMemo(() => {
     const q = agSearch.trim().toLowerCase();
-    if (!q) return true;
-    return `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(q);
-  });
+    if (!q) return agents;
+    return agents.filter((a) =>
+      `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(q)
+    );
+  }, [agents, agSearch]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -818,34 +821,20 @@ function SupervisorEditDialog({
               ))}
             </datalist>
           </label>
-          <div className="rounded-md border">
-            <div className="border-b p-2 text-sm font-medium">Агент</div>
-            <Input
-              placeholder="Поиск агента"
-              className="m-2"
-              value={agSearch}
-              onChange={(e) => setAgSearch(e.target.value)}
-            />
-            <div className="max-h-48 overflow-y-auto p-2">
-              {filteredAgents.map((a) => (
-                <label key={a.id} className="flex items-center gap-2 py-1 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={agSel.has(a.id)}
-                    onChange={(e) => {
-                      const n = new Set(agSel);
-                      if (e.target.checked) n.add(a.id);
-                      else n.delete(a.id);
-                      setAgSel(n);
-                    }}
-                  />
-                  <span className="font-mono text-[10px] text-muted-foreground">{a.id}</span>
-                  {a.code ? <span className="font-mono text-xs">{a.code}</span> : null}
-                  <span className="truncate">{a.fio}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+          <SearchableMultiSelectPanel
+            label="Агент"
+            searchPlaceholder="Поиск агента"
+            search={agSearch}
+            onSearchChange={setAgSearch}
+            items={filteredAgents.map((a) => ({
+              id: a.id,
+              subtitle: a.code != null && String(a.code).trim() !== "" ? String(a.code) : `#${a.id}`,
+              title: a.fio
+            }))}
+            selected={agSel}
+            onSelectedChange={setAgSel}
+            emptyMessage="Нет агентов"
+          />
           <Input placeholder="Логин для входа" value={login} onChange={(e) => setLogin(e.target.value)} disabled />
           {!pwMode ? (
             <Button type="button" variant="outline" className="w-full" onClick={() => setPwMode(true)}>

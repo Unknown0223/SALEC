@@ -23,6 +23,7 @@ const createBody = z.object({
   order_id: z.number().int().positive().nullable().optional(),
   refund_amount: z.number().positive().nullable().optional(),
   note: z.string().max(2000).optional().nullable(),
+  refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
   lines: z
     .array(
       z.object({
@@ -40,6 +41,7 @@ const periodReturnBody = z.object({
   date_from: z.string().optional(),
   date_to: z.string().optional(),
   note: z.string().max(2000).optional().nullable(),
+  refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
   lines: z
     .array(
       z.object({
@@ -57,7 +59,8 @@ const fullReturnBody = z.object({
   order_id: z.number().int().positive(),
   warehouse_id: z.number().int().positive().optional(),
   refund_amount: z.number().positive().optional(),
-  note: z.string().max(2000).optional().nullable()
+  note: z.string().max(2000).optional().nullable(),
+  refusal_reason_ref: z.string().trim().max(128).optional().nullable()
 });
 
 export async function registerSalesReturnRoutes(app: FastifyInstance) {

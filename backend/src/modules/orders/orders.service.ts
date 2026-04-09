@@ -33,6 +33,11 @@ import { buildNakladnoyPdf } from "./order-nakladnoy-pdf";
 
 export type OrderLineInput = { product_id: number; qty: number };
 
+export type BonusGiftOverrideInput = {
+  bonus_rule_id: number;
+  bonus_product_id: number;
+};
+
 export type CreateOrderInput = {
   client_id: number;
   /** Majburiy — qaysi ombordan jo’natiladi */
@@ -45,7 +50,11 @@ export type CreateOrderInput = {
   /** Hujjat tipi: order | return | exchange | partial_return | return_by_order */
   order_type?: string | null;
   apply_bonus?: boolean;
+  /** Qty bonus: `bonus_product_ids` ro‘yxatidan tanlov (faqat qoida ro‘yxatida bor mahsulotlar) */
+  bonus_gift_overrides?: BonusGiftOverrideInput[];
   comment?: string | null;
+  /** Sozlamalar → request_type_entries (kod yoki nom, max 128) */
+  request_type_ref?: string | null;
   items: OrderLineInput[];
 };
 
@@ -54,6 +63,7 @@ export type UpdateOrderLinesInput = {
   warehouse_id?: number | null;
   agent_id?: number | null;
   apply_bonus?: boolean;
+  bonus_gift_overrides?: BonusGiftOverrideInput[];
 };
 
 export type OrderItemRow = {
@@ -104,6 +114,8 @@ export type OrderListRow = {
   debt: string | null;
   price_type: string | null;
   comment: string | null;
+  /** «Причины заявок» tanlovi */
+  request_type_ref: string | null;
   created_at: string;
   /** Joriy foydalanuvchi roli uchun ruxsat etilgan keyingi holatlar (jadvalda tez o‘zgartirish). */
   allowed_next_statuses: string[];
@@ -125,6 +137,14 @@ export type OrderChangeLogRow = {
   created_at: string;
 };
 
+export type BonusGiftSwapOptionRow = {
+  bonus_rule_id: number;
+  rule_name: string;
+  allowed_product_ids: number[];
+  chosen_product_id: number;
+  products: Array<{ id: number; name: string; sku: string }>;
+};
+
 export type OrderDetailRow = OrderListRow & {
   agent_id: number | null;
   warehouse_name: string | null;
@@ -134,6 +154,10 @@ export type OrderDetailRow = OrderListRow & {
   allowed_next_statuses: string[];
   status_logs: OrderStatusLogRow[];
   change_logs: OrderChangeLogRow[];
+  /** Saqlangan qty bonus sovg‘a tanlovlari (rule_id string kalit) */
+  bonus_gift_selections?: Record<string, number>;
+  /** UI: bir nechta sovg‘a varianti bo‘lgan qo‘llangan qty qoidalar */
+  bonus_gift_swap_options?: BonusGiftSwapOptionRow[];
   /** Faqat yaratish javobida (ixtiyoriy) */
   client_finance?: {
     account_balance: string;
@@ -186,7 +210,10 @@ export type OrderDetailLoaded = {
   bonus_sum: Prisma.Decimal;
   discount_sum: Prisma.Decimal;
   applied_auto_bonus_rule_ids: number[];
+  bonus_gift_selections?: Prisma.JsonValue | null;
   comment: string | null;
+  request_type_ref: string | null;
+  order_type: string;
   created_at: Date;
   client: { name: string };
   warehouse: { id: number; name: string } | null;
@@ -221,6 +248,90 @@ function roundOrderMoney(d: Prisma.Decimal): Prisma.Decimal {
   return d.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
 
+function parseBonusGiftSelectionsJson(json: Prisma.JsonValue | null | undefined): Map<number, number> {
+  const m = new Map<number, number>();
+  if (json == null || typeof json !== "object" || Array.isArray(json)) return m;
+  for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+    const rid = Number.parseInt(k, 10);
+    const pid = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(rid) && rid > 0 && Number.isFinite(pid) && pid > 0) m.set(rid, pid);
+  }
+  return m;
+}
+
+function bonusGiftMapToJson(map: Map<number, number>): Prisma.InputJsonValue {
+  const o: Record<string, number> = {};
+  for (const [k, v] of map) o[String(k)] = v;
+  return o;
+}
+
+async function validateBonusGiftOverrides(
+  tenantId: number,
+  rows: BonusGiftOverrideInput[]
+): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  for (const row of rows) {
+    const rule = await prisma.bonusRule.findFirst({
+      where: {
+        id: row.bonus_rule_id,
+        tenant_id: tenantId,
+        type: "qty",
+        is_manual: false,
+        is_active: true
+      },
+      select: { id: true, bonus_product_ids: true }
+    });
+    if (!rule) {
+      throw new Error("BAD_BONUS_GIFT_OVERRIDE");
+    }
+    const ids = rule.bonus_product_ids;
+    if (ids.length === 0 || !ids.includes(row.bonus_product_id)) {
+      throw new Error("BAD_BONUS_GIFT_OVERRIDE");
+    }
+    map.set(row.bonus_rule_id, row.bonus_product_id);
+  }
+  return map;
+}
+
+async function buildBonusGiftSwapOptions(
+  tenantId: number,
+  appliedRuleIds: number[],
+  selections: Map<number, number>
+): Promise<BonusGiftSwapOptionRow[]> {
+  const out: BonusGiftSwapOptionRow[] = [];
+  if (!appliedRuleIds.length) return out;
+  const rules = await prisma.bonusRule.findMany({
+    where: { tenant_id: tenantId, id: { in: appliedRuleIds }, type: "qty" },
+    select: { id: true, name: true, bonus_product_ids: true }
+  });
+  const productIdSet = new Set<number>();
+  for (const r of rules) {
+    if (r.bonus_product_ids.length < 2) continue;
+    for (const pid of r.bonus_product_ids) productIdSet.add(pid);
+  }
+  if (productIdSet.size === 0) return out;
+  const products = await prisma.product.findMany({
+    where: { id: { in: [...productIdSet] }, tenant_id: tenantId },
+    select: { id: true, name: true, sku: true }
+  });
+  const pmap = new Map(products.map((p) => [p.id, p]));
+  for (const r of rules) {
+    if (r.bonus_product_ids.length < 2) continue;
+    const chosen = selections.get(r.id) ?? r.bonus_product_ids[0]!;
+    out.push({
+      bonus_rule_id: r.id,
+      rule_name: r.name,
+      allowed_product_ids: [...r.bonus_product_ids],
+      chosen_product_id: chosen,
+      products: r.bonus_product_ids.map((id) => {
+        const p = pmap.get(id);
+        return { id, name: p?.name ?? `#${id}`, sku: p?.sku ?? "" };
+      })
+    });
+  }
+  return out;
+}
+
 function sumBonusQty(
   items: ReadonlyArray<{ qty: Prisma.Decimal; is_bonus: boolean }>
 ): string {
@@ -249,7 +360,7 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
   return {
     id: o.id,
     number: o.number,
-    order_type: null,
+    order_type: o.order_type ?? "order",
     client_id: o.client_id,
     client_name: o.client.name,
     client_legal_name: null,
@@ -286,6 +397,7 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
     debt: null,
     price_type: null,
     comment: o.comment ?? null,
+    request_type_ref: o.request_type_ref ?? null,
     created_at: o.created_at.toISOString(),
     items: mapItems(o.items),
     allowed_next_statuses: allowedNextForRole(o.status, viewerRole),
@@ -327,6 +439,19 @@ function mapItems(
     total: i.total.toString(),
     is_bonus: i.is_bonus
   }));
+}
+
+async function enrichOrderDetailRow(
+  tenantId: number,
+  o: OrderDetailLoaded,
+  viewerRole?: string
+): Promise<OrderDetailRow> {
+  const base = toDetailRow(o, viewerRole);
+  const sel = parseBonusGiftSelectionsJson(o.bonus_gift_selections ?? null);
+  const swap = await buildBonusGiftSwapOptions(tenantId, o.applied_auto_bonus_rule_ids, sel);
+  const bonus_gift_selections: Record<string, number> = {};
+  for (const [k, v] of sel) bonus_gift_selections[String(k)] = v;
+  return { ...base, bonus_gift_selections, bonus_gift_swap_options: swap };
 }
 
 export async function createOrder(
@@ -438,6 +563,11 @@ export async function createOrder(
   });
   const stackPolicy = parseBonusStackPolicy(tenantRow?.settings);
 
+  const validatedGiftOverrides =
+    input.bonus_gift_overrides?.length ?
+      await validateBonusGiftOverrides(tenantId, input.bonus_gift_overrides)
+    : new Map<number, number>();
+
   const order = await prisma.$transaction(async (tx) => {
     const applyBonus = input.apply_bonus ?? true;
     let paidAfterDisc = lineData;
@@ -462,7 +592,8 @@ export async function createOrder(
         productById,
         orderedProductIds,
         stackPolicy,
-        usedRuleIds
+        usedRuleIds,
+        validatedGiftOverrides
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;
@@ -619,6 +750,11 @@ export async function createOrder(
         ? null
         : input.comment.trim() || null;
 
+    const requestTypeRefTrim =
+      input.request_type_ref === undefined || input.request_type_ref === null
+        ? null
+        : input.request_type_ref.trim().slice(0, 128) || null;
+
     const orderType = normalizeOrderType(input.order_type);
     const statusForType = orderType === "order" ? "new" : "new";
 
@@ -636,7 +772,9 @@ export async function createOrder(
         bonus_sum: bonusSum,
         discount_sum: discountSum,
         applied_auto_bonus_rule_ids: appliedAutoBonusRuleIds,
+        bonus_gift_selections: bonusGiftMapToJson(new Map(validatedGiftOverrides)),
         comment: commentTrim,
+        request_type_ref: requestTypeRefTrim,
         items: {
           create: [
             ...paidAfterDisc.map((l) => ({
@@ -661,7 +799,7 @@ export async function createOrder(
 
   emitOrderUpdated(tenantId, order.id);
   void invalidateDashboard(tenantId);
-  const detail = toDetailRow(order as unknown as OrderDetailLoaded, viewerRole);
+  const detail = await enrichOrderDetailRow(tenantId, order as unknown as OrderDetailLoaded, viewerRole);
 
   // Finance — post-commit hisoblash (yangi zakaz kiritilgan joriy holatni qaytarish)
   const balRow = await prisma.clientBalance.findUnique({
@@ -743,6 +881,16 @@ export async function updateOrderLines(
   if (!client) {
     throw new Error("BAD_CLIENT");
   }
+
+  const priorSelections = parseBonusGiftSelectionsJson(
+    (existing as { bonus_gift_selections?: Prisma.JsonValue | null }).bonus_gift_selections ?? null
+  );
+  const bodyGiftOverrides =
+    input.bonus_gift_overrides?.length ?
+      await validateBonusGiftOverrides(tenantId, input.bonus_gift_overrides)
+    : new Map<number, number>();
+  const giftSelectionMap = new Map(priorSelections);
+  for (const [k, v] of bodyGiftOverrides) giftSelectionMap.set(k, v);
 
   const warehouseId =
     input.warehouse_id !== undefined ? input.warehouse_id : existing.warehouse_id;
@@ -849,7 +997,8 @@ export async function updateOrderLines(
         productById,
         orderedProductIds,
         stackPolicy,
-        usedRuleIds
+        usedRuleIds,
+        giftSelectionMap
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;
@@ -916,6 +1065,7 @@ export async function updateOrderLines(
         bonus_sum: bonusSum,
         discount_sum: discountSum,
         applied_auto_bonus_rule_ids: appliedAutoBonusRuleIds,
+        bonus_gift_selections: bonusGiftMapToJson(giftSelectionMap),
         items: {
           create: [
             ...paidAfterDisc.map((l) => ({
@@ -968,7 +1118,7 @@ export async function updateOrderLines(
   });
 
   emitOrderUpdated(tenantId, orderId);
-  return toDetailRow(updated as unknown as OrderDetailLoaded, viewerRole);
+  return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
 }
 
 /**
@@ -1024,7 +1174,7 @@ export async function updateOrderMeta(
       include: orderDetailInclude
     });
     emitOrderUpdated(tenantId, orderId);
-    return toDetailRow(updated as unknown as OrderDetailLoaded, viewerRole);
+    return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
   }
 
   if (!ORDER_LINES_EDITABLE_STATUSES.has(existing.status)) {
@@ -1163,7 +1313,7 @@ export async function updateOrderMeta(
   });
 
   emitOrderUpdated(tenantId, orderId);
-  return toDetailRow(updated as unknown as OrderDetailLoaded, viewerRole);
+  return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
 }
 
 export async function updateOrderStatus(
@@ -1187,7 +1337,7 @@ export async function updateOrderStatus(
   }
 
   if (o.status === trimmed) {
-    return toDetailRow(o as unknown as OrderDetailLoaded, actorRole);
+    return enrichOrderDetailRow(tenantId, o as unknown as OrderDetailLoaded, actorRole);
   }
 
   if (!canTransitionOrderStatus(o.status, trimmed)) {
@@ -1325,7 +1475,7 @@ export async function updateOrderStatus(
     agent_id: o.agent_id,
     expeditor_user_id: o.expeditor_user_id
   });
-  return toDetailRow(updated as unknown as OrderDetailLoaded, actorRole);
+  return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, actorRole);
 }
 
 export type BulkOrderStatusResult = {
@@ -1528,7 +1678,7 @@ export async function listOrdersPaged(
       return {
       id: o.id,
       number: o.number,
-      order_type: null,
+      order_type: o.order_type ?? "order",
       client_id: o.client_id,
       client_name: o.client.name,
       client_legal_name: null,
@@ -1562,6 +1712,7 @@ export async function listOrdersPaged(
       debt: null,
       price_type: null,
       comment: (o as { comment?: string | null }).comment ?? null,
+      request_type_ref: (o as { request_type_ref?: string | null }).request_type_ref ?? null,
       created_at: o.created_at.toISOString(),
       allowed_next_statuses: allowedNextForRole(o.status, viewerRole)
     };
@@ -1584,7 +1735,7 @@ export async function getOrderDetail(
   if (!o) {
     throw new Error("NOT_FOUND");
   }
-  return toDetailRow(o as unknown as OrderDetailLoaded, viewerRole);
+  return enrichOrderDetailRow(tenantId, o as unknown as OrderDetailLoaded, viewerRole);
 }
 
 export const NAKLADNOY_TEMPLATE_IDS = ["nakladnoy_warehouse", "nakladnoy_expeditor"] as const;

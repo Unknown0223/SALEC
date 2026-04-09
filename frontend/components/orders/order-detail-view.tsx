@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import { refEntryLabelByStored } from "@/lib/profile-ref-entries";
 import type { ProductRow } from "@/lib/product-types";
 import { OrderPrintView } from "./order-print-view";
 import axios, { type AxiosError } from "axios";
@@ -52,6 +53,8 @@ export type OrderListRow = {
   debt: string | null;
   price_type: string | null;
   comment: string | null;
+  /** «Причины заявок» kod/nom */
+  request_type_ref?: string | null;
   created_at: string;
   /** Ro‘yxat API dan; tafsilotda bo‘lmasa bo‘sh. */
   allowed_next_statuses?: string[];
@@ -84,6 +87,14 @@ export type OrderChangeLogRow = {
   created_at: string;
 };
 
+export type BonusGiftSwapOptionRow = {
+  bonus_rule_id: number;
+  rule_name: string;
+  allowed_product_ids: number[];
+  chosen_product_id: number;
+  products: Array<{ id: number; name: string; sku: string }>;
+};
+
 export type OrderDetailRow = OrderListRow & {
   agent_id: number | null;
   warehouse_name: string | null;
@@ -93,6 +104,8 @@ export type OrderDetailRow = OrderListRow & {
   allowed_next_statuses: string[];
   status_logs: OrderStatusLogRow[];
   change_logs: OrderChangeLogRow[];
+  bonus_gift_selections?: Record<string, number>;
+  bonus_gift_swap_options?: BonusGiftSwapOptionRow[];
   client_finance?: {
     account_balance: string;
     credit_limit: string;
@@ -263,6 +276,18 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
       const { data: body } = await api.get<OrderDetailRow>(
         `/api/${tenantSlug}/orders/${orderId}`
       );
+      return body;
+    }
+  });
+
+  const profileRefsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "order-detail-refs"],
+    enabled: Boolean(tenantSlug) && enabled,
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data: body } = await api.get<{
+        references: { request_type_entries?: unknown };
+      }>(`/api/${tenantSlug}/settings/profile`);
       return body;
     }
   });
@@ -441,6 +466,46 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
         return;
       }
       setEditError(e.message ?? "Saqlab bo‘lmadi.");
+    }
+  });
+
+  const [bonusGiftError, setBonusGiftError] = useState<string | null>(null);
+
+  const bonusGiftMut = useMutation({
+    mutationFn: async (payload: { ruleId: number; productId: number }) => {
+      const cur = qc.getQueryData<OrderDetailRow>(["order", tenantSlug, orderId]);
+      if (!cur) throw new Error("no data");
+      const items = cur.items
+        .filter((i) => !i.is_bonus)
+        .map((i) => ({
+          product_id: i.product_id,
+          qty: Number.parseFloat(String(i.qty).replace(",", "."))
+        }))
+        .filter((l) => Number.isFinite(l.qty) && l.qty > 0);
+      const { data: body } = await api.patch<OrderDetailRow>(`/api/${tenantSlug}/orders/${orderId}`, {
+        items,
+        bonus_gift_overrides: [{ bonus_rule_id: payload.ruleId, bonus_product_id: payload.productId }]
+      });
+      return body;
+    },
+    onSuccess: (body) => {
+      void qc.setQueryData(["order", tenantSlug, orderId], body);
+      void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      setBonusGiftError(null);
+    },
+    onError: (e: Error) => {
+      if (axios.isAxiosError(e)) {
+        const code = (e.response?.data as { error?: string } | undefined)?.error;
+        if (code === "BadBonusGiftOverride") {
+          setBonusGiftError("Tanlov qoidadagi ro‘yxatga mos kelmaydi.");
+          return;
+        }
+        if (code === "InsufficientStock") {
+          setBonusGiftError("Tanlangan bonus uchun omborda qoldiq yetarli emas.");
+          return;
+        }
+      }
+      setBonusGiftError("Saqlab bo‘lmadi.");
     }
   });
 
@@ -654,6 +719,19 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                       : "—"}
                   </td>
                 </tr>
+                {data.request_type_ref?.trim() ? (
+                  <tr className="border-b border-border">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
+                      Заявка turi
+                    </th>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {refEntryLabelByStored(
+                        profileRefsQ.data?.references?.request_type_entries,
+                        data.request_type_ref
+                      ) ?? data.request_type_ref}
+                    </td>
+                  </tr>
+                ) : null}
                 <tr className="border-t border-border">
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground align-top">
                     Izoh
@@ -1157,6 +1235,59 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                     Joriy bonus qatorlari saqlagach yangilanadi.
                   </p>
                 ) : null}
+              </div>
+            ) : null}
+
+            {canEditOrderLines &&
+            (data.bonus_gift_swap_options?.length ?? 0) > 0 &&
+            !editingLines ? (
+              <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] p-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Bonus sovg‘asini almashtirish</h3>
+                  <p className="mt-1 text-[11px] text-muted-foreground max-w-2xl">
+                    Qoidada bir nechta bonus mahsulot ko‘rsatilgan bo‘lsa, shu ro‘yxatdan tanlang. Zakaz
+                    qayta hisoblanadi; to‘lov qatorlari o‘zgarishsiz qoladi (faqat bonus qismi).
+                  </p>
+                </div>
+                {bonusGiftError ? (
+                  <p className="text-xs text-destructive" role="alert">
+                    {bonusGiftError}
+                  </p>
+                ) : null}
+                <div className="space-y-3">
+                  {(data.bonus_gift_swap_options ?? []).map((opt) => (
+                    <div
+                      key={opt.bonus_rule_id}
+                      className="flex flex-col gap-2 rounded-md border border-border/80 bg-background/80 p-3 sm:flex-row sm:items-end sm:justify-between"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-xs font-medium text-foreground">{opt.rule_name}</p>
+                        <label className="block text-[11px] text-muted-foreground">
+                          Sovg‘a mahsuloti
+                          <select
+                            className="mt-1 h-9 w-full max-w-md rounded-md border border-input bg-background px-2 text-sm"
+                            value={String(opt.chosen_product_id)}
+                            disabled={bonusGiftMut.isPending}
+                            onChange={(e) => {
+                              const pid = Number.parseInt(e.target.value, 10);
+                              if (!Number.isFinite(pid) || pid < 1) return;
+                              bonusGiftMut.mutate({ ruleId: opt.bonus_rule_id, productId: pid });
+                            }}
+                          >
+                            {opt.products.map((p) => (
+                              <option key={p.id} value={String(p.id)}>
+                                {p.sku} — {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground sm:pb-2">
+                        O‘zgarish darhol saqlanadi
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 

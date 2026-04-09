@@ -166,8 +166,16 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       if (Number.isNaN(id)) {
         return reply.status(400).send({ error: "InvalidId" });
       }
+      const q = z
+        .object({ cancel_reason_ref: z.string().max(128).optional() })
+        .parse((request.query as Record<string, unknown>) ?? {});
       try {
-        await deletePayment(request.tenant!.id, id, actorUserIdOrNull(request));
+        await deletePayment(
+          request.tenant!.id,
+          id,
+          actorUserIdOrNull(request),
+          q.cancel_reason_ref?.trim() || null
+        );
         return reply.status(204).send();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
