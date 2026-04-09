@@ -1,20 +1,14 @@
--- DropIndex
-DROP INDEX "cash_desks_tenant_id_code_key";
+-- DropIndex (prod / qisman DB larda indeks nomi boshqacha bo‘lishi mumkin)
+DROP INDEX IF EXISTS "cash_desks_tenant_id_code_key";
 
 -- DropIndex
-DROP INDEX "clients_tenant_id_created_at_idx";
+DROP INDEX IF EXISTS "clients_tenant_id_created_at_idx";
 
 -- DropIndex
-DROP INDEX "users_tenant_supervisor_user_id_idx";
+DROP INDEX IF EXISTS "users_tenant_supervisor_user_id_idx";
 
--- AlterTable
-ALTER TABLE "kpi_groups" ALTER COLUMN "updated_at" DROP DEFAULT;
-
--- AlterTable
-ALTER TABLE "sales_channel_refs" ALTER COLUMN "updated_at" DROP DEFAULT;
-
--- AlterTable
-ALTER TABLE "trade_directions" ALTER COLUMN "updated_at" DROP DEFAULT;
+-- kpi_groups / sales_channel_refs / trade_directions ALTER lar keyinroq yaratiladi (20260429100000);
+-- updated_at DROP DEFAULT — 20260430160000_drop_default_updated_at_sales_catalog
 
 -- CreateTable
 CREATE TABLE "suppliers" (

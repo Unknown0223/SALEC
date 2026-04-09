@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AxiosError } from "axios";
@@ -236,7 +237,7 @@ export default function StockCorrectionPage() {
       return data.data;
     },
     enabled: Boolean(tenantSlug) && role === "admin",
-    staleTime: 120_000
+    staleTime: STALE.reference
   });
 
   const { data: journalResult, isFetching: journalFetching, refetch: refetchJournal } = useQuery({
@@ -262,7 +263,7 @@ export default function StockCorrectionPage() {
       return data;
     },
     enabled: Boolean(tenantSlug) && role === "admin" && tab === "journal",
-    staleTime: 30_000
+    staleTime: STALE.list
   });
 
   const { data: priceTypes = [] } = useQuery({
@@ -274,7 +275,7 @@ export default function StockCorrectionPage() {
       return data.data;
     },
     enabled: Boolean(tenantSlug) && role === "admin" && (tab === "correction" || tab === "inventory"),
-    staleTime: 120_000
+    staleTime: STALE.reference
   });
 
   useEffect(() => {
@@ -296,7 +297,7 @@ export default function StockCorrectionPage() {
     },
     enabled:
       Boolean(tenantSlug) && role === "admin" && (tab === "correction" || tab === "inventory"),
-    staleTime: 120_000
+    staleTime: STALE.reference
   });
 
   const categoriesFiltered = useMemo(() => {
@@ -334,7 +335,7 @@ export default function StockCorrectionPage() {
       wid > 0 &&
       selectedCategoryId != null &&
       selectedCategoryId > 0,
-    staleTime: 60_000,
+    staleTime: STALE.detail,
     gcTime: 5 * 60_000,
     placeholderData: keepPreviousData
   });

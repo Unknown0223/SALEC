@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { agentDisplayName, type AgentListItem } from "@/lib/agent-display";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -25,6 +26,7 @@ export default function RoutesPage() {
   const agentsQ = useQuery({
     queryKey: ["routes-agents", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
@@ -38,6 +40,7 @@ export default function RoutesPage() {
   const oneQ = useQuery({
     queryKey: ["agent-route-day", tenantSlug, agentId, routeDate],
     enabled: Boolean(tenantSlug) && Boolean(agentId),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("agent_id", agentId);

@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import type { CatalogSimpleRow } from "@/lib/product-types";
 import { api } from "@/lib/api";
 import { formatGroupedInteger } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -53,6 +54,7 @@ export function CatalogSimpleTab({
   const listQ = useQuery({
     queryKey: ["catalog-simple", apiPath, tenantSlug, statusTab, search, page, pageSize],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),

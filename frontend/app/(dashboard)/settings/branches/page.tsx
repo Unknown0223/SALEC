@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -109,6 +110,7 @@ export default function BranchesSettingsPage() {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -118,6 +120,7 @@ export default function BranchesSettingsPage() {
   const usersQ = useQuery({
     queryKey: ["ref-users", tenantSlug, "branches-users"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: SystemUser[] }>(`/api/${tenantSlug}/users`);
       return data.data;
@@ -127,6 +130,7 @@ export default function BranchesSettingsPage() {
   const cashDesksQ = useQuery({
     queryKey: ["cash-desks", tenantSlug, "branches-picker"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("page", "1");

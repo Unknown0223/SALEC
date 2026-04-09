@@ -84,3 +84,12 @@ npm run dev
 PostgreSQL da vaqtincha `log_min_duration_statement` (masalan, 500 ms) yoqib, sekin querylarni toping. Batafsil: [docs/SLO_AND_OBSERVABILITY.md](../docs/SLO_AND_OBSERVABILITY.md).
 
 Seed paroli (test): tenant `test1`, login `admin`, parol `secret123`.
+
+---
+
+## Production shablonlar
+
+- Nginx: `infrastructure/nginx/salec-prod.conf`
+- PM2: `infrastructure/pm2/ecosystem.config.cjs`
+- Deploy tartibi: `docs/PROD-CHECKLIST.md`
+- Backup/restore: `scripts/db-backup.ps1`, `scripts/db-restore.ps1`

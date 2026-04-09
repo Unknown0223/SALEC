@@ -25,9 +25,23 @@ import {
   Wallet
 } from "lucide-react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
-import { DashboardDayActivityChart } from "@/components/charts/analytics-charts";
+
+const DashboardDayActivityChart = dynamic(
+  () =>
+    import("@/components/charts/analytics-charts").then((m) => ({
+      default: m.DashboardDayActivityChart
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="mb-8 h-[220px] animate-pulse rounded-lg bg-muted/30" aria-hidden />
+    )
+  }
+);
 import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 
 type DashboardStats = {
   day_utc: string;
@@ -74,6 +88,7 @@ export function DashboardHome({
   const statsQ = useQuery({
     queryKey: ["dashboard-stats", tenantSlug],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<DashboardStats>(`/api/${tenantSlug}/dashboard/stats`);
       return data;

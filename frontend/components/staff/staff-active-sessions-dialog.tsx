@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { getUserFacingError } from "@/lib/error-utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,6 +70,7 @@ export function StaffActiveSessionsDialog({
   const sessionsQ = useQuery({
     queryKey: ["staff-active-sessions", tenantSlug, staffKind, userId],
     enabled: open && userId != null,
+    staleTime: STALE.live,
     queryFn: async () => {
       const { data } = await api.get<{ data: SessionRow[] }>(
         `/api/${tenantSlug}/${seg}/${userId}/sessions`

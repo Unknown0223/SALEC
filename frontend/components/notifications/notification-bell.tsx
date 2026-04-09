@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Bell } from "lucide-react";
@@ -28,6 +29,7 @@ export function NotificationBell({ tenantSlug }: { tenantSlug: string | null }) 
   const q = useQuery({
     queryKey: ["notifications", tenantSlug],
     enabled: Boolean(tenantSlug) && authHydrated && Boolean(accessToken?.trim()),
+    staleTime: STALE.live,
     refetchInterval: 60_000,
     queryFn: async () => {
       const { data } = await api.get<{ data: NotifRow[]; unread_count: number }>(

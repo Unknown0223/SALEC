@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 
 export type UserTableUiState = {
   columnOrder?: string[];
@@ -35,6 +36,7 @@ export function useUserTablePrefs({
   const prefsQ = useQuery({
     queryKey: queryKey(tenantSlug ?? null),
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<{ data: UiRoot }>(`/api/${tenantSlug}/me/ui-preferences`);
       return data.data;

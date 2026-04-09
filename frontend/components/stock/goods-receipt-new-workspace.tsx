@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatGroupedDecimal, formatGroupedInteger } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { Box, Coins, Package, Search } from "lucide-react";
 
 type CategoryRow = { id: number; name: string; parent_id: number | null; is_active: boolean };
@@ -91,7 +92,8 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
       );
       return data.data.filter((c) => c.is_active);
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const flatCats = categoriesQ.data ?? [];
@@ -104,7 +106,8 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const suppliersQ = useQuery({
@@ -115,7 +118,8 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const priceTypesQ = useQuery({
@@ -128,7 +132,8 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
       const { data: all } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
       return all.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const catIds = useMemo(() => Array.from(selectedCats), [selectedCats]);

@@ -5,6 +5,7 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ export default function BonusStackHubPage() {
   const stackQ = useQuery({
     queryKey: ["settings", "bonus-stack", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<{ bonus_stack: BonusStackJson }>(`/api/${tenantSlug}/settings/bonus-stack`);
       return data.bonus_stack;

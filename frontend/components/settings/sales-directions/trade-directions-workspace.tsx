@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ export function TradeDirectionsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["trade-directions", tenantSlug, tab],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");

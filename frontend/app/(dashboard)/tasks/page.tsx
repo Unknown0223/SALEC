@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { agentDisplayName, type AgentListItem } from "@/lib/agent-display";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -33,6 +34,7 @@ export default function TasksPage() {
   const staffQ = useQuery({
     queryKey: ["tasks-agents", tenantSlug],
     enabled: Boolean(tenantSlug) && canWrite,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: AgentListItem[] }>(
         `/api/${tenantSlug}/agents?is_active=true`
@@ -44,6 +46,7 @@ export default function TasksPage() {
   const listQ = useQuery({
     queryKey: ["tenant-tasks", tenantSlug, mine],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("limit", "80");

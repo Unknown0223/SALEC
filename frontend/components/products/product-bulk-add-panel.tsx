@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import {
   PRODUCT_UNIT_CUSTOM,
@@ -104,6 +105,7 @@ export function ProductBulkAddPanel({
   const catsQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "bulk-panel"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: CatRow[] }>(`/api/${tenantSlug}/product-categories`);
       return data.data;

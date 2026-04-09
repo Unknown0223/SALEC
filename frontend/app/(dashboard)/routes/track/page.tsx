@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
@@ -67,6 +68,7 @@ export default function AgentTrackPage() {
   const filterOptQ = useQuery({
     queryKey: ["agent-track-filter-options", tenantSlug],
     enabled: Boolean(tenantSlug) && hydrated && !isAgent,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: {
@@ -94,6 +96,7 @@ export default function AgentTrackPage() {
       agentStatus
     ],
     enabled: Boolean(tenantSlug) && hydrated && !isAgent,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (agentStatus === "active") params.set("is_active", "true");
@@ -143,6 +146,7 @@ export default function AgentTrackPage() {
       (isAgent || selectedAgentId != null) &&
       Boolean(fromLocal) &&
       Boolean(toLocal),
+    staleTime: STALE.live,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (!isAgent && selectedAgentId != null) params.set("agent_id", String(selectedAgentId));

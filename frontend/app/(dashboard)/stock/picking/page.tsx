@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 import { formatIntGrouped, formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -81,6 +82,7 @@ export default function StockPickingPage() {
   const whQ = useQuery({
     queryKey: ["warehouses", tenantSlug],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: WarehouseOpt[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data ?? [];
@@ -90,6 +92,7 @@ export default function StockPickingPage() {
   const ordersQ = useQuery({
     queryKey: ["orders-picking", tenantSlug, page, limit, debounced, warehouseId],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.list,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -112,6 +115,7 @@ export default function StockPickingPage() {
   const aggregateQ = useQuery({
     queryKey: ["stock-picking-aggregate", tenantSlug, debounced, warehouseId],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (debounced) params.set("q", debounced);

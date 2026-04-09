@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import type { WarehouseStockPurpose } from "@/components/warehouses/warehouses-workspace";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
@@ -465,7 +466,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
       const { data } = await api.get<{ data: WarehouseOpt[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const categoriesQ = useQuery({
@@ -476,7 +478,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const groupsQ = useQuery({
@@ -487,7 +490,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const priceTypesQ = useQuery({
@@ -498,7 +502,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const warehousesForPurpose = useMemo(() => {
@@ -541,7 +546,8 @@ export function StockBalancesWorkspace({ tenantSlug }: Props) {
       );
       return data;
     },
-    enabled: balancesEnabled
+    enabled: balancesEnabled,
+    staleTime: STALE.list
   });
 
   function applyFilters() {

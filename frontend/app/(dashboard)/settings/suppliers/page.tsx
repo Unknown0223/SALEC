@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,6 +54,7 @@ export default function SuppliersSettingsPage() {
   const listQ = useQuery({
     queryKey: ["suppliers-settings", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: SupplierRow[] }>(`/api/${tenantSlug}/suppliers`);
       return data.data;

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { getUserFacingError } from "@/lib/error-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Trash2 } from "lucide-react";
@@ -71,6 +72,7 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
   const detailQ = useQuery({
     queryKey: ["stock-take", tenantSlug, takeId],
     enabled: Boolean(tenantSlug) && takeId > 0,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: TakeDetail }>(`/api/${tenantSlug}/stock-takes/${takeId}`);
       return data.data;
@@ -94,6 +96,7 @@ export function InventoryTakeEditor({ tenantSlug, takeId, onClose }: Props) {
   const productsPickQ = useQuery({
     queryKey: ["products-inv-pick", tenantSlug, debouncedSearch],
     enabled: Boolean(tenantSlug) && debouncedSearch.length >= 2,
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductPick[] }>(
         `/api/${tenantSlug}/products?search=${encodeURIComponent(debouncedSearch)}&limit=80&is_active=true`

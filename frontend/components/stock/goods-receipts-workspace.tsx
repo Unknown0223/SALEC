@@ -12,6 +12,7 @@ import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { cn } from "@/lib/utils";
 import { formatGroupedDecimal } from "@/lib/format-numbers";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { useQuery } from "@tanstack/react-query";
 import { Download, LayoutGrid, ListFilter, RefreshCw, Search } from "lucide-react";
@@ -204,7 +205,8 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const suppliersQ = useQuery({
@@ -215,7 +217,8 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const listQ = useQuery({
@@ -241,7 +244,8 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
       );
       return data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.list
   });
 
   const rows = listQ.data?.data ?? [];

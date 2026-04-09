@@ -3,6 +3,7 @@
 import { buttonVariants } from "@/components/ui/button-variants";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -14,6 +15,7 @@ export default function SpravochnikPage() {
   const users = useQuery({
     queryKey: ["ref-users", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; login: string; name: string; role: string }[] }>(
         `/api/${tenantSlug}/users`
@@ -25,6 +27,7 @@ export default function SpravochnikPage() {
   const categories = useQuery({
     queryKey: ["product-categories", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string; parent_id: number | null }[] }>(
         `/api/${tenantSlug}/product-categories`
@@ -36,6 +39,7 @@ export default function SpravochnikPage() {
   const priceTypes = useQuery({
     queryKey: ["price-types", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
       return data.data;
@@ -45,6 +49,7 @@ export default function SpravochnikPage() {
   const profile = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<{
         references: { payment_types: string[]; return_reasons: string[]; regions: string[] };

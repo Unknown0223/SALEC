@@ -22,6 +22,7 @@ import { getUserFacingError } from "@/lib/error-utils";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import {
   ORDER_LIST_COLUMNS,
   ORDER_LIST_COLUMN_IDS,
@@ -390,6 +391,7 @@ function OrdersPageContent() {
       dateFieldMode
     ],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -426,6 +428,7 @@ function OrdersPageContent() {
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "orders-toolbar"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/warehouses`
@@ -437,6 +440,7 @@ function OrdersPageContent() {
   const agentsQ = useQuery({
     queryKey: ["agents", tenantSlug, "orders-toolbar"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: { id: number; fio: string; code: string | null }[] }>(
         `/api/${tenantSlug}/agents`
@@ -448,6 +452,7 @@ function OrdersPageContent() {
   const expeditorsQ = useQuery({
     queryKey: ["expeditors", tenantSlug, "orders-toolbar"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: { id: number; fio: string; code: string | null }[] }>(
         `/api/${tenantSlug}/expeditors`
@@ -459,6 +464,7 @@ function OrdersPageContent() {
   const productsFilterQ = useQuery({
     queryKey: ["products", tenantSlug, "orders-filter"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{
         data: { id: number; name: string; sku: string }[];
@@ -965,6 +971,7 @@ function OrdersPageContent() {
                 <label className="orders-filter-field-label">
                   Статус
                   <select
+                    data-testid="orders-filter-status"
                     className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
                     value={filters.status}
                     onChange={(e) => replaceOrdersQuery({ status: e.target.value, page: 1 })}
@@ -1355,7 +1362,7 @@ function OrdersPageContent() {
                               if (!tenantSlug) return;
                               void qc.prefetchQuery({
                                 queryKey: ["order", tenantSlug, o.id],
-                                staleTime: 45 * 1000,
+                                staleTime: STALE.detail,
                                 queryFn: async () => {
                                   const { data: body } = await api.get<OrderDetailRow>(
                                     `/api/${tenantSlug}/orders/${o.id}`

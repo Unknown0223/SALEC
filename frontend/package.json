@@ -10,11 +10,16 @@
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "npm run typecheck && vitest run",
+    "test:quality": "npm run typecheck && npm run lint && npm run test",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/login-smoke.spec.ts e2e/dashboard-shell-smoke.spec.ts e2e/dashboard-routes-smoke.spec.ts e2e/orders-payments-shell-smoke.spec.ts e2e/payment-allocate-order-status-smoke.spec.ts",
     "test:e2e:ci": "cross-env CI=true playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "test:all": "npm run test:quality && npm run test:e2e:smoke"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -38,6 +43,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
     "@types/react": "^18",
@@ -45,8 +52,11 @@
     "cross-env": "^7.0.3",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.8"
   }
 }

@@ -1,7 +1,7 @@
 # Loyiha rejasi — jarayon hisoboti
 
-**Oxirgi yangilanish:** 2026-04-08 — FAZA 10: **Playwright** dastlabki smoke (`/login` formasi); `playwright.config.ts`, CI qadam (`frontend` job oxirida `playwright install` + `playwright test`).  
-**Manba checklist:** [`PHASE_GATES.md`](./PHASE_GATES.md)
+**Oxirgi yangilanish:** 2026-04-09 — **FAZA bo‘yicha davom:** quyida «Keyingi navbat (tartib bilan)» — operatsion deploy (FAZA 10), `test:all` / `test:all:ci`, ixtiyoriy E2E kengaytirish, MV, Flutter. **Eslatma:** `backend/scripts/import-excel-bundle.ts` va qo‘shimcha Excel importlari — **migratsiya/ma’lumot yuklash** vositasi; ular `PHASE_GATES.md` dagi faza raqamlari bilan bir xil «navbat» emas — katta rejani davom ettirishda asosiy manba **shu hujjatdagi jadval**. **Texnik sifat:** backend `orders.integration.test.ts` — suite boshida asosiy omborda SKU-001/002/003 zaxirasi tiklanadi (`ensureOrdersIntegrationStock`).  
+**Manba checklist:** [`PHASE_GATES.md`](./PHASE_GATES.md). **Testlar + brauzer silliq:** [`WEB-QA-CHECKLIST.md`](./WEB-QA-CHECKLIST.md). **Deploy:** [`PROD-CHECKLIST.md`](./PROD-CHECKLIST.md), [`RAILWAY-STAGING-CHECKLIST.md`](./RAILWAY-STAGING-CHECKLIST.md).
 
 ---
 
@@ -19,32 +19,60 @@
 | FAZA 6 | **~90%** | To‘lovlar + taqsimlash + **to‘lov kartochkasi** `/payments/[id]`; **akt-sverka PDF**; **qarzdorlik** (Excel). Balans MV — ixtiyoriy. |
 | FAZA 7 | **~80%** | `/visits`, `/clients/map` (Leaflet), tashriflar Excel; **GPS trek** API + `/routes/track`. Mobil ilova fon pinglari — FAZA 9. |
 | FAZA 8 | **~95%** | Dashboard **Recharts** (bugungi faoliyat ustunlari); `/reports`: dinamika (line+area), holat **pie**, mahsulot top-10, kanallar **bar**; **xlsx** avvalgidek. |
-| FAZA 9–10 | **~10–15%** | **Playwright:** login smoke + CI; keyin — to‘liq zakaz zanjiri, k6, prod checklist. **Flutter** — FAZA 9, hali ochiq. |
+| FAZA 9–10 | **~20–25%** | **Playwright:** login + dashboard shell + CI; ixtiyoriy real login; **zakaz yaratish** zanjiri (`order-create-full-stack.spec.ts`). **Load:** `load-smoke.mjs`. Keyin — k6/prod checklist. **Flutter** — FAZA 9. |
 
 **Butun loyiha (0–4 oralig‘i):** **100%** (MVP gate). **FAZA 5+** iteratsiya.
 
 ---
 
-## Keyingi qadam — FAZA 5 (ustuvor)
+## Nima uchun FAZA 5–6 «navbatda» turib, FAZA 10 ga «sakrab» ketilgan?
 
-1. **Inventarizatsiya:** ~~API + foydalanuvchi UI (qidiruv, jadval, saqlash/provesti/otmen)~~ (2026-04-05).  
-2. **Picking:** ~~`/stock/picking` + aggregate + skaner maydoni + chop etish~~ (2026-04-02).  
-3. **Platforma:** ~~`api-client` / `middleware`~~ (2026-04-02).  
-4. **Korrektirovka:** ~~`/stock/correction` + bulk + audit~~.  
-5. **Qoldiqlar UI:** ~~jadval qatorlari holat bo‘yicha rang~~.  
-6. **Keyingi navbat:** FAZA 6 — qarzdorlik / akt-sverka / PDF. ~~Excel nakladnoy + transfer UI~~, ~~orders nakladnoy PDF~~ va ~~transfer PDF~~ kodda bor (`PHASE_GATES` yangilandi).  
-7. **FAZA 8 navbat:** ~~`channels` / ABC / XYZ / churn UI~~; ~~dashboard + hisobotlarda **Recharts**~~ (`analytics-charts.tsx`, 2026-04-06).  
-8. **FAZA 6 navbat:** ~~qarzdorlik~~; ~~to‘lov detail~~; keyin — ixtiyoriy **balans MV**.
+Bu **reja raqamini tartibsiz tashlab ketish emas**, balki **parallel va ustuvorlik** bilan bog‘liq:
 
-### Keyingi qadam — FAZA 7 (GPS / maydon)
+1. **FAZA 5 va 6 ning asosiy gate bandlari** `PHASE_GATES.md` bo‘yicha **allaqachon yopilgan** (ombor, picking, korrektirovka, to‘lovlar, taqsimlash, qarzdorlik, akt-sverka va hok.). Shuning uchun ish **6 dan keyingi fazalarga** (7–8) va keyin **sifat / barqarorlik** bandlariga o‘tgan.
+2. **FAZA 10** (Playwright, `next build`, CI) **ertaroq boshlangan**, chunki: frontend o‘zgarishlari ko‘payganda **regressiya** va **yig‘ish xatolari**ni avval ushlash arzonroq — aks holda keyinroq hamma fazani qayta tekshirish qiyinlashadi. Shuning uchun **10 dan bir qism** (login + dashboard shell + CI) 5–6 «rasmiy yopilish»dan oldin yoki **parallel** qilingan; bu **waterfall** emas, **xavfni kamaytirish**.
+3. **FAZA 6** da `PHASE_GATES.md` da **bitta ixtiyoriy** `[ ]` qolgan: **balans materialized view** — bu «to‘liq 6 yopilmaguncha 7/8/10 ga o‘tmaslik» degani emas; gate hujjati ham shuni **ixtiyoriy** deb belgilagan.
 
-- ~~`/clients/map` — Leaflet~~; ~~tashriflar Excel~~; ~~agent GPS trek~~ (`agent_location_pings`, `/routes/track`).
-- Keyin: **mobil** ilovadan fon pinglari + FAZA 9 Flutter integratsiyasi.
+**Xulosa:** raqamli ketma-ketlik **ideal loyiha rejasi**; amalda **funksiya bo‘yicha** (ombor → moliya → GPS → hisobotlar) va **texnik qaror** (E2E/CI) bir vaqtning o‘zida yuritilgan. Hujjatdagi eski «Keyingi qadam — FAZA 5» bandi tarixiy qolgan edi — quyida **haqiqiy navbat** yangilandi.
 
-### Keyingi qadam — FAZA 6 (parallel ixtiyoriy)
+---
 
-- ~~To‘lovni zakazlarga taqsimlash: REST + panel~~ (2026-04-05).
-- ~~Qarzdorlik / akt-sverka / PDF~~ (asosiy qismi bajarilgan).
+## Keyingi navbat (tartib bilan — faza bo‘yicha davom)
+
+Reja mantiqiy tartib: avval **ishga tushirish va sifat panjarasi**, keyin **ixtiyoriy tezlashtirish**, eng oxirida **mobil**.
+
+| # | Faza | Ish | Turi |
+|---|------|-----|------|
+| 1 | **10** | Staging/prod: [`RAILWAY-STAGING-CHECKLIST.md`](./RAILWAY-STAGING-CHECKLIST.md) yoki [`PROD-CHECKLIST.md`](./PROD-CHECKLIST.md) bo‘yicha **amalda** yopish (migratsiya, env, health, SSL, backup, monitoring) | Operatsion |
+| 2 | **10** | `npm run test:all:ci` (CI ekvivalenti: alohida backend + frontend joblari); to‘liq `npm run test:all` yana `load:smoke` — **lokal**, backend `/health` bilan | Sifat |
+| 3 | **10** | Playwright: smoke (qobiq + status + dialog) + **FIFO to‘liq stack** (`payment-allocate-fifo-full-stack`, `E2E_*`; smoke ro‘yxatiga kirmaydi) | Kod |
+| 4 | **6** | Ixtiyoriy: balans **materialized view** — faqat ro‘yxat/sekund sekinlashganda (`PHASE_GATES.md`) | DB/perf |
+| 5 | **9** | Flutter: agent/dastavchi (login, offline, sync, **fon GPS ping** — FAZA 7 veb treki bilan API allaqachon mos) | Mobil |
+| 6 | **10** | Birinchi diler **go-live** / Play Store checklist (`PHASE_GATES.md` oxirgi band) | Biznes |
+
+**Qisqa yo‘l-yo‘riq:** 1–2 dan keyin loyiha «production-ready» deb hisoblanadi; 3–4 sifat va hajm; 5–6 mobil va masshtab.
+
+---
+
+## Navbat (hozirgi holat bo‘yicha, 2026-04) — arxiv xulosasi
+
+**1. FAZA 6 — qoldiq (ixtiyoriy)**  
+- [ ] Balans **materialized view** + refresh strategiyasi — faqat hajm/performance talab qilganda (`PHASE_GATES.md`).
+
+**2. FAZA 7 — qoldiq**  
+- Mobil ilovadan **fon GPS pinglari** (asosan **FAZA 9** Flutter bilan bog‘liq).
+
+**3. FAZA 9**  
+- [ ] Flutter agent / dastavchi ilovalari (offline, sync, FCM).
+
+**4. FAZA 10 — davom etish (ustuvor texnik)**  
+- [x] Playwright: **to‘liq zakaz zanjiri** (mijoz + ombor + miqdor → yaratish → ro‘yxat; `E2E_*` + seed `test1`).  
+- [x] Load smoke: `load-smoke.mjs` (k6 keyingi bosqich).  
+- [x] Production checklist hujjati: `docs/PROD-CHECKLIST.md`.  
+- [x] Railway staging checklist hujjati: `docs/RAILWAY-STAGING-CHECKLIST.md`.  
+- [ ] Production checklistni amalda yopish (Nginx, SSL, backup, go-live).
+
+**Bajarilgan (arxiv — eski «FAZA 5 navbat»):** inventarizatsiya, picking, korrektirovka, nakladnoy Excel/PDF, transfer UI+PDF, FAZA 6 asosiy moliya UI/API, FAZA 7–8 ning veb qismi, Recharts, qarzdorlik hisoboti — batafsil `PHASE_GATES.md`.
 
 **2026-03-30:** `GET /api/:slug/stock`, `POST /api/:slug/stock/receipts` (admin), panel `/stock`; zakazlar SSE Redis orqali sinxron (ioredis).
 
@@ -122,12 +150,23 @@ Chap menyu (Sklad): **Перемещение** → `/stock/transfers`. Asosiy qa
 | Fayl / skript | Vazifa |
 |----------------|--------|
 | `frontend/playwright.config.ts` | `baseURL`, CI da `cross-env PORT=… npm run start` |
+| `frontend/e2e/fake-session.ts` | Playwright uchun soxta admin sessiya (`test1`) |
 | `frontend/e2e/login-smoke.spec.ts` | `/login` — «Вход», slug/login/parol, «Войти» |
-| `npm run test:e2e` / `test:e2e:ci` / `test:e2e:ui` / `test:e2e:install` | `package.json` |
+| `frontend/e2e/dashboard-shell-smoke.spec.ts` | `sd_auth` + `savdo-auth` → `/dashboard` sarlavha + statistikada muvaffaqiyat yoki xato |
+| `frontend/e2e/dashboard-routes-smoke.spec.ts` | ~30 ta asosiy URL `/login` ga qaytmasligi |
+| `frontend/e2e/login-full-stack.spec.ts` | Haqiqiy `POST /auth/login` (env bor bo‘lsa); aks holda `skip` |
+| `frontend/e2e/order-create-full-stack.spec.ts` | Login → yangi zakaz → seed mijoz/ombor → miqdor → `/orders` (`E2E_*`; `skip` agar env yo‘q) |
+| `frontend/e2e/payment-allocate-order-status-smoke.spec.ts` | `/orders` status `<select>` → URL `status=`; `/payments` «Zakazlarga» → dialog (`payment-allocate-dialog`) |
+| `frontend/e2e/payment-allocate-fifo-full-stack.spec.ts` | Login → `/payments/new` → saqlash → «Zakazlarga» → `payment-allocate-fifo` (`E2E_*` bo‘lmasa `skip`) |
+| `npm run test:e2e` / `test:e2e:smoke` / `test:e2e:ci` / `test:e2e:ui` / `test:e2e:install` | Ildiz va `frontend/package.json` |
+| `npm run test:quality` (`frontend`) | `typecheck` + `lint` + `vitest` |
+| `npm run load:smoke` | `node scripts/load-smoke.mjs` — GET `/health` (yoki `--path`), **k6** gate uchun sodda alternativa |
 
 **Eslatma:** `next start` (Playwright `webServer`) uchun `.next` oxirgi `npm run build` bilan mos bo‘lishi kerak. `npm run dev` bilan bir vaqtda bir papkani bo‘lish xatolarga olib kelishi mumkin — E2E oldidan `dev` ni to‘xtating yoki `npm run clean && npm run build` qiling.
 
-**Keyingi E2E bandlar (gate):** login → dashboard → zakaz yaratish zanjiri; keyin k6 smoke va prod checklist (`PHASE_GATES.md` FAZA 10).
+**Keyingi E2E bandlar (gate):** ~~login~~, ~~dashboard qobig‘i~~, ~~zakaz yaratish (env + seed)~~, ~~zakaz/to‘lov qobig‘i~~, ~~status + dialog smoke~~, ~~**FIFO taqsimlash** to‘liq stack (`payment-allocate-fifo-full-stack.spec.ts`, `E2E_*` + `npx playwright test e2e/payment-allocate-fifo-full-stack.spec.ts`)~~; **load:** `load-smoke.mjs`; prod checklist (`PHASE_GATES.md` FAZA 10).
+
+**Monorepo `test:all` (ildiz):** `test:all:ci` = backend `test:ci` + frontend `test:all` (typecheck+lint+vitest + smoke E2E); to‘liq `test:all` = `test:all:ci` + `load:smoke` (lokalda API `:4000` /health ishlashi kerak).
 
 ---
 

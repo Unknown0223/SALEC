@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -50,6 +51,7 @@ export default function ClientListsSpravochnikPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["settings", "profile", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data: body } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return body;

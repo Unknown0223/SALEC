@@ -11,6 +11,7 @@ type User = {
   password_hash: string;
   role: string;
   is_active: boolean;
+  max_sessions?: number | null;
 };
 type RefreshToken = {
   id: number;
@@ -50,6 +51,8 @@ const { state, mockPrisma } = vi.hoisted(() => {
         })
       },
       refreshToken: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => []),
         create: vi.fn(async ({ data }: { data: Omit<RefreshToken, "id" | "revoked_at"> }) => {
           const row: RefreshToken = { id: state.refreshTokens.length + 1, ...data, revoked_at: null };
           state.refreshTokens.push(row);
@@ -65,20 +68,36 @@ const { state, mockPrisma } = vi.hoisted(() => {
           }
           return row;
         }),
-        update: vi.fn(async ({ where, data }: { where: { id: number }; data: { revoked_at: Date } }) => {
+        update: vi.fn(async ({ where, data }: { where: { id: number }; data: { revoked_at?: Date } }) => {
           const row = state.refreshTokens.find((r) => r.id === where.id);
-          if (row) row.revoked_at = data.revoked_at;
+          if (row && data.revoked_at) row.revoked_at = data.revoked_at;
           return row;
         }),
         updateMany: vi.fn(
-          async ({ where, data }: { where: { token_hash: string; revoked_at: null }; data: { revoked_at: Date } }) => {
+          async ({
+            where,
+            data
+          }: {
+            where: { token_hash?: string; revoked_at?: null; id?: { in: number[] } };
+            data: { revoked_at: Date };
+          }) => {
             let count = 0;
-            state.refreshTokens.forEach((r) => {
-              if (r.token_hash === where.token_hash && r.revoked_at === null) {
-                r.revoked_at = data.revoked_at;
-                count += 1;
-              }
-            });
+            if (where.token_hash != null) {
+              state.refreshTokens.forEach((r) => {
+                if (r.token_hash === where.token_hash && r.revoked_at === null) {
+                  r.revoked_at = data.revoked_at;
+                  count += 1;
+                }
+              });
+            }
+            if (where.id?.in?.length) {
+              state.refreshTokens.forEach((r) => {
+                if (where.id!.in.includes(r.id) && r.revoked_at === null) {
+                  r.revoked_at = data.revoked_at;
+                  count += 1;
+                }
+              });
+            }
             return { count };
           }
         )
@@ -123,7 +142,8 @@ describe("auth + tenant integration", () => {
         login: "agent01",
         password_hash: "hashed-secret",
         role: "agent",
-        is_active: true
+        is_active: true,
+        max_sessions: 2
       }
     ];
     state.refreshTokens = [];

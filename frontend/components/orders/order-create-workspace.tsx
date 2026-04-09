@@ -18,6 +18,7 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 
 type Props = {
   tenantSlug: string | null;
@@ -89,6 +90,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ClientRow[] }>(
         `/api/${tenantSlug}/clients?page=1&limit=200&is_active=true`
@@ -100,6 +102,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const productsQ = useQuery({
     queryKey: ["products", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductRow[] }>(
         `/api/${tenantSlug}/products?page=1&limit=200&is_active=true&include_prices=true`
@@ -111,6 +114,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data;
@@ -120,6 +124,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const usersQ = useQuery({
     queryKey: ["users", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; login: string; name: string; role: string }[] }>(
         `/api/${tenantSlug}/users`
@@ -131,6 +136,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const stockQ = useQuery({
     queryKey: ["stock", tenantSlug, warehouseId, "order-form"],
     enabled: Boolean(tenantSlug) && Boolean(warehouseId),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: { product_id: number; qty: string; reserved_qty: string }[] }>(
         `/api/${tenantSlug}/stock?warehouse_id=${warehouseId}`
@@ -142,6 +148,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
       return data.data.length ? data.data : ["retail"];
@@ -151,6 +158,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const expeditorsQ = useQuery({
     queryKey: ["expeditors", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -163,6 +171,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const clientSummaryQ = useQuery({
     queryKey: ["client", tenantSlug, clientIdNum, "order-form"],
     enabled: Boolean(tenantSlug) && Number.isFinite(clientIdNum) && clientIdNum > 0,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{
         account_balance: string;
@@ -176,6 +185,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "order-form"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/product-categories`
@@ -544,6 +554,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             <Button
               type="button"
               size="sm"
+              data-testid="order-create-submit"
               disabled={!canSubmit}
               onClick={() => mutation.mutate()}
               className="bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-600 dark:hover:bg-teal-700"
@@ -642,6 +653,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               <Label htmlFor="oc-client">Klient</Label>
               <FilterSelect
                 id="oc-client"
+                data-testid="order-create-client"
                 className={fieldClass}
                 emptyLabel="Klientni tanlang"
                 aria-label="Klient"
@@ -680,6 +692,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 <Label htmlFor="oc-warehouse">Ombor</Label>
                 <FilterSelect
                   id="oc-warehouse"
+                  data-testid="order-create-warehouse"
                   className={fieldClass}
                   emptyLabel="Omborni tanlang"
                   aria-label="Ombor"
@@ -1131,6 +1144,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                                   min={0}
                                   step="any"
                                   placeholder="0"
+                                  data-testid="oc-line-qty"
+                                  data-oc-product-id={p.id}
                                   className={cn(
                                     "h-9 w-full tabular-nums text-center",
                                     qtyOver && "border-destructive focus-visible:ring-destructive"

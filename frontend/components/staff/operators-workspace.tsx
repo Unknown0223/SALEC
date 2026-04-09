@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { formatGroupedInteger } from "@/lib/format-numbers";
 import { FilterSelect, filterSelectClassName } from "@/components/ui/filter-select";
@@ -198,6 +199,7 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
   const filterOptsQ = useQuery({
     queryKey: ["operators", tenantSlug, "filter-options"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: FilterOptions }>(
         `/api/${tenantSlug}/operators/meta/filter-options`
@@ -209,6 +211,7 @@ export function OperatorsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["operators", tenantSlug, tab, appliedBranch, appliedPosition],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.live,
     refetchInterval: 45_000,
     queryFn: async () => {
       const params = new URLSearchParams();

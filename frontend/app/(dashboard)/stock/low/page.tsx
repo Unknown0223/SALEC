@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -22,6 +23,7 @@ export default function StockLowPage() {
   const listQ = useQuery({
     queryKey: ["stock-low", tenantSlug, threshold],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.list,
     queryFn: async () => {
       const t = threshold.trim() || "10";
       const { data } = await api.get<{ data: LowRow[]; threshold: string }>(

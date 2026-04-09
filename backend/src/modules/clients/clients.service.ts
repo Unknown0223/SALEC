@@ -20,7 +20,7 @@ import {
 import { salesRefStoredValue } from "../sales-directions/sales-directions.service";
 import { ClientImportRefResolver } from "./client-import-ref-resolve";
 import { buildClientReconciliationPdf } from "./client-reconciliation-pdf";
-import { normKeyTerritoryMatch } from "../../../../shared/territory-lalaku-seed";
+import { normKeyTerritoryMatch } from "../../../shared/territory-lalaku-seed";
 
 /** Telefonni solishtirish uchun faqat raqamlar (masalan +998 90 → 99890). */
 export function normalizePhoneDigits(phone: string | null | undefined): string | null {

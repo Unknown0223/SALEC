@@ -11,6 +11,9 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
+import { isDatabaseSchemaMismatchError } from "@/lib/api-errors";
+import { DatabaseSchemaMismatchCallout } from "@/components/system/database-schema-mismatch-callout";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useMemo, useCallback } from "react";
 
@@ -60,6 +63,7 @@ function ReturnsPageContent() {
   const listQ = useQuery({
     queryKey: ["returns", tenantSlug, limit],
     enabled: Boolean(tenantSlug) && hydrated && activeTab === "list",
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ReturnRow[]; total: number }>(
         `/api/${tenantSlug}/returns?page=1&limit=${limit}`
@@ -84,6 +88,7 @@ function ReturnsPageContent() {
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "return-select"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ClientForSelect[] }>(
         `/api/${tenantSlug}/clients?page=1&limit=500&is_active=true`
@@ -96,6 +101,7 @@ function ReturnsPageContent() {
   const warehouseQuery = useQuery({
     queryKey: ["warehouses", tenantSlug, "returns"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string; stock_purpose: string }[] }>(
         `/api/${tenantSlug}/warehouses`
@@ -109,6 +115,7 @@ function ReturnsPageContent() {
   const clientDataQuery = useQuery({
     queryKey: ["returns-client-data", tenantSlug, clientId, dateFrom, dateTo],
     enabled: Boolean(tenantSlug && clientId && Number.isFinite(Number(clientId))),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const params = new URLSearchParams({ client_id: clientId });
       if (dateFrom) params.set("date_from", dateFrom);
@@ -228,6 +235,8 @@ function ReturnsPageContent() {
       else if (data?.error === "BadClient") setErr("Mijoz topilmadi.");
       else if (data?.error === "BadProduct") setErr("Mahsulot topilmadi.");
       else if (data?.error === "NoWarehouse") setErr("Qaytarish ombori topilmadi.");
+      else if (data?.error === "DatabaseSchemaMismatch")
+        setErr("Baza migratsiyasi qo‘llanmagan. backend: npm run db:deploy");
       else setErr("Qaytarish yaratilmadi.");
     } finally {
       setSubmitting(false);
@@ -431,7 +440,14 @@ function ReturnsPageContent() {
         <Card className="overflow-hidden shadow-panel">
           <CardContent className="p-0">
             {listQ.isLoading && <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>}
-            {listQ.isError && <p className="p-4 text-sm text-destructive">Xato yuz berdi.</p>}
+            {listQ.isError && isDatabaseSchemaMismatchError(listQ.error) && (
+              <div className="p-4">
+                <DatabaseSchemaMismatchCallout />
+              </div>
+            )}
+            {listQ.isError && !isDatabaseSchemaMismatchError(listQ.error) && (
+              <p className="p-4 text-sm text-destructive">Xato yuz berdi.</p>
+            )}
             {!listQ.isLoading && !listQ.isError && (
               <>
                 <div className="flex items-center gap-3 px-3 pt-2">

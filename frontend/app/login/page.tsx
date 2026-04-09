@@ -1,8 +1,9 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
-import axios, { isAxiosError } from "axios";
+import { isAxiosError } from "axios";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -22,7 +23,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const { data } = await axios.post("/auth/login", {
+      const { data } = await api.post("/auth/login", {
         slug,
         login,
         password
@@ -80,9 +81,12 @@ export default function LoginPage() {
           <h1 className="text-xl font-semibold tracking-tight">Вход</h1>
           <p className="text-sm text-muted-foreground">Slug дилера и учётные данные</p>
           <p className="text-xs text-muted-foreground">
-            Импорт: <code className="text-[10px]">npm run import:once</code> — вход с тем же slug (обычно{" "}
-            <span className="font-medium">test1</span>). Примеры сотрудников:{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">demo_sup_sample</code> и др. — пароль{" "}
+            Slug обычно <span className="font-medium">test1</span>. Админ после{" "}
+            <code className="text-[10px]">npm run provision:admin</code>: логин{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">admin</code>, пароль{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">secret123</code>. Импорт справочников:{" "}
+            <code className="text-[10px]">npm run import:once</code> — сотрудники{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">demo_sup_sample</code> и др., пароль{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-[10px]">Parol123!</code>.
           </p>
         </div>

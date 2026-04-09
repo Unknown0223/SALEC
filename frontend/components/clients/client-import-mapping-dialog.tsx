@@ -12,8 +12,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { CLIENT_IMPORT_MAPPABLE_FIELDS } from "@/lib/client-import-fields";
 import { rowToHeaderLabels, suggestColumnMapping } from "@/lib/client-import-header-match";
-import * as XLSX from "xlsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type { WorkBook, WorkSheet } from "xlsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const selectClass =
   "border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full min-w-0 rounded-md border px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
@@ -32,7 +32,9 @@ type Props = {
   onConfirm: (payload: ClientImportMappingPayload) => void;
 };
 
-function sheetToMatrix(ws: XLSX.WorkSheet): unknown[][] {
+type XlsxNs = typeof import("xlsx");
+
+function sheetToMatrix(XLSX: XlsxNs, ws: WorkSheet): unknown[][] {
   return XLSX.utils.sheet_to_json(ws, {
     header: 1,
     defval: null,
@@ -49,7 +51,8 @@ export function ClientImportMappingDialog({
   onConfirm
 }: Props) {
   const [parseError, setParseError] = useState<string | null>(null);
-  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const xlsxModRef = useRef<XlsxNs | null>(null);
+  const [workbook, setWorkbook] = useState<WorkBook | null>(null);
   const [sheetName, setSheetName] = useState("");
   /** 1-based (Excel qatori), foydalanuvchiga tushunarli */
   const [headerRowOneBased, setHeaderRowOneBased] = useState(1);
@@ -57,6 +60,7 @@ export function ClientImportMappingDialog({
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   const resetState = useCallback(() => {
+    xlsxModRef.current = null;
     setParseError(null);
     setWorkbook(null);
     setSheetName("");
@@ -75,21 +79,25 @@ export function ClientImportMappingDialog({
     setLocalErr(null);
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const buf = reader.result as ArrayBuffer;
-        const wb = XLSX.read(buf, { type: "array", cellDates: true, sheetRows: 120 });
-        if (!wb.SheetNames.length) {
-          setParseError("Faylda varaq yo‘q.");
+      void (async () => {
+        try {
+          const XLSX = await import("xlsx");
+          xlsxModRef.current = XLSX;
+          const buf = reader.result as ArrayBuffer;
+          const wb = XLSX.read(buf, { type: "array", cellDates: true, sheetRows: 120 });
+          if (!wb.SheetNames.length) {
+            setParseError("Faylda varaq yo‘q.");
+            setWorkbook(null);
+            return;
+          }
+          setWorkbook(wb);
+          setSheetName(wb.SheetNames[0] ?? "");
+          setHeaderRowOneBased(1);
+        } catch {
+          setParseError("Excel faylini o‘qib bo‘lmadi.");
           setWorkbook(null);
-          return;
         }
-        setWorkbook(wb);
-        setSheetName(wb.SheetNames[0] ?? "");
-        setHeaderRowOneBased(1);
-      } catch {
-        setParseError("Excel faylini o‘qib bo‘lmadi.");
-        setWorkbook(null);
-      }
+      })();
     };
     reader.onerror = () => {
       setParseError("Fayl o‘qilmadi.");
@@ -99,10 +107,11 @@ export function ClientImportMappingDialog({
   }, [open, file, resetState]);
 
   const matrix = useMemo(() => {
-    if (!workbook || !sheetName) return [] as unknown[][];
+    const XLSX = xlsxModRef.current;
+    if (!workbook || !sheetName || !XLSX) return [] as unknown[][];
     const ws = workbook.Sheets[sheetName];
     if (!ws) return [];
-    return sheetToMatrix(ws);
+    return sheetToMatrix(XLSX, ws);
   }, [workbook, sheetName]);
 
   const headerRowIdx = Math.max(0, headerRowOneBased - 1);

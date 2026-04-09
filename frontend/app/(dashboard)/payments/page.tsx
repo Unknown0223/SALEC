@@ -10,6 +10,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { PaymentAllocateDialog } from "@/components/payments/payment-allocate-dialog";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useState } from "react";
 
 type PaymentRow = {
@@ -34,6 +35,7 @@ export default function PaymentsPage() {
   const listQ = useQuery({
     queryKey: ["payments", tenantSlug],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: PaymentRow[]; total: number }>(
         `/api/${tenantSlug}/payments?page=1&limit=100`
@@ -136,6 +138,7 @@ export default function PaymentsPage() {
                   <td className="px-3 py-2">
                     <button
                       type="button"
+                      data-testid="payment-open-allocate"
                       className="text-xs text-primary underline underline-offset-2 hover:text-primary/80"
                       onClick={() => setAllocatePaymentRow(r)}
                     >

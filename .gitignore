@@ -14,3 +14,7 @@ backend/.env
 **/.DS_Store
 *.log
 backend/tests/.db-integration-ready
+
+# Excel import: qo‘lda qo‘yiladigan .xlsx (README va .gitkeep saqlanadi)
+backend/scripts/data/excel/*.xlsx
+backend/scripts/data/excel/warehouse-aliases.json

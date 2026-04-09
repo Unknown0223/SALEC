@@ -1,11 +1,13 @@
 "use client";
 
 import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
+import { BonusRuleProductScopePicker } from "@/components/bonus-rules/bonus-rule-product-scope-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -129,6 +131,7 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
 
   const paymentMethodsQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "bonus-payment-methods"],
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<{
         references: { payment_method_entries?: { name: string; active?: boolean }[] };
@@ -139,6 +142,7 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
 
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "bonus-form"],
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
       return data.data;
@@ -555,7 +559,11 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
         <Card className="shadow-panel">
           <CardHeader>
             <CardTitle>Filtrlar</CardTitle>
-            <CardDescription>Bo‘sh maydonlar cheklov qo‘ymaydi. ID lar vergul yoki bo‘shliq bilan.</CardDescription>
+            <CardDescription>
+              Bo‘sh maydonlar cheklov qo‘ymaydi. Mahsulot qamrovini pastdagi kategoriya tanlovi yoki ID matnidan
+              bering. <span className="text-foreground/90">Agar bir vaqtning o‘zida mahsulot ID va kategoriya ID
+              ikkalasini ham to‘ldirsangiz, backend ikkala shartni ham talab qiladi (AND).</span>
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">
@@ -601,7 +609,18 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
               </datalist>
             </div>
             <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-xs">Mahsulot ID</Label>
+              <Label className="text-sm font-medium">Qamrov: mahsulotlar</Label>
+              <BonusRuleProductScopePicker
+                tenantSlug={tenantSlug}
+                value={parseIdList(productIdsStr)}
+                onChange={(ids) => {
+                  setProductIdsStr(formatIdList(ids));
+                  setCategoryIdsStr("");
+                }}
+                onClearCategoryScope={() => setCategoryIdsStr("")}
+                disabled={mutation.isPending}
+              />
+              <Label className="text-xs text-muted-foreground">Qo‘lda mahsulot ID (ixtiyoriy)</Label>
               <Input
                 className={inputCls}
                 value={productIdsStr}

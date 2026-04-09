@@ -10,6 +10,7 @@ import {
   formatGroupedInteger,
   formatNumberGrouped
 } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
@@ -116,6 +117,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["client", tenantSlug, clientId],
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data: body } = await api.get<ClientDetailApiRow>(
         `/api/${tenantSlug}/clients/${clientId}`
@@ -126,6 +128,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
 
   const movementsQuery = useQuery({
     queryKey: ["client-balance-movements", tenantSlug, clientId, balPage],
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(balPage), limit: "30" });
       const { data: body } = await api.get<BalanceMovementsResponse>(
@@ -138,6 +141,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
 
   const auditQuery = useQuery({
     queryKey: ["client-audit", tenantSlug, clientId, auditPage],
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(auditPage), limit: "30" });
       const { data: body } = await api.get<ClientAuditResponse>(
@@ -150,6 +154,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
 
   const paymentsTabQ = useQuery({
     queryKey: ["client-payments-tab", tenantSlug, clientId],
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: PaymentRow[] }>(
         `/api/${tenantSlug}/clients/${clientId}/payments`
@@ -766,6 +771,7 @@ export function ClientOrdersSnippet({
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ["orders", tenantSlug, 1, "", clientId],
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({
         page: "1",

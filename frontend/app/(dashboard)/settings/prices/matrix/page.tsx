@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { formatGroupedInteger } from "@/lib/format-numbers";
@@ -66,6 +67,7 @@ export default function PriceMatrixPage() {
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug],
     enabled: Boolean(tenantSlug) && isAdmin,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: Cat[] }>(`/api/${tenantSlug}/product-categories`);
       return data.data;
@@ -77,6 +79,7 @@ export default function PriceMatrixPage() {
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, kind],
     enabled: Boolean(tenantSlug) && isAdmin,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=${kind}`);
       return data.data;
@@ -86,6 +89,7 @@ export default function PriceMatrixPage() {
   const matrixQ = useQuery({
     queryKey: ["price-matrix", tenantSlug, categoryId, priceType],
     enabled: Boolean(tenantSlug) && isAdmin && categoryId !== "" && priceType.length > 0,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: MatrixRow[]; currency: string }>(
         `/api/${tenantSlug}/products/prices/matrix?category_id=${categoryId}&price_type=${encodeURIComponent(priceType)}`

@@ -11,9 +11,58 @@ const dbReady = existsSync(marker) && readFileSync(marker, "utf8").trim() === "1
 
 const app = buildApp();
 
+/** Seed zaxirasi `type: main` omborda — `name` bo‘yicha birinchi qator har doim shu bo‘lmasligi mumkin */
+async function mainWarehouseId(token: string): Promise<number> {
+  const list = await request(app.server).get("/api/test1/warehouses").set("Authorization", `Bearer ${token}`);
+  expect(list.status).toBe(200);
+  const rows = list.body.data as { id: number; name: string; type: string | null }[];
+  expect(rows.length).toBeGreaterThan(0);
+  const main = rows.find((w) => w.type === "main") ?? rows.find((w) => /asosiy/i.test(w.name)) ?? rows[0];
+  return main.id;
+}
+
+/** Seed qty=100 yetmaydi; ba'zi testlar orderni to‘g‘ridan-to‘g‘ri o‘chiradi va reserved_qty “osib” qoladi. */
+async function ensureOrdersIntegrationStock(): Promise<void> {
+  const tenant = await prisma.tenant.findUnique({ where: { slug: "test1" } });
+  if (!tenant) return;
+  const mainWh =
+    (await prisma.warehouse.findFirst({ where: { tenant_id: tenant.id, type: "main" } })) ??
+    (await prisma.warehouse.findFirst({
+      where: { tenant_id: tenant.id, name: { contains: "Asosiy", mode: "insensitive" } }
+    }));
+  if (!mainWh) return;
+  const products = await prisma.product.findMany({
+    where: { tenant_id: tenant.id, sku: { in: ["SKU-001", "SKU-002", "SKU-003"] } }
+  });
+  const plenty = new Prisma.Decimal("1000000");
+  const zero = new Prisma.Decimal("0");
+  for (const p of products) {
+    await prisma.stock.upsert({
+      where: {
+        tenant_id_warehouse_id_product_id: {
+          tenant_id: tenant.id,
+          warehouse_id: mainWh.id,
+          product_id: p.id
+        }
+      },
+      create: {
+        tenant_id: tenant.id,
+        warehouse_id: mainWh.id,
+        product_id: p.id,
+        qty: plenty,
+        reserved_qty: zero
+      },
+      update: { qty: plenty, reserved_qty: zero }
+    });
+  }
+}
+
 describe.skipIf(!dbReady)("orders API (database)", () => {
+  /** Bir xil ombor/zaxira — parallel `it` bir-birini buzadi (InsufficientStock). */
+  describe.sequential("orders sequential", () => {
   beforeAll(async () => {
     await app.ready();
+    await ensureOrdersIntegrationStock();
   });
 
   afterAll(async () => {
@@ -38,12 +87,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 2 }]
       });
 
@@ -116,12 +167,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .set("Authorization", `Bearer ${token}`);
     const id1 = p1.body.data[0].id as number;
     const id2 = p2.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [
           { product_id: id1, qty: 1 },
           { product_id: id2, qty: 1 }
@@ -152,12 +205,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 12 }]
       });
 
@@ -188,12 +243,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-002")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 10 }]
       });
 
@@ -220,12 +277,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 20 }]
       });
 
@@ -273,12 +332,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
         .get("/api/test1/products?page=1&limit=5&search=SKU-002")
         .set("Authorization", `Bearer ${token}`);
       const productId = productsRes.body.data[0].id as number;
+      const warehouseId = await mainWarehouseId(token);
 
       const first = await request(app.server)
         .post("/api/test1/orders")
         .set("Authorization", `Bearer ${token}`)
         .send({
           client_id: freshClient.id,
+          warehouse_id: warehouseId,
           items: [{ product_id: productId, qty: 10 }]
         });
       expect(first.status).toBe(201);
@@ -289,6 +350,7 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
         .set("Authorization", `Bearer ${token}`)
         .send({
           client_id: freshClient.id,
+          warehouse_id: warehouseId,
           items: [{ product_id: productId, qty: 10 }]
         });
       expect(second.status).toBe(201);
@@ -330,12 +392,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
         .get("/api/test1/products?page=1&limit=5&search=SKU-001")
         .set("Authorization", `Bearer ${token}`);
       const productId = productsRes.body.data[0].id as number;
+      const warehouseId = await mainWarehouseId(token);
 
       const first = await request(app.server)
         .post("/api/test1/orders")
         .set("Authorization", `Bearer ${token}`)
         .send({
           client_id: freshClient.id,
+          warehouse_id: warehouseId,
           items: [{ product_id: productId, qty: 2 }]
         });
       expect(first.status).toBe(201);
@@ -346,6 +410,7 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
         .set("Authorization", `Bearer ${token}`)
         .send({
           client_id: freshClient.id,
+          warehouse_id: warehouseId,
           items: [{ product_id: productId, qty: 1 }]
         });
       expect(second.status).toBe(400);
@@ -377,12 +442,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -420,16 +487,17 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
     expect(whRes.status).toBe(200);
     const warehouses = whRes.body.data as { id: number; name: string }[];
     expect(warehouses.length).toBeGreaterThanOrEqual(2);
-    const whA = warehouses[0].id;
-    const whB = warehouses[1].id;
+    const whMain = await mainWarehouseId(token);
+    const whB = warehouses.find((w) => w.id !== whMain)?.id ?? warehouses[1].id;
 
     const clientsRes = await request(app.server)
       .get("/api/test1/clients?page=1&limit=5&search=Asosiy")
       .set("Authorization", `Bearer ${token}`);
     const clientId = clientsRes.body.data[0].id as number;
 
+    /* Oldingi testlar SKU-001 zaxirasini kamaytirishi mumkin — SKU-003 seedda kamroq tortiladi */
     const productsRes = await request(app.server)
-      .get("/api/test1/products?page=1&limit=5&search=SKU-001")
+      .get("/api/test1/products?page=1&limit=5&search=SKU-003")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
 
@@ -438,7 +506,7 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
-        warehouse_id: whA,
+        warehouse_id: whMain,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -473,12 +541,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${token}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(token);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${token}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -520,12 +590,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${adminToken}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(adminToken);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -588,12 +660,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${adminToken}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(adminToken);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -657,12 +731,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${adminToken}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(adminToken);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -713,12 +789,14 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .get("/api/test1/products?page=1&limit=5&search=SKU-001")
       .set("Authorization", `Bearer ${adminToken}`);
     const productId = productsRes.body.data[0].id as number;
+    const warehouseId = await mainWarehouseId(adminToken);
 
     const create = await request(app.server)
       .post("/api/test1/orders")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({
         client_id: clientId,
+        warehouse_id: warehouseId,
         items: [{ product_id: productId, qty: 1 }]
       });
     expect(create.status).toBe(201);
@@ -759,5 +837,6 @@ describe.skipIf(!dbReady)("orders API (database)", () => {
       .send({ status: "cancelled" });
     expect(adminCancel.status).toBe(200);
     expect(adminCancel.body.status).toBe("cancelled");
+  });
   });
 });

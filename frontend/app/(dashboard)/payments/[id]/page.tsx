@@ -12,6 +12,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 
 type PaymentDetailRow = {
   id: number;
@@ -61,6 +62,7 @@ export default function PaymentDetailPage() {
   const detailQ = useQuery({
     queryKey: ["payment-detail", tenantSlug, paymentId],
     enabled: Boolean(tenantSlug) && hydrated && !invalid,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<DetailPayload>(`/api/${tenantSlug}/payments/${paymentId}`);
       return data;

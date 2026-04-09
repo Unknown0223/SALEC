@@ -11,9 +11,9 @@ function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        /** Ro‘yxat sahifalarida tez-tez qayta yuklashni kamaytiradi */
-        staleTime: 60 * 1000,
-        gcTime: 15 * 60 * 1000,
+        /** Ro‘yxatlar: qisqa muddatda bir xil ma’lumot qayta olinmasin */
+        staleTime: 90 * 1000,
+        gcTime: 20 * 60 * 1000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         /** Backend o‘chiq bo‘lsa qayta urinmasin — konsoldagi ERR_CONNECTION_REFUSED takrorini kamaytiradi */
@@ -21,6 +21,9 @@ function makeQueryClient() {
           if (isApiUnreachable(error)) return false;
           return failureCount < 1;
         }
+      },
+      mutations: {
+        retry: 0
       }
     }
   });

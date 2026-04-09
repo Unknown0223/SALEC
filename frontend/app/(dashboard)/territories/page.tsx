@@ -8,6 +8,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, useTenant } from "@/lib/api-client";
+import { isDatabaseSchemaMismatchError } from "@/lib/api-errors";
+import { DatabaseSchemaMismatchCallout } from "@/components/system/database-schema-mismatch-callout";
 
 interface Territory {
   id: number;
@@ -23,18 +25,30 @@ export default function TerritoriesPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Territory[]>([]);
   const [activeFilter, setActiveFilter] = useState("all");
+  const [schemaMismatch, setSchemaMismatch] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchTerritories = useCallback(async () => {
     try {
       setLoading(true);
+      setSchemaMismatch(false);
+      setLoadError(false);
       const params = new URLSearchParams({
         page: "1", limit: "100",
         ...(activeFilter !== "all" ? { is_active: activeFilter === "active" ? "true" : "false" } : {})
       });
       const data = await apiFetch<{ data?: Territory[] }>(`/api/${tenant}/territories?${params}`);
       setItems(data.data ?? []);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (isDatabaseSchemaMismatchError(e)) setSchemaMismatch(true);
+      else {
+        setLoadError(true);
+        console.error(e);
+      }
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [tenant, activeFilter]);
 
   useEffect(() => { void fetchTerritories(); }, [fetchTerritories]);
@@ -42,6 +56,13 @@ export default function TerritoriesPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Hududlar (Territories)</h1>
+
+      {schemaMismatch && <DatabaseSchemaMismatchCallout />}
+      {!loading && loadError && !schemaMismatch && (
+        <p className="text-sm text-destructive" role="alert">
+          Ma’lumotlarni yuklab bo‘lmadi.
+        </p>
+      )}
 
       <Card>
         <CardHeader className="pb-2">

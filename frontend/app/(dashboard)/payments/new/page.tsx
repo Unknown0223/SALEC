@@ -9,6 +9,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { api } from "@/lib/api";
 import type { ClientRow } from "@/lib/client-types";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -41,6 +42,7 @@ export default function NewPaymentPage() {
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "payment-form"],
     enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ClientRow[] }>(
         `/api/${tenantSlug}/clients?page=1&limit=300&is_active=true`
@@ -105,6 +107,7 @@ export default function NewPaymentPage() {
           <div className="space-y-2">
             <Label>Mijoz</Label>
             <FilterSelect
+              data-testid="new-payment-client"
               className="flex h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
               emptyLabel="Tanlang"
               value={clientId}
@@ -134,6 +137,7 @@ export default function NewPaymentPage() {
             <Label htmlFor="pay-amt">Summa</Label>
             <Input
               id="pay-amt"
+              data-testid="new-payment-amount"
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
@@ -167,6 +171,7 @@ export default function NewPaymentPage() {
           </div>
           <Button
             type="button"
+            data-testid="new-payment-submit"
             disabled={mut.isPending}
             onClick={() => {
               setErr(null);

@@ -1,4 +1,4 @@
-import { normKeyTerritoryMatch } from "../../../../shared/territory-lalaku-seed";
+import { normKeyTerritoryMatch } from "../../../shared/territory-lalaku-seed";
 import { prisma } from "../../config/database";
 import { salesRefStoredValue } from "../sales-directions/sales-directions.service";
 import {

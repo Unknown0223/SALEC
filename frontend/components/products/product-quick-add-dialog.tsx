@@ -19,6 +19,7 @@ import {
   resolveUnitFromForm
 } from "@/lib/product-units";
 import { cn } from "@/lib/utils";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
@@ -69,6 +70,7 @@ export function ProductQuickAddDialog({ open, onOpenChange, tenantSlug, onDone }
   const catsQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "quick-add"],
     enabled: Boolean(tenantSlug) && open,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: CatRow[] }>(`/api/${tenantSlug}/product-categories`);
       return data.data;
@@ -77,6 +79,7 @@ export function ProductQuickAddDialog({ open, onOpenChange, tenantSlug, onDone }
 
   const catalogOpts = (path: string) => ({
     queryKey: ["catalog-opts", path, tenantSlug, "quick"],
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams({ page: "1", limit: "500", is_active: "true" });
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(

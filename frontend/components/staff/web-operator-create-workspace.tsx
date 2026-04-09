@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { FilterSelect, filterSelectClassName } from "@/components/ui/filter-select";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ export function WebOperatorCreateWorkspace({ tenantSlug }: Props) {
   const filterOptsQ = useQuery({
     queryKey: ["operators", tenantSlug, "filter-options"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: FilterOptions }>(
         `/api/${tenantSlug}/operators/meta/filter-options`
@@ -58,6 +60,7 @@ export function WebOperatorCreateWorkspace({ tenantSlug }: Props) {
   const desksQ = useQuery({
     queryKey: ["cash-desks", tenantSlug, "operator-create-page"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/cash-desks?is_active=true&limit=200&page=1`

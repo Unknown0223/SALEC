@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -93,6 +94,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["operators", tenantSlug, "position-presets-admin"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: WebStaffPositionPresetRow[] }>(
         `/api/${tenantSlug}/operators/meta/position-presets`
@@ -104,6 +106,7 @@ export function WebStaffPositionPresetsWorkspace({ tenantSlug }: Props) {
   const historyQ = useQuery({
     queryKey: ["operators", tenantSlug, "position-preset-history", historyPresetId],
     enabled: Boolean(tenantSlug) && Boolean(historyPresetId),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{
         data: AuditHistoryRow[];

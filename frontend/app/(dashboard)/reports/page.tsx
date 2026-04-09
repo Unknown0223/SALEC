@@ -9,17 +9,33 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { formatNumberGrouped } from "@/lib/format-numbers";
-import { useQuery } from "@tanstack/react-query";
+import { STALE } from "@/lib/query-stale";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
-import {
-  ReportsChannelOrdersBar,
-  ReportsStatusPie,
-  ReportsTopProductsBar,
-  ReportsTrendCharts
-} from "@/components/charts/analytics-charts";
+
+const chartLoading = () => (
+  <div className="h-[280px] animate-pulse rounded-lg bg-muted/30" aria-hidden />
+);
+
+const ReportsTrendCharts = dynamic(
+  () => import("@/components/charts/analytics-charts").then((m) => ({ default: m.ReportsTrendCharts })),
+  { ssr: false, loading: chartLoading }
+);
+const ReportsStatusPie = dynamic(
+  () => import("@/components/charts/analytics-charts").then((m) => ({ default: m.ReportsStatusPie })),
+  { ssr: false, loading: chartLoading }
+);
+const ReportsTopProductsBar = dynamic(
+  () => import("@/components/charts/analytics-charts").then((m) => ({ default: m.ReportsTopProductsBar })),
+  { ssr: false, loading: chartLoading }
+);
+const ReportsChannelOrdersBar = dynamic(
+  () => import("@/components/charts/analytics-charts").then((m) => ({ default: m.ReportsChannelOrdersBar })),
+  { ssr: false, loading: chartLoading }
+);
 
 /* ─── Types ─────────────────────────────────────────────── */
 
@@ -234,13 +250,14 @@ function renderXyzTable(title: string, desc: string, rows: XyzRow[], tone: "emer
   );
 }
 
-function exportToXlsx(fileName: string, sheets: { name: string; data: unknown[][] }[]) {
+async function exportReportsToXlsx(fileName: string, sheets: { name: string; data: unknown[][] }[]) {
+  const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
   for (const sheet of sheets) {
     const ws = XLSX.utils.aoa_to_sheet(sheet.data);
     XLSX.utils.book_append_sheet(wb, ws, sheet.name);
   }
-  XLSX.writeFile(wb, `${fileName}.xlsx`);
+  XLSX.writeFile(wb, `${fileName}.xlsx`, { bookType: "xlsx", compression: true });
 }
 
 function formatDate(d: Date) {
@@ -321,6 +338,7 @@ function ReportsContent() {
   const salesQ = useQuery({
     queryKey: ["reports", "sales", tenantSlug, from, to],
     enabled: enabled && activeTab === "summary",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<SalesSummary>(
         `/api/${tenantSlug}/reports/sales?from=${from}&to=${to}`
@@ -332,6 +350,7 @@ function ReportsContent() {
   const trendsQ = useQuery({
     queryKey: ["reports", "trends", tenantSlug, from, to],
     enabled: enabled && activeTab === "trends",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<TrendPoint[]>(
         `/api/${tenantSlug}/reports/order-trends?from=${from}&to=${to}`
@@ -343,6 +362,7 @@ function ReportsContent() {
   const productsQ = useQuery({
     queryKey: ["reports", "products", tenantSlug, from, to],
     enabled: enabled && activeTab === "products",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductSale[] }>(
         `/api/${tenantSlug}/reports/products?from=${from}&to=${to}`
@@ -354,6 +374,7 @@ function ReportsContent() {
   const clientsQ = useQuery({
     queryKey: ["reports", "clients", tenantSlug, from, to],
     enabled: enabled && activeTab === "clients",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<{ data: ClientKpi[] }>(
         `/api/${tenantSlug}/reports/clients?from=${from}&to=${to}`
@@ -365,6 +386,7 @@ function ReportsContent() {
   const agentsQ = useQuery({
     queryKey: ["reports", "agents", tenantSlug, from, to],
     enabled: enabled && activeTab === "agents",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<{ data: AgentKpi[] }>(
         `/api/${tenantSlug}/reports/agent-kpi?from=${from}&to=${to}`
@@ -376,6 +398,7 @@ function ReportsContent() {
   const statusQ = useQuery({
     queryKey: ["reports", "status", tenantSlug],
     enabled: enabled && activeTab === "summary",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<StatusDist[]>(
         `/api/${tenantSlug}/reports/status-distribution`
@@ -387,6 +410,7 @@ function ReportsContent() {
   const channelsQ = useQuery({
     queryKey: ["reports", "channels", tenantSlug, from, to],
     enabled: enabled && activeTab === "channels",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<ChannelStats>(
         `/api/${tenantSlug}/reports/channels?from=${from}&to=${to}`
@@ -398,6 +422,7 @@ function ReportsContent() {
   const abcQ = useQuery({
     queryKey: ["reports", "abc", tenantSlug, from, to],
     enabled: enabled && activeTab === "abc",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<AbcAnalysis>(
         `/api/${tenantSlug}/reports/abc-analysis?from=${from}&to=${to}`
@@ -409,6 +434,7 @@ function ReportsContent() {
   const xyzQ = useQuery({
     queryKey: ["reports", "xyz", tenantSlug, from, to],
     enabled: enabled && activeTab === "xyz",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<XyzAnalysis>(
         `/api/${tenantSlug}/reports/xyz-analysis?from=${from}&to=${to}`
@@ -420,6 +446,7 @@ function ReportsContent() {
   const churnQ = useQuery({
     queryKey: ["reports", "churn", tenantSlug, churnMonths],
     enabled: enabled && activeTab === "churn",
+    staleTime: STALE.report,
     queryFn: async () => {
       const { data } = await api.get<ClientChurn>(
         `/api/${tenantSlug}/reports/client-churn?monthsAgo=${churnMonths}`
@@ -440,6 +467,8 @@ function ReportsContent() {
       recLimit
     ],
     enabled: enabled && activeTab === "receivables",
+    staleTime: STALE.report,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const p = new URLSearchParams({
         page: String(recPage),
@@ -755,7 +784,7 @@ function ReportsContent() {
                       const rows = productsQ.data!.map((p, i) => [
                         i + 1, p.sku, p.product_name, parseFloat(p.total_qty), p.order_count, parseFloat(p.total_revenue)
                       ]);
-                      exportToXlsx(`products-${formatDate(new Date())}`, [
+                      void exportReportsToXlsx(`products-${formatDate(new Date())}`, [
                         { name: "Mahsulotlar", data: [["#", "Kod", "Mahsulot", "Sotilgan", "Zakazlar", "Summa"], ...rows] }
                       ]);
                     }}
@@ -835,7 +864,7 @@ function ReportsContent() {
                         c.last_order_date ? new Date(c.last_order_date).toLocaleDateString("uz-UZ") : "—",
                         parseFloat(c.balance)
                       ]);
-                      exportToXlsx(`clients-${formatDate(new Date())}`, [
+                      void exportReportsToXlsx(`clients-${formatDate(new Date())}`, [
                         { name: "Mijozlar", data: [["#", "Mijoz", "Zakazlar", "Xarajat", "Oxirgi", "Balans"], ...rows] }
                       ]);
                     }}
@@ -909,7 +938,7 @@ function ReportsContent() {
                         a.user_name, a.clients_count, a.order_count, parseFloat(a.total_orders),
                         parseFloat(a.avg_order_sum), a.returns_count
                       ]);
-                      exportToXlsx(`agent-kpi-${formatDate(new Date())}`, [
+                      void exportReportsToXlsx(`agent-kpi-${formatDate(new Date())}`, [
                         { name: "Agent KPI", data: [["Agent", "Mijozlar", "Zakazlar", "Summa", "Avg", "Qaytarish"], ...rows] }
                       ]);
                     }}
@@ -976,7 +1005,7 @@ function ReportsContent() {
                       d.order_count,
                       parseFloat(d.total_sum)
                     ]);
-                    exportToXlsx(`kanallar-${from}-${to}`, [
+                    void exportReportsToXlsx(`kanallar-${from}-${to}`, [
                       { name: "Kanallar", data: [["Kanal", "Zakazlar", "Summa"], ...ch] },
                       { name: "Savdo yo‘nalishi", data: [["Yo‘nalish", "Zakazlar", "Summa"], ...td] }
                     ]);
@@ -1079,7 +1108,7 @@ function ReportsContent() {
                     const d = abcQ.data!;
                     const toSheet = (rows: AbcRow[]) =>
                       [["Mijoz", "Summa", "%"], ...rows.map((r) => [r.client_name, parseFloat(r.total), r.pct])];
-                    exportToXlsx(`abc-${from}-${to}`, [
+                    void exportReportsToXlsx(`abc-${from}-${to}`, [
                       { name: "A", data: toSheet(d.categoryA ?? []) },
                       { name: "B", data: toSheet(d.categoryB ?? []) },
                       { name: "C", data: toSheet(d.categoryC ?? []) }
@@ -1114,7 +1143,7 @@ function ReportsContent() {
                     const d = xyzQ.data!;
                     const toSheet = (rows: XyzRow[]) =>
                       [["Mijoz", "O‘rtacha", "CV"], ...rows.map((r) => [r.client_name, parseFloat(r.avg), r.cv])];
-                    exportToXlsx(`xyz-${from}-${to}`, [
+                    void exportReportsToXlsx(`xyz-${from}-${to}`, [
                       { name: "X", data: toSheet(d.xClients ?? []) },
                       { name: "Y", data: toSheet(d.yClients ?? []) },
                       { name: "Z", data: toSheet(d.zClients ?? []) }
@@ -1385,7 +1414,7 @@ function ReportsContent() {
                       c.last_order ? new Date(c.last_order).toLocaleDateString("uz-UZ") : "—",
                       parseFloat(c.total_historical)
                     ]);
-                    exportToXlsx(`churn-${churnMonths}oy`, [
+                    void exportReportsToXlsx(`churn-${churnMonths}oy`, [
                       {
                         name: "Nofaol",
                         data: [["Mijoz", "Oxirgi zakaz", "Tarixiy summa"], ...rows]

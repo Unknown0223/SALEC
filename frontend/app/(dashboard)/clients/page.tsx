@@ -35,6 +35,7 @@ import {
 } from "@/lib/ref-select-options";
 import { api } from "@/lib/api";
 import { formatGroupedInteger } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { clientsFilterDebugEnabled, logClientsFilters } from "@/lib/clients-filter-debug";
 import {
   ClientImportMappingDialog,
@@ -43,7 +44,8 @@ import {
 import { QueryErrorState } from "@/components/common/query-error-state";
 import { getUserFacingError } from "@/lib/error-utils";
 import { isAxiosError } from "axios";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -135,6 +137,7 @@ export default function ClientsPage() {
   const [importStagingFile, setImportStagingFile] = useState<File | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [activeFilter, setActiveFilter] = useState<"all" | "true" | "false">("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [regionFilter, setRegionFilter] = useState("");
@@ -215,26 +218,53 @@ export default function ClientsPage() {
     };
   }, [tenantSlug, qc]);
 
-  const filterBundle: FilterBundle = {
-    search,
-    activeFilter,
-    categoryFilter,
-    regionFilter,
-    cityFilter,
-    clientTypeFilter,
-    clientFormatFilter,
-    salesChannelFilter,
-    agentFilter,
-    expeditorFilter,
-    sortField,
-    sortOrder
-  };
+  const filterBundleForApi = useMemo<FilterBundle>(
+    () => ({
+      search: debouncedSearch,
+      activeFilter,
+      categoryFilter,
+      regionFilter,
+      cityFilter,
+      clientTypeFilter,
+      clientFormatFilter,
+      salesChannelFilter,
+      agentFilter,
+      expeditorFilter,
+      sortField,
+      sortOrder
+    }),
+    [
+      debouncedSearch,
+      activeFilter,
+      categoryFilter,
+      regionFilter,
+      cityFilter,
+      clientTypeFilter,
+      clientFormatFilter,
+      salesChannelFilter,
+      agentFilter,
+      expeditorFilter,
+      sortField,
+      sortOrder
+    ]
+  );
+
+  const prevDebouncedSearchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevDebouncedSearchRef.current === null) {
+      prevDebouncedSearchRef.current = debouncedSearch;
+      return;
+    }
+    if (prevDebouncedSearchRef.current === debouncedSearch) return;
+    prevDebouncedSearchRef.current = debouncedSearch;
+    setPage(1);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     setSelectedIds(new Set());
   }, [
     tenantSlug,
-    search,
+    debouncedSearch,
     activeFilter,
     categoryFilter,
     regionFilter,
@@ -330,12 +360,12 @@ export default function ClientsPage() {
     }
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching, isPlaceholderData } = useQuery({
     queryKey: [
       "clients",
       tenantSlug,
       page,
-      search,
+      debouncedSearch,
       activeFilter,
       categoryFilter,
       regionFilter,
@@ -350,18 +380,20 @@ export default function ClientsPage() {
       tablePrefs.pageSize
     ],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(tablePrefs.pageSize)
       });
-      appendClientsFilterParams(params, filterBundle);
+      appendClientsFilterParams(params, filterBundleForApi);
       const qs = params.toString();
       logClientsFilters("request", {
         tenantSlug,
         url: `/api/${tenantSlug}/clients?${qs}`,
         queryParams: Object.fromEntries(params.entries()),
-        filters: { ...filterBundle }
+        filters: { ...filterBundleForApi }
       });
       try {
         const { data: body } = await api.get<ClientsResponse>(`/api/${tenantSlug}/clients?${qs}`);
@@ -385,6 +417,7 @@ export default function ClientsPage() {
   const refsQ = useQuery({
     queryKey: ["clients-references", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<ClientReferencesResponse>(`/api/${tenantSlug}/clients/references`);
       return data;
@@ -503,6 +536,7 @@ export default function ClientsPage() {
   const agentsFilterQ = useQuery({
     queryKey: ["agents", tenantSlug, "clients-toolbar"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -516,6 +550,7 @@ export default function ClientsPage() {
   const expeditorsFilterQ = useQuery({
     queryKey: ["expeditors", tenantSlug, "clients-toolbar"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -671,7 +706,7 @@ export default function ClientsPage() {
             setExportBusy(true);
             try {
               const params = new URLSearchParams({ page: "1", limit: "50" });
-              appendClientsFilterParams(params, filterBundle);
+              appendClientsFilterParams(params, filterBundleForApi);
               logClientsFilters("export_csv_request", {
                 queryParams: Object.fromEntries(params.entries()),
                 note: "limit=50 — faqat eksport endpointi; filtr barcha mos yozuvlar bo‘yicha serverda"
@@ -856,12 +891,17 @@ export default function ClientsPage() {
             Войти снова
           </Link>
         </p>
-      ) : isLoading ? (
+      ) : isLoading && !data ? (
         <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
         <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
       ) : (
-        <div className="orders-hub-section orders-hub-section--table mt-4">
+        <div
+          className={cn(
+            "orders-hub-section orders-hub-section--table mt-4",
+            isFetching && isPlaceholderData && "opacity-70 transition-opacity"
+          )}
+        >
           <Card className="overflow-hidden rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
             <CardContent className="p-0">
               <ClientsTableListToolbarStrip

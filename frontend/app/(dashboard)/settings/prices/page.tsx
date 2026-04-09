@@ -6,6 +6,7 @@ import { SettingsWorkspace } from "@/components/settings/settings-workspace";
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -37,6 +38,7 @@ export default function PricesOverviewSettingsPage() {
   const overviewQ = useQuery({
     queryKey: ["finance-price-overview", tenantSlug, kind],
     enabled: Boolean(tenantSlug) && isStaff,
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: OverviewRow[] }>(
         `/api/${tenantSlug}/finance/price-overview?kind=${kind}`

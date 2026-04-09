@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -215,6 +216,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const clientQ = useQuery({
     queryKey: ["client", tenantSlug, clientId],
     enabled: Boolean(tenantSlug) && clientId > 0,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<ClientDetailApi>(`/api/${tenantSlug}/clients/${clientId}`);
       return data;
@@ -224,6 +226,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const agentsPickerQ = useQuery({
     queryKey: ["agents", tenantSlug, "client-edit"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -237,6 +240,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const expeditorsPickerQ = useQuery({
     queryKey: ["expeditors", tenantSlug, "client-edit"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -250,6 +254,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const refsQ = useQuery({
     queryKey: ["clients-references", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         categories: string[];

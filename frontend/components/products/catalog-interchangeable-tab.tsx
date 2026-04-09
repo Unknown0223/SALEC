@@ -14,6 +14,7 @@ import type { InterchangeableGroupRow } from "@/lib/product-types";
 import type { ProductRow } from "@/lib/product-types";
 import { api } from "@/lib/api";
 import { formatGroupedInteger } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -54,6 +55,7 @@ export function CatalogInterchangeableTab({
   const listQ = useQuery({
     queryKey: ["catalog-interchangeable", tenantSlug, statusTab, search, page, pageSize],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
@@ -71,6 +73,7 @@ export function CatalogInterchangeableTab({
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "interchangeable-modal"],
     enabled: Boolean(tenantSlug) && open,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
       return data.data;
@@ -80,6 +83,7 @@ export function CatalogInterchangeableTab({
   const pickQ = useQuery({
     queryKey: ["products-pick", tenantSlug, pickSearch],
     enabled: Boolean(tenantSlug) && open && pickSearch.trim().length >= 1,
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "15", page: "1" });
       params.set("search", pickSearch.trim());

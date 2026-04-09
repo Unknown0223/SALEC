@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -271,6 +272,7 @@ function WarehouseFormDialog({
   const pickersQ = useQuery({
     queryKey: ["warehouse-pickers", tenantSlug],
     enabled: Boolean(tenantSlug) && open && canWrite,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: WarehousePickersData }>(
         `/api/${tenantSlug}/warehouses/pickers`
@@ -282,6 +284,7 @@ function WarehouseFormDialog({
   const detailQ = useQuery({
     queryKey: ["warehouse-detail", tenantSlug, initial?.id],
     enabled: Boolean(tenantSlug) && open && canWrite && initial != null,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: WarehouseDetail }>(
         `/api/${tenantSlug}/warehouses/${initial!.id}`
@@ -620,6 +623,7 @@ export function WarehousesWorkspace({ tenantSlug, canWrite }: Props) {
   const listQ = useQuery({
     queryKey: ["warehouses-table", tenantSlug, tab, page, limit, debouncedSearch],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");

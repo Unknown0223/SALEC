@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -36,6 +37,7 @@ export function BonusStrategySettings() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["settings", "bonus-stack", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data: body } = await api.get<{ bonus_stack: BonusStackDto }>(
         `/api/${tenantSlug}/settings/bonus-stack`

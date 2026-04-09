@@ -19,11 +19,21 @@
     "import:staff-csv": "node scripts/run-backend-npm.cjs import:staff-csv",
     "ensure:demo-logins": "node scripts/run-backend-npm.cjs ensure:demo-logins",
     "import:once": "node scripts/run-backend-npm.cjs import:once",
-    "test": "npm run test:ci --prefix backend && npm run test --prefix frontend",
+    "test": "npm run test:ci --prefix backend && npm run test:ci --prefix frontend",
+    "test:all:ci": "npm run test:ci --prefix backend && npm run test:all --prefix frontend",
+    "test:backend": "npm run test:ci --prefix backend",
+    "test:frontend": "npm run test --prefix frontend",
+    "test:frontend:watch": "npm run test:watch --prefix frontend",
+    "test:frontend:ci": "npm run test:ci --prefix frontend",
+    "test:e2e": "npm run test:e2e --prefix frontend",
+    "test:e2e:smoke": "npm run test:e2e:smoke --prefix frontend",
+    "test:e2e:ci": "npm run test:e2e:ci --prefix frontend",
+    "test:quality:frontend": "npm run test:quality --prefix frontend",
     "frontend:lint": "npm run lint --prefix frontend",
     "frontend:typecheck": "npm run typecheck --prefix frontend",
     "frontend:build": "npm run build --prefix frontend",
-    "load:smoke": "node scripts/load-smoke.mjs"
+    "load:smoke": "node scripts/load-smoke.mjs",
+    "test:all": "npm run test:all:ci && npm run load:smoke"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

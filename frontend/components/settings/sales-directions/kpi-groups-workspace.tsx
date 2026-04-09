@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ export function KpiGroupsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["kpi-groups", tenantSlug, tab],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");
@@ -362,6 +364,7 @@ function KpiFormDialog({
   const agentsQ = useQuery({
     queryKey: ["agents-kpi-pick", tenantSlug],
     enabled: open && Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
@@ -376,6 +379,7 @@ function KpiFormDialog({
   const productsQ = useQuery({
     queryKey: ["products-kpi-pick", tenantSlug, prodSearch],
     enabled: open && Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");

@@ -21,6 +21,8 @@
  * Production: ALLOW_PROD_REF_IMPORT=true
  * Namuna parolni o‘tkazmaslik: IMPORT_ONCE_SKIP_ENSURE_LOGINS=1
  *
+ * Keyin Excel (agent/prays/…): `npm run import:excel-bundle` yoki zanjir: `npm run import:tenant-data`.
+ *
  * Shaharlar (Excel): CITY_XLSX_PATH yoki scripts/data/Данные Город*.xlsx | gorod.xlsx
  * O‘tkazib yuborish: IMPORT_ONCE_NO_CITIES=1
  */

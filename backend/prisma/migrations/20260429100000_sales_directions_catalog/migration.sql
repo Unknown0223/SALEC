@@ -75,3 +75,8 @@ ALTER TABLE "kpi_group_products" ADD CONSTRAINT "kpi_group_products_product_id_f
 
 ALTER TABLE "kpi_group_agents" ADD CONSTRAINT "kpi_group_agents_kpi_group_id_fkey" FOREIGN KEY ("kpi_group_id") REFERENCES "kpi_groups"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "kpi_group_agents" ADD CONSTRAINT "kpi_group_agents_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Avval 20260404120000 da bo‘lgani kabi, lekin trade_directions jadvali shu migratsiyada yaratilgach:
+ALTER TABLE "users" ADD COLUMN "trade_direction_id" INTEGER;
+CREATE INDEX "users_trade_direction_id_idx" ON "users"("trade_direction_id");
+ALTER TABLE "users" ADD CONSTRAINT "users_trade_direction_id_fkey" FOREIGN KEY ("trade_direction_id") REFERENCES "trade_directions"("id") ON DELETE SET NULL ON UPDATE CASCADE;

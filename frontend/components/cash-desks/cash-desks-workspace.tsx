@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatGroupedInteger } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -164,6 +165,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
   const listQ = useQuery({
     queryKey: ["cash-desks", tenantSlug, tab, page, limit, debouncedSearch],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");
@@ -183,6 +185,7 @@ export function CashDesksWorkspace({ tenantSlug, canWrite }: Props) {
   const pickersQ = useQuery({
     queryKey: ["cash-desks-pickers", tenantSlug],
     enabled: Boolean(tenantSlug) && (formOpen || editing != null),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: PickersData }>(`/api/${tenantSlug}/cash-desks/pickers`);
       return data.data;
@@ -538,6 +541,7 @@ function CashDeskShiftsDialog({
   const listQ = useQuery({
     queryKey: ["cash-desk-shifts", tenantSlug, deskId],
     enabled: open && deskId != null,
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ShiftApiRow[] }>(
         `/api/${tenantSlug}/cash-desks/${deskId}/shifts?limit=40`
@@ -549,6 +553,7 @@ function CashDeskShiftsDialog({
   const openShiftQ = useQuery({
     queryKey: ["cash-desk-shift-open", tenantSlug, deskId],
     enabled: open && deskId != null,
+    staleTime: STALE.live,
     queryFn: async () => {
       const { data } = await api.get<{ data: ShiftApiRow | null }>(
         `/api/${tenantSlug}/cash-desks/${deskId}/shifts/open`

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -55,6 +56,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "staff-create"],
     enabled: kind !== "supervisor",
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data;
@@ -64,6 +66,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
   const branchesQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "staff-create-branches"],
     enabled: Boolean(tenantSlug) && kind !== "supervisor",
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return (data.references.branches ?? []).filter((b) => b.active !== false);
@@ -73,6 +76,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "staff-create"],
     enabled: Boolean(tenantSlug) && kind === "agent",
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
       return data.data;
@@ -82,6 +86,7 @@ export function StaffCreateForm({ kind, tenantSlug, onSuccess, onCancel }: Props
   const tradeDirectionsQ = useQuery({
     queryKey: ["trade-directions", tenantSlug, "staff-create"],
     enabled: Boolean(tenantSlug) && (kind === "agent" || kind === "expeditor"),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; name: string; code: string | null }>;

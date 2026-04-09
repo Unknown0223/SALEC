@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { useQuery } from "@tanstack/react-query";
 import { ListOrdered } from "lucide-react";
@@ -55,6 +56,7 @@ export default function AuditJournalPage() {
   const q = useQuery({
     queryKey,
     enabled: Boolean(tenantSlug) && hydrated && role === "admin",
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("page", String(page));

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -108,6 +109,7 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
 
   const listQ = useQuery({
     queryKey: [kind, tenantSlug],
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: StaffRow[] }>(`/api/${tenantSlug}/${seg}`);
       return data.data;
@@ -117,6 +119,7 @@ export function StaffManageView({ kind, tenantSlug }: Props) {
   const supervisorsQ = useQuery({
     queryKey: ["supervisors", tenantSlug, "staff-agent-dropdown"],
     enabled: kind === "agent" && Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: StaffRow[] }>(`/api/${tenantSlug}/supervisors`);
       return data.data;

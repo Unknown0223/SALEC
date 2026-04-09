@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { PRODUCT_UNIT_OPTIONS } from "@/lib/product-units";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,7 @@ export default function ProductCategoriesSettingsPage() {
   const catsQ = useQuery({
     queryKey: ["product-categories", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductCategoryRow[] }>(`/api/${tenantSlug}/product-categories`);
       return data.data;
@@ -106,6 +108,7 @@ export default function ProductCategoriesSettingsPage() {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "product-cat-units"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<Profile>(`/api/${tenantSlug}/settings/profile`);
       return data;

@@ -3,9 +3,13 @@ FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Build vaqtida brauzer API manzili (Railway o‘zgaruvchisi: build va runtime uchun)
+# Build vaqtida brauzer API manzili (ixtiyoriy — berilsa proxy o‘chadi, client to‘g‘ridan-to‘g‘ri backendga uradi)
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+# Prod proxy uchun backend origin (Railway: `https://<backend>.*.railway.app`) — build vaqtida majburiy, agar NEXT_PUBLIC_API_URL bo‘sh bo‘lsa
+ARG API_INTERNAL_ORIGIN
+ENV API_INTERNAL_ORIGIN=${API_INTERNAL_ORIGIN}
 
 COPY package.json package-lock.json ./
 RUN npm ci

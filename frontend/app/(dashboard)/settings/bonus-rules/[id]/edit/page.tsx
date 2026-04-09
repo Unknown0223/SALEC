@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -25,6 +26,7 @@ export default function EditBonusRulePage() {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["bonus-rule", tenantSlug, ruleId],
     enabled: Boolean(tenantSlug) && !invalid,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data: body } = await api.get<BonusRuleRow>(`/api/${tenantSlug}/bonus-rules/${ruleId}`);
       return body;

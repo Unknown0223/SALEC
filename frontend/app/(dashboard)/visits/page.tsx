@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { agentDisplayName, type AgentListItem } from "@/lib/agent-display";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatGroupedInteger } from "@/lib/format-numbers";
@@ -35,6 +36,7 @@ export default function VisitsPage() {
   const agentsQ = useQuery({
     queryKey: ["visits-agents", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
@@ -48,6 +50,7 @@ export default function VisitsPage() {
   const listQ = useQuery({
     queryKey: ["agent-visits", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: VisitRow[]; total: number }>(
         `/api/${tenantSlug}/agent-visits?limit=50`

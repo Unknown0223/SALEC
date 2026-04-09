@@ -27,6 +27,7 @@ import {
   productItemsExportCell
 } from "@/lib/products-catalog-columns";
 import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { Ban, ListOrdered, Pencil, RefreshCw, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { CatalogInterchangeableTab } from "./catalog-interchangeable-tab";
@@ -99,6 +100,7 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "items-tab"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/product-categories`
@@ -110,6 +112,7 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
   const groupsQ = useQuery({
     queryKey: ["catalog-simple", "catalog/product-groups", tenantSlug, "items-filter"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams({ page: "1", limit: "500", is_active: "true" });
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
@@ -132,6 +135,7 @@ function ItemsTab({ tenantSlug, isAdmin, statusTab, search }: ItemsProps) {
       isActiveFilter
     ],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({

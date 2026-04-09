@@ -171,8 +171,14 @@ export async function registerProductRoutes(app: FastifyInstance) {
       if (q.is_active === "true") where.is_active = true;
       if (q.is_active === "false") where.is_active = false;
 
-      const categoryId = parseFilterId(q.category_id);
-      if (categoryId !== undefined) where.category_id = categoryId;
+      const uncategorized =
+        q.uncategorized === "true" || q.uncategorized === "1" || q.uncategorized === "yes";
+      if (uncategorized) {
+        where.category_id = null;
+      } else {
+        const categoryId = parseFilterId(q.category_id);
+        if (categoryId !== undefined) where.category_id = categoryId;
+      }
 
       const productGroupId = parseFilterId(q.product_group_id);
       if (productGroupId !== undefined) where.product_group_id = productGroupId;

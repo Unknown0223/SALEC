@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import type { ProductRow } from "@/lib/product-types";
 import { OrderPrintView } from "./order-print-view";
 import axios, { type AxiosError } from "axios";
@@ -257,7 +258,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["order", tenantSlug, orderId],
     enabled,
-    staleTime: 45 * 1000,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data: body } = await api.get<OrderDetailRow>(
         `/api/${tenantSlug}/orders/${orderId}`
@@ -279,6 +280,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const paymentsListQ = useQuery({
     queryKey: ["order-payments", tenantSlug, orderId],
     enabled: enabled && canOperate,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: PaymentRow[] }>(
         `/api/${tenantSlug}/orders/${orderId}/payments`
@@ -290,6 +292,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const returnsListQ = useQuery({
     queryKey: ["order-returns", tenantSlug, orderId],
     enabled: enabled && canOperate,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: ReturnRow[] }>(
         `/api/${tenantSlug}/orders/${orderId}/returns`
@@ -301,7 +304,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug],
     enabled: enabled && canOperate,
-    staleTime: 10 * 60 * 1000,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/warehouses`
@@ -313,7 +316,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const usersQ = useQuery({
     queryKey: ["users", tenantSlug, "order-meta"],
     enabled: enabled && canOperate,
-    staleTime: 10 * 60 * 1000,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{
         data: { id: number; login: string; name: string; role: string }[];
@@ -324,7 +327,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const expeditorsQ = useQuery({
     queryKey: ["expeditors", tenantSlug, "order-detail-meta"],
     enabled: enabled && canOperate,
-    staleTime: 10 * 60 * 1000,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{
         data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
@@ -346,7 +349,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   const productsQ = useQuery({
     queryKey: ["products", tenantSlug, "order-edit"],
     enabled: enabled && editingLines && canEditOrderLines,
-    staleTime: 5 * 60 * 1000,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data: body } = await api.get<{ data: ProductRow[] }>(
         `/api/${tenantSlug}/products?page=1&limit=200&is_active=true`

@@ -16,6 +16,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { STALE } from "@/lib/query-stale";
 
 type Props = {
   tenantSlug: string | null;
@@ -78,6 +79,7 @@ export function ProductForm({
   const productQ = useQuery({
     queryKey: ["product-detail-form", tenantSlug, productId],
     enabled: Boolean(tenantSlug) && isEdit,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<ProductRow>(
         `/api/${tenantSlug}/products/${productId}?include_prices=true`
@@ -88,6 +90,7 @@ export function ProductForm({
 
   const { data: categories = [] } = useQuery({
     queryKey: ["product-categories", tenantSlug],
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/product-categories`
@@ -99,6 +102,7 @@ export function ProductForm({
 
   const catalogOpts = (path: string) => ({
     queryKey: ["catalog-opts", path, tenantSlug],
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams({ page: "1", limit: "500", is_active: "true" });
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(

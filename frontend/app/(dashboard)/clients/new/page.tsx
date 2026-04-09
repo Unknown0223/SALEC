@@ -14,6 +14,7 @@ import { pickCityTerritoryHint } from "@/lib/city-territory-hint";
 import { mergeRefOptions } from "@/lib/merge-ref-options";
 import { mergeRefSelectOptions } from "@/lib/ref-select-options";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { STALE } from "@/lib/query-stale";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -88,6 +89,7 @@ export default function NewClientPage() {
   const refsQ = useQuery({
     queryKey: ["clients-references", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<ClientReferencesResponse>(`/api/${tenantSlug}/clients/references`);
       return data;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
@@ -142,6 +143,7 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const filterOptQ = useQuery({
     queryKey: ["supervisors-filter-options", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { positions: string[] } }>(
         `/api/${tenantSlug}/supervisors/filter-options`
@@ -153,6 +155,7 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "supervisors-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -170,6 +173,7 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["supervisors", tenantSlug, tab, appliedPos],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");
@@ -184,6 +188,7 @@ export function SupervisorsWorkspace({ tenantSlug }: Props) {
   const agentsQ = useQuery({
     queryKey: ["agents", tenantSlug, "supervisors-ws-pick"],
     enabled: Boolean(tenantSlug) && Boolean(editRow),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
@@ -692,6 +697,7 @@ function SupervisorEditDialog({
   const detailQ = useQuery({
     queryKey: ["supervisor-detail", tenantSlug, row?.id],
     enabled: Boolean(row),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: SupervisorRow }>(`/api/${tenantSlug}/supervisors/${row!.id}`);
       return data.data;

@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/lib/auth-store";
 import { api } from "@/lib/api";
 import { getUserFacingError } from "@/lib/error-utils";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
@@ -40,6 +41,7 @@ export default function InventoryCountsPage() {
   const whQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "inv"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(`/api/${tenantSlug}/warehouses`);
       return data.data.filter((w) => w);
@@ -56,6 +58,7 @@ export default function InventoryCountsPage() {
   const listQ = useQuery({
     queryKey: ["stock-takes", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: TakeRow[]; total: number }>(
         `/api/${tenantSlug}/stock-takes?limit=40`

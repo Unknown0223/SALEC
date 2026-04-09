@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { formatGroupedDecimal, formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Package, Search } from "lucide-react";
@@ -71,6 +72,7 @@ export default function PriceListPage() {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "price-list"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -85,6 +87,7 @@ export default function PriceListPage() {
   const productsQ = useQuery({
     queryKey: ["products", tenantSlug, "price-list", page, limit, debounced],
     enabled: Boolean(tenantSlug) && profileQ.isSuccess,
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("page", String(page));

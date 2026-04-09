@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -230,6 +231,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const filterOptQ = useQuery({
     queryKey: ["agents-filter-options", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: {
@@ -247,6 +249,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "agents-workspace"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -265,6 +268,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const listQ = useQuery({
     queryKey: ["agent", tenantSlug, tab, appliedBranch, appliedTd, appliedPos],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");
@@ -281,6 +285,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "agents-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/warehouses`
@@ -292,6 +297,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "agents-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
       return data.data;
@@ -301,6 +307,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const tradeDirectionsQ = useQuery({
     queryKey: ["trade-directions", tenantSlug, "agents-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; name: string; code: string | null; is_active: boolean }>;
@@ -314,6 +321,7 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "agents-ws"],
     enabled: Boolean(tenantSlug) && Boolean(restrictAgent),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductCategoryRow[] }>(
         `/api/${tenantSlug}/product-categories`
@@ -1143,6 +1151,7 @@ function AgentEditDialog({
   const detailQ = useQuery({
     queryKey: ["agent-detail", tenantSlug, row?.id],
     enabled: Boolean(row),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: AgentRow }>(`/api/${tenantSlug}/agents/${row!.id}`);
       return data.data;
@@ -1346,6 +1355,7 @@ function useCategoryProducts(tenantSlug: string, categoryId: number | null, enab
   return useQuery({
     queryKey: ["products-by-cat", tenantSlug, categoryId],
     enabled: Boolean(tenantSlug) && enabled && categoryId != null,
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductListItem[] }>(
         `/api/${tenantSlug}/products?category_id=${categoryId}&limit=100&is_active=true`

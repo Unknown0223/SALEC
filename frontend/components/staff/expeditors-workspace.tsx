@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -165,6 +166,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const filterOptQ = useQuery({
     queryKey: ["expeditors-filter-options", tenantSlug],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: {
@@ -182,6 +184,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "expeditors-workspace"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.profile,
     queryFn: async () => {
       const { data } = await api.get<TenantProfile>(`/api/${tenantSlug}/settings/profile`);
       return data;
@@ -209,6 +212,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
       appliedCity
     ],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", tab === "active" ? "true" : "false");
@@ -227,6 +231,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug, "expeditors-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
         `/api/${tenantSlug}/warehouses`
@@ -238,6 +243,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "expeditors-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
       return data.data;
@@ -247,6 +253,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const tradeDirectionsQ = useQuery({
     queryKey: ["trade-directions", tenantSlug, "expeditors-ws"],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
         data: Array<{ id: number; name: string; code: string | null; is_active: boolean }>;
@@ -260,6 +267,7 @@ export function ExpeditorsWorkspace({ tenantSlug }: Props) {
   const agentsPickerQ = useQuery({
     queryKey: ["agents", tenantSlug, "expeditors-assign"],
     enabled: Boolean(tenantSlug) && Boolean(assignRow),
+    staleTime: STALE.reference,
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("is_active", "true");
@@ -1211,6 +1219,7 @@ function AgentEditDialog({
   const detailQ = useQuery({
     queryKey: ["expeditor-detail", tenantSlug, row?.id],
     enabled: Boolean(row),
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: ExpeditorRow }>(`/api/${tenantSlug}/expeditors/${row!.id}`);
       return data.data;

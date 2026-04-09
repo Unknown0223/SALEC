@@ -29,8 +29,8 @@ describe("order-status", () => {
     expect(canTransitionOrderStatus("picking", "new")).toBe(false);
   });
 
-  it("returned is terminal; cancelled can reopen to new (admin enforced in API)", () => {
-    expect(getAllowedNextStatuses("returned")).toEqual([]);
+  it("returned -> cancelled for standard order; cancelled can reopen to new (admin enforced in API)", () => {
+    expect(getAllowedNextStatuses("returned")).toEqual(["cancelled"]);
     expect(getAllowedNextStatuses("cancelled")).toEqual(["new"]);
     expect(canTransitionOrderStatus("cancelled", "new")).toBe(true);
     expect(isBackwardTransition("cancelled", "new")).toBe(false);

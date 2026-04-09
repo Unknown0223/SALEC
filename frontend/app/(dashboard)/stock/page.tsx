@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api, apiBaseURL } from "@/lib/api";
@@ -108,7 +109,8 @@ function StockPageContent() {
       );
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
   });
 
   const { data: products = EMPTY_PRODUCTS, isLoading: productsLoading } = useQuery({
@@ -128,7 +130,8 @@ function StockPageContent() {
       }
       return out.sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
     },
-    enabled: Boolean(tenantSlug) && role === "admin"
+    enabled: Boolean(tenantSlug) && role === "admin",
+    staleTime: STALE.reference
   });
 
   useEffect(() => {
@@ -152,7 +155,8 @@ function StockPageContent() {
       const { data } = await api.get<{ data: StockRow[] }>(`/api/${tenantSlug}/stock${qs}`);
       return data.data;
     },
-    enabled: Boolean(tenantSlug)
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.list
   });
 
   const receiptMutation = useMutation({

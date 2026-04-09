@@ -11,6 +11,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { STALE } from "@/lib/query-stale";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
@@ -93,6 +94,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["bonus-rules", tenantSlug, filterKey, page],
     enabled: Boolean(tenantSlug),
+    staleTime: STALE.list,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const params = new URLSearchParams({

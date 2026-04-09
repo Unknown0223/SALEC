@@ -12,6 +12,7 @@ import {
 import { api } from "@/lib/api";
 import { getUserFacingError } from "@/lib/error-utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
+import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -57,6 +58,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
   const allocQ = useQuery({
     queryKey: ["payment-allocations", tenantSlug, pid],
     enabled: open && Boolean(tenantSlug) && pid != null,
+    staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{ data: AllocationRow[] }>(
         `/api/${tenantSlug}/payments/${pid}/allocations`
@@ -90,7 +92,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" data-testid="payment-allocate-dialog">
         <DialogHeader>
           <DialogTitle>To‘lovni zakazlarga taqsimlash</DialogTitle>
           <DialogDescription>
@@ -176,6 +178,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
           </Button>
           <Button
             type="button"
+            data-testid="payment-allocate-fifo"
             disabled={!payment || unallocated <= 0 || allocateMut.isPending || allocQ.isLoading}
             onClick={() => void allocateMut.mutate()}
           >

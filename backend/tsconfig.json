@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
+    "rootDir": ".",
     "outDir": "dist",
     "strict": true,
     "esModuleInterop": true,
@@ -11,6 +12,6 @@
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src"],
+  "include": ["src/**/*.ts", "shared/**/*.ts"],
   "exclude": ["tests", "vitest.config.ts", "dist", "node_modules"]
 }
