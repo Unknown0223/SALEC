@@ -14,13 +14,13 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-export default function EditBonusRulePage() {
+export default function EditDiscountRulePage() {
   const params = useParams();
+  const router = useRouter();
   const raw = params.id;
   const idStr = Array.isArray(raw) ? raw[0] : raw;
   const ruleId = Number.parseInt(idStr ?? "", 10);
   const invalid = !Number.isFinite(ruleId) || ruleId < 1;
-  const router = useRouter();
 
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
@@ -37,18 +37,18 @@ export default function EditBonusRulePage() {
 
   useEffect(() => {
     if (!data) return;
-    if (data.type === "sum" || data.type === "discount") {
-      router.replace(`/settings/discount-rules/${ruleId}/edit`);
+    if (data.type === "qty") {
+      router.replace(`/settings/bonus-rules/${ruleId}/edit`);
     }
   }, [data, ruleId, router]);
 
   return (
     <PageShell>
       <Link
-        href="/settings/bonus-rules/active"
+        href="/settings/discount-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Bonus qoidalari ro‘yxati
+        ← Chegirmalar ro‘yxati
       </Link>
 
       {!authHydrated ? (
@@ -67,12 +67,12 @@ export default function EditBonusRulePage() {
         <p className="text-sm text-destructive">
           {error instanceof Error ? error.message : "Правило не найдено или ошибка"}
         </p>
-      ) : data && (data.type === "sum" || data.type === "discount") ? (
-        <p className="text-sm text-muted-foreground">Skidkalar bo‘limiga yo‘naltirilmoqda…</p>
+      ) : data && data.type === "qty" ? (
+        <p className="text-sm text-muted-foreground">Bonuslar bo‘limiga yo‘naltirilmoqda…</p>
       ) : data ? (
         <>
           <PageHeader
-            title="Bonus qoidasini tahrirlash"
+            title="Chegirma qoidasini tahrirlash"
             description={`${data.name} · #${data.id}`}
             actions={
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
@@ -80,7 +80,7 @@ export default function EditBonusRulePage() {
               </Link>
             }
           />
-          <BonusRuleForm tenantSlug={tenantSlug} initialRule={data} />
+          <BonusRuleForm tenantSlug={tenantSlug} initialRule={data} variant="discountOnly" />
         </>
       ) : (
         <p className="text-sm text-destructive">Нет данных.</p>

@@ -42,6 +42,7 @@ const targetingFields = {
   in_blocks: z.boolean().optional(),
   once_per_client: z.boolean().optional(),
   one_plus_one_gift: z.boolean().optional(),
+  prerequisite_rule_ids: z.array(z.number().int().positive()).max(200).optional(),
   conditions: z.array(conditionSchema).optional()
 };
 
@@ -96,8 +97,23 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         andFilters.push({ name: { contains: search, mode: "insensitive" } });
       }
 
-      if (q.type === "qty" || q.type === "sum" || q.type === "discount") {
+      /** Vergul bilan: masalan `types=qty` yoki `types=sum,discount` (ro‘yxatlar bo‘limlariga ajratish). */
+      const typesCsv = q.types?.trim();
+      if (typesCsv) {
+        const parts = typesCsv
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const ok = [...new Set(parts)].filter((t): t is "qty" | "sum" | "discount" =>
+          t === "qty" || t === "sum" || t === "discount"
+        );
+        if (ok.length > 0) {
+          andFilters.push({ type: { in: ok } });
+        }
+      } else if (q.type === "qty" || q.type === "sum" || q.type === "discount") {
         andFilters.push({ type: q.type });
+      } else if (q.exclude_type === "discount") {
+        andFilters.push({ type: { not: "discount" } });
       }
 
       if (q.manual === "true") {
@@ -213,6 +229,12 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        if (msg === "PRODUCT_SCOPE_REQUIRED") {
+          return reply.status(400).send({
+            error: "ProductScopeRequired",
+            message: "Avtomatik qoida uchun assortiment yoki kategoriya tanlanishi kerak."
+          });
+        }
         if (msg === "BAD_DATE") return reply.status(400).send({ error: "BadDate" });
         throw e;
       }
@@ -247,6 +269,12 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        if (msg === "PRODUCT_SCOPE_REQUIRED") {
+          return reply.status(400).send({
+            error: "ProductScopeRequired",
+            message: "Avtomatik qoida uchun assortiment yoki kategoriya tanlanishi kerak."
+          });
+        }
         if (msg === "BAD_DATE") return reply.status(400).send({ error: "BadDate" });
         throw e;
       }

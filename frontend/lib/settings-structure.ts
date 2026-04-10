@@ -154,7 +154,12 @@ export const settingsSections: SettingsSection[] = [
         href: "/settings/bonus-rules",
         status: "available"
       },
-      makeItem("bonusy-i-skidki", "Скидки", "available", 1),
+      {
+        title: "Скидки",
+        slug: "skidki-pravila",
+        href: "/settings/discount-rules",
+        status: "available"
+      },
       makeItem("bonusy-i-skidki", "RLP бонусы", "available", 2),
       makeItem("bonusy-i-skidki", "Надбавки и вычеты к зарплате", "available", 3)
     ]
@@ -237,7 +242,7 @@ const existingHrefByItemTitle: Record<string, string> = {
   "канал продаж": "/settings/sales-directions/sales-channels",
   "группа kpi": "/settings/sales-directions/kpi-groups",
   "бонусы": "/settings/bonus-rules",
-  "скидки": "/settings/bonus-stack",
+  "скидки": "/settings/discount-rules",
   "rlp бонусы": "/settings/bonus-stack",
   "причины отказа": "/settings/reasons/refusal-reasons",
   "справочники": "/settings/spravochnik",

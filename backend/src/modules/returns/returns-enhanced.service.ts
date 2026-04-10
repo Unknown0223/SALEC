@@ -9,7 +9,7 @@ import {
   type BonusRuleRow
 } from "../bonus-rules/bonus-rules.service";
 import { getProductPrice } from "../products/product-prices.service";
-import { canTransitionOrderStatus } from "../orders/order-status";
+import { canTransitionOrderStatus, normalizeOrderType } from "../orders/order-status";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,8 @@ export type OrderItemSummary = {
 };
 
 export type ClientReturnsData = {
+  /** `period` — mijoz+davr (zakazsiz yig‘indi); `order` — bitta zakaz doirasi */
+  polki_scope: "period" | "order";
   orders: {
     id: number;
     number: string;
@@ -127,12 +129,110 @@ export async function getClientReturnsData(
   tenantId: number,
   clientId: number,
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  orderId?: number | null
 ): Promise<ClientReturnsData> {
   const client = await prisma.client.findFirst({
     where: { id: clientId, tenant_id: tenantId, merged_into_client_id: null }
   });
   if (!client) throw new Error("BAD_CLIENT");
+
+  // ─── Bitta zakaz (polki po zakaz) ─────────────────────────────────────
+  if (orderId != null && orderId > 0) {
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        tenant_id: tenantId,
+        client_id: clientId,
+        status: { notIn: ["cancelled"] }
+      },
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        total_sum: true,
+        bonus_sum: true,
+        created_at: true,
+        items: {
+          select: {
+            product_id: true,
+            qty: true,
+            price: true,
+            total: true,
+            is_bonus: true,
+            product: { select: { sku: true, name: true, unit: true } }
+          }
+        }
+      }
+    });
+    if (!order) throw new Error("BAD_ORDER");
+
+    const returns = await prisma.salesReturn.findMany({
+      where: {
+        tenant_id: tenantId,
+        client_id: clientId,
+        order_id: orderId,
+        status: "posted"
+      },
+      select: { refund_amount: true, lines: { select: { product_id: true, qty: true } } }
+    });
+
+    const totalReturnedQty = returns.reduce(
+      (a, ret) => a + ret.lines.reduce((b, l) => b + Number(l.qty), 0),
+      0
+    );
+    const alreadyReturned = returns.reduce(
+      (a, r) => a.add(r.refund_amount ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0)
+    );
+
+    let totalPaidValue = new Prisma.Decimal(0);
+    const items: OrderItemSummary[] = [];
+    for (const item of order.items) {
+      items.push({
+        product_id: item.product_id,
+        sku: item.product.sku,
+        name: item.product.name,
+        unit: item.product.unit,
+        qty: item.qty.toString(),
+        price: item.price.toString(),
+        total: item.total.toString(),
+        is_bonus: item.is_bonus,
+        order_id: order.id,
+        order_number: order.number
+      });
+      if (!item.is_bonus) totalPaidValue = totalPaidValue.add(item.total);
+    }
+
+    const bal = await prisma.clientBalance.findUnique({
+      where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
+      select: { balance: true }
+    });
+    const balance = bal?.balance ?? new Prisma.Decimal(0);
+    const maxReturnable = totalPaidValue.sub(alreadyReturned);
+
+    return {
+      polki_scope: "order",
+      orders: [
+        {
+          id: order.id,
+          number: order.number,
+          status: order.status,
+          total_sum: order.total_sum.toString(),
+          bonus_sum: order.bonus_sum.toString(),
+          created_at: order.created_at.toISOString()
+        }
+      ],
+      items,
+      total_orders: 1,
+      total_returned_qty: String(totalReturnedQty),
+      total_paid_value: totalPaidValue.toString(),
+      already_returned_value: alreadyReturned.toString(),
+      max_returnable_value: maxReturnable.gt(0) ? maxReturnable.toString() : "0",
+      client_balance: balance.toString(),
+      client_debt: balance.lt(0) ? balance.abs().toString() : "0"
+    };
+  }
 
   // Orders in period
   const orderWhere: Prisma.OrderWhereInput = {
@@ -202,6 +302,7 @@ export async function getClientReturnsData(
   const maxReturnable = totalPaidValue.sub(alreadyReturned);
 
   return {
+    polki_scope: "period",
     orders: orders.map(o => ({
       id: o.id, number: o.number, status: o.status,
       total_sum: o.total_sum.toString(), bonus_sum: o.bonus_sum.toString(),
@@ -387,6 +488,45 @@ export function validateReturnQty(
   }
 }
 
+/** Pul qaytarishni `maxRefund` bilan cheklaganda qatorlardagi paid/bonus taqsimotini saqlab qolish. */
+function scaleReturnLinesToMaxRefund(
+  lines: Array<{ product_id: number; qty: number; paid_qty: number; bonus_qty: number; price: number }>,
+  maxRefund: Prisma.Decimal
+): {
+  lines: Array<{ product_id: number; qty: number; paid_qty: number; bonus_qty: number; price: number }>;
+  refund: Prisma.Decimal;
+} {
+  let refund = lines.reduce(
+    (a, l) => a.add(R(l.price).mul(l.paid_qty)),
+    new Prisma.Decimal(0)
+  );
+  if (!refund.gt(maxRefund)) {
+    return { lines, refund };
+  }
+  const ratio = maxRefund.div(refund);
+  const adjusted = lines.map((l) => {
+    const oldPaid = new Prisma.Decimal(l.paid_qty);
+    const newPaid = R(oldPaid.mul(ratio));
+    const shift = oldPaid.sub(newPaid);
+    const newBonus = R(new Prisma.Decimal(l.bonus_qty).add(shift));
+    return {
+      product_id: l.product_id,
+      qty: l.qty,
+      paid_qty: Number(newPaid.toString()),
+      bonus_qty: Number(newBonus.toString()),
+      price: l.price
+    };
+  });
+  refund = adjusted.reduce(
+    (a, l) => a.add(R(l.price).mul(l.paid_qty)),
+    new Prisma.Decimal(0)
+  );
+  if (refund.gt(maxRefund)) {
+    refund = maxRefund;
+  }
+  return { lines: adjusted, refund };
+}
+
 // ─── Create period return ────────────────────────────────────────────────────
 
 export async function createPeriodReturn(
@@ -414,27 +554,44 @@ export async function createPeriodReturn(
 
   const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
 
-  // Get all items in period for bonus recalc
-  const cdata = await getClientReturnsData(tenantId, input.client_id, input.date_from, input.date_to);
+  const orderScoped = input.order_id != null && input.order_id > 0;
+  if (orderScoped) {
+    const ordOk = await prisma.order.findFirst({
+      where: {
+        id: input.order_id,
+        tenant_id: tenantId,
+        client_id: input.client_id,
+        status: { notIn: ["cancelled"] }
+      },
+      select: { id: true }
+    });
+    if (!ordOk) throw new Error("BAD_ORDER");
+  }
+
+  const cdata = orderScoped
+    ? await getClientReturnsData(tenantId, input.client_id, undefined, undefined, input.order_id)
+    : await getClientReturnsData(tenantId, input.client_id, input.date_from, input.date_to);
 
   const allItems = cdata.items.map(i => ({
     product_id: i.product_id, qty: Number(i.qty), price: Number(i.price), is_bonus: i.is_bonus
   }));
 
-  // Already returned qty by product
-  const alreadyRetMap = new Map<number, number>();
-  for (const it of cdata.items) {
-    // We need this from the returns fetched inside getClientReturnsData...
-    // Recalculate here
-  }
-
-  // Recalculate already returned by product
   const returnWhere: Prisma.SalesReturnWhereInput = {
     tenant_id: tenantId, client_id: input.client_id, status: "posted"
   };
-  if (input.date_from) returnWhere.created_at = { gte: localDayStart(input.date_from) };
-  if (input.date_to) returnWhere.created_at = { ...(returnWhere.created_at as object) ?? {}, lte: localDayEnd(input.date_to) };
+  if (orderScoped) {
+    returnWhere.order_id = input.order_id;
+  } else {
+    if (input.date_from) returnWhere.created_at = { gte: localDayStart(input.date_from) };
+    if (input.date_to) {
+      returnWhere.created_at = {
+        ...(returnWhere.created_at as object) ?? {},
+        lte: localDayEnd(input.date_to)
+      };
+    }
+  }
 
+  const alreadyRetMap = new Map<number, number>();
   const prevReturns = await prisma.salesReturn.findMany({
     where: returnWhere,
     select: { lines: { select: { product_id: true, qty: true } } }
@@ -451,15 +608,17 @@ export async function createPeriodReturn(
   const maxRet = new Prisma.Decimal(cdata.max_returnable_value);
   if (maxRet.lte(0)) throw new Error("NOTHING_TO_RETURN");
 
-  // Bonus recalc
-  const { lines: retLines, recalc } = await computeReturnBonusRecalc(
+  // Bonus recalc + refund cap (qatorlar va balans mos bo‘lishi uchun)
+  const { lines: rawRetLines, recalc: rawRecalc } = await computeReturnBonusRecalc(
     tenantId, input.client_id, allItems, input.lines
   );
-
-  if (recalc.refund_amount.gt(maxRet)) {
-    // Use the actual recalc refund amount but cap it
-    recalc.refund_amount = maxRet;
-  }
+  const { lines: retLines, refund: cappedRefund } = scaleReturnLinesToMaxRefund(rawRetLines, maxRet);
+  const recalc = {
+    ...rawRecalc,
+    refund_amount: cappedRefund,
+    paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
+    bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0)
+  };
 
   const number = `VR-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
   const uid = actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
@@ -474,8 +633,9 @@ export async function createPeriodReturn(
         status: "posted",
         refund_amount: recalc.refund_amount,
         return_type: "partial",
-        date_from: input.date_from ? new Date(input.date_from) : null,
-        date_to: input.date_to ? new Date(input.date_to) : null,
+        date_from:
+          orderScoped ? null : input.date_from ? new Date(input.date_from) : null,
+        date_to: orderScoped ? null : input.date_to ? new Date(input.date_to) : null,
         note: input.note?.trim() || null,
         refusal_reason_ref:
           input.refusal_reason_ref != null && String(input.refusal_reason_ref).trim()
@@ -527,8 +687,13 @@ export async function createPeriodReturn(
     return ret;
   });
 
-  // Auto-mark orders as returned
-  await autoMarkReturnedOrders(tenantId, input.client_id, input.date_from, input.date_to, uid);
+  await autoMarkReturnedOrders(
+    tenantId,
+    input.client_id,
+    orderScoped ? undefined : input.date_from,
+    orderScoped ? undefined : input.date_to,
+    uid
+  );
 
   await appendTenantAuditEvent({
     tenantId, actorUserId, entityType: AuditEntityType.stock,
@@ -568,27 +733,88 @@ async function autoMarkReturnedOrders(
 
   const orders = await prisma.order.findMany({
     where: orderWhere,
+    orderBy: { created_at: "asc" },
     select: { id: true, status: true, order_type: true, items: { select: { product_id: true, qty: true } } }
   });
+  if (orders.length === 0) return;
 
-  for (const ord of orders) {
-    const returnedQty = new Map<number, number>();
-    const rets = await prisma.salesReturn.findMany({
-      where: { tenant_id: tenantId, client_id: clientId, order_id: ord.id, status: "posted" },
+  const orderIds = orders.map((o) => o.id);
+  const linkedReturns = await prisma.salesReturn.findMany({
+    where: { tenant_id: tenantId, client_id: clientId, order_id: { in: orderIds }, status: "posted" },
+    select: { order_id: true, lines: { select: { product_id: true, qty: true } } }
+  });
+  const linkedByOrderId = new Map<number, typeof linkedReturns>();
+  for (const r of linkedReturns) {
+    if (r.order_id == null) continue;
+    const arr = linkedByOrderId.get(r.order_id) ?? [];
+    arr.push(r);
+    linkedByOrderId.set(r.order_id, arr);
+  }
+
+  /** Sana filtri bo‘lsa — `order_id`siz polki qaytarishlarni FIFO bilan zakazlarga taqsimlash. */
+  const useFifoPool = dateFrom != null || dateTo != null;
+  const pool = new Map<number, number>();
+  if (useFifoPool) {
+    const unlinkedWhere: Prisma.SalesReturnWhereInput = {
+      tenant_id: tenantId,
+      client_id: clientId,
+      status: "posted",
+      order_id: null
+    };
+    if (dateFrom) unlinkedWhere.created_at = { gte: localDayStart(dateFrom) };
+    if (dateTo) {
+      unlinkedWhere.created_at = {
+        ...(unlinkedWhere.created_at as object) ?? {},
+        lte: localDayEnd(dateTo)
+      };
+    }
+    const unlinked = await prisma.salesReturn.findMany({
+      where: unlinkedWhere,
+      orderBy: { created_at: "asc" },
       select: { lines: { select: { product_id: true, qty: true } } }
     });
-    for (const ret of rets) {
+    for (const ret of unlinked) {
+      for (const ln of ret.lines) {
+        pool.set(ln.product_id, (pool.get(ln.product_id) ?? 0) + Number(ln.qty));
+      }
+    }
+  }
+
+  for (const ord of orders) {
+    const orderedQty = new Map<number, number>();
+    for (const item of ord.items) {
+      orderedQty.set(item.product_id, (orderedQty.get(item.product_id) ?? 0) + Number(item.qty));
+    }
+
+    const returnedQty = new Map<number, number>();
+    for (const ret of linkedByOrderId.get(ord.id) ?? []) {
       for (const ln of ret.lines) {
         returnedQty.set(ln.product_id, (returnedQty.get(ln.product_id) ?? 0) + Number(ln.qty));
       }
     }
 
-    const allReturned = ord.items.every(item => {
-      const ret = returnedQty.get(item.product_id) ?? 0;
-      return ret >= Number(item.qty);
+    if (useFifoPool) {
+      for (const [pid, ordQty] of orderedQty) {
+        const have = returnedQty.get(pid) ?? 0;
+        const need = Math.max(0, ordQty - have);
+        if (need <= 0) continue;
+        const avail = pool.get(pid) ?? 0;
+        const take = Math.min(need, avail);
+        if (take > 0) {
+          returnedQty.set(pid, have + take);
+          pool.set(pid, avail - take);
+        }
+      }
+    }
+
+    const allReturned = [...orderedQty.keys()].every((pid) => {
+      const need = orderedQty.get(pid) ?? 0;
+      const ret = returnedQty.get(pid) ?? 0;
+      return ret >= need;
     });
 
-    if (allReturned && canTransitionOrderStatus(ord.status, "returned", ord.order_type as any)) {
+    const otype = normalizeOrderType(ord.order_type);
+    if (allReturned && canTransitionOrderStatus(ord.status, "returned", otype)) {
       await prisma.order.update({ where: { id: ord.id }, data: { status: "returned" } });
       await prisma.orderStatusLog.create({
         data: { order_id: ord.id, from_status: ord.status, to_status: "returned", user_id: actorUserId }
@@ -619,17 +845,65 @@ export async function createFullReturnFromOrder(
     }
   });
   if (!order) throw new Error("BAD_ORDER");
+  if (order.status === "cancelled" || order.status === "returned") {
+    throw new Error("ORDER_NOT_RETURNABLE");
+  }
+
+  const existingFull = await prisma.salesReturn.findFirst({
+    where: {
+      tenant_id: tenantId,
+      order_id: order.id,
+      status: "posted",
+      return_type: "order_full"
+    },
+    select: { id: true }
+  });
+  if (existingFull) throw new Error("ORDER_ALREADY_FULLY_RETURNED");
+
+  const priorPosted = await prisma.salesReturn.findMany({
+    where: { tenant_id: tenantId, order_id: order.id, status: "posted" },
+    select: { lines: { select: { product_id: true, qty: true } } }
+  });
+  const returnedByProduct = new Map<number, number>();
+  for (const r of priorPosted) {
+    for (const ln of r.lines) {
+      returnedByProduct.set(
+        ln.product_id,
+        (returnedByProduct.get(ln.product_id) ?? 0) + Number(ln.qty)
+      );
+    }
+  }
+  const orderedByProduct = new Map<number, number>();
+  for (const it of order.items) {
+    orderedByProduct.set(
+      it.product_id,
+      (orderedByProduct.get(it.product_id) ?? 0) + Number(it.qty)
+    );
+  }
+  const alreadyFullyReturned = [...orderedByProduct.keys()].every((pid) => {
+    const need = orderedByProduct.get(pid) ?? 0;
+    const have = returnedByProduct.get(pid) ?? 0;
+    return have >= need;
+  });
+  if (alreadyFullyReturned) throw new Error("ORDER_ALREADY_FULLY_RETURNED");
 
   const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
   const number = `VR-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
   const uid = actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
-  const refund = input.refund_amount != null ? new Prisma.Decimal(input.refund_amount) : order.total_sum;
+  const refund =
+    input.refund_amount != null ? R(input.refund_amount) : R(order.total_sum);
 
-  const bonusItemsCount = order.items.filter(i => i.is_bonus).length;
+  const bonusQtySum = order.items
+    .filter((i) => i.is_bonus)
+    .reduce((a, i) => a + Number(i.qty), 0);
+  const paidQtySum = order.items
+    .filter((i) => !i.is_bonus)
+    .reduce((a, i) => a + Number(i.qty), 0);
   const totalQty = order.items.reduce((a, i) => a + Number(i.qty), 0);
+  const orderType = normalizeOrderType(order.order_type);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.salesReturn.create({
+  const created = await prisma.$transaction(async (tx) => {
+    const ret = await tx.salesReturn.create({
       data: {
         tenant_id: tenantId, number,
         client_id: order.client_id, order_id: order.id,
@@ -664,32 +938,38 @@ export async function createFullReturnFromOrder(
       });
     }
 
-    if (canTransitionOrderStatus(order.status, "returned")) {
+    if (canTransitionOrderStatus(order.status, "returned", orderType)) {
       await tx.order.update({ where: { id: order.id }, data: { status: "returned" } });
       await tx.orderStatusLog.create({
         data: { order_id: order.id, from_status: order.status, to_status: "returned", user_id: uid }
       });
     }
 
-    const bal = await tx.clientBalance.upsert({
-      where: { tenant_id_client_id: { tenant_id: tenantId, client_id: order.client_id } },
-      create: { tenant_id: tenantId, client_id: order.client_id, balance: refund },
-      update: { balance: { increment: refund } }
-    });
-    await tx.clientBalanceMovement.create({
-      data: { client_balance_id: bal.id, delta: refund, note: `Vazvrat: ${number}`, user_id: uid }
-    });
+    if (refund.gt(0)) {
+      const bal = await tx.clientBalance.upsert({
+        where: { tenant_id_client_id: { tenant_id: tenantId, client_id: order.client_id } },
+        create: { tenant_id: tenantId, client_id: order.client_id, balance: refund },
+        update: { balance: { increment: refund } }
+      });
+      await tx.clientBalanceMovement.create({
+        data: { client_balance_id: bal.id, delta: refund, note: `Vazvrat: ${number}`, user_id: uid }
+      });
+    }
+
+    return ret;
   });
 
   await appendTenantAuditEvent({
     tenantId, actorUserId, entityType: AuditEntityType.stock,
-    entityId: String(order.client_id), action: "full_return",
-    payload: { return_id: order.id, number, order_id: order.id }
+    entityId: String(created.id),
+    action: "full_return",
+    payload: { return_id: created.id, number: created.number, order_id: order.id }
   });
 
   return {
-    id: 0, number,
-    refund_amount: refund.toString(),
+    id: created.id,
+    number: created.number,
+    refund_amount: created.refund_amount?.toString() ?? refund.toString(),
     lines: order.items.map(it => ({
       product_id: it.product_id,
       sku: it.product.sku, name: it.product.name,
@@ -699,12 +979,12 @@ export async function createFullReturnFromOrder(
       paid_amount: it.is_bonus ? "0" : it.total.toString()
     })),
     bonus_recalc: {
-      original_bonus_qty: bonusItemsCount,
+      original_bonus_qty: bonusQtySum,
       remaining_bonus_qty: 0,
-      excess_bonus: bonusItemsCount,
+      excess_bonus: bonusQtySum,
       total_return_qty: totalQty,
-      paid_return_qty: totalQty - bonusItemsCount,
-      bonus_return_qty: bonusItemsCount,
+      paid_return_qty: paidQtySum,
+      bonus_return_qty: bonusQtySum,
       refund_amount: refund.toString()
     }
   };

@@ -13,7 +13,8 @@ function ProductTreeColumn({
   formDisabled,
   selectionDisabled,
   selectionHint,
-  querySuffix
+  querySuffix,
+  stackClassName
 }: {
   title: string;
   tenantSlug: string;
@@ -23,6 +24,8 @@ function ProductTreeColumn({
   selectionDisabled: boolean;
   selectionHint?: string;
   querySuffix: string;
+  /** Ikki ustun ustma-ust tushganda bosishlar chap ustunga tushishi uchun */
+  stackClassName?: string;
 }) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -30,7 +33,8 @@ function ProductTreeColumn({
   return (
     <div
       className={cn(
-        "flex min-h-[18rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm",
+        "relative flex min-h-[18rem] min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm",
+        stackClassName ?? "z-0",
         formDisabled && "opacity-70"
       )}
     >
@@ -53,7 +57,7 @@ function ProductTreeColumn({
           Kategoriyani bosing — ochiladi; mahsulot yonidagi belgi bilan tanlang.
         </p>
       </div>
-      <div className="min-h-[12rem] max-h-[min(22rem,42vh)] flex-1 overflow-y-auto px-2 py-2">
+      <div className="min-h-[12rem] max-h-[min(22rem,42vh)] min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
         <BonusRuleProductCategoryTree
           tenantSlug={tenantSlug}
           value={selectedIds}
@@ -81,6 +85,8 @@ export type BonusRuleProductDualPanelsProps = {
   onTriggerChange: (ids: number[]) => void;
   onBonusChange: (ids: number[]) => void;
   onlyByAssortment: boolean;
+  /** true bo‘lsa trigger SKU lar o‘rniga faqat kategoriya filtri */
+  onlyByCategory?: boolean;
   showTriggerColumn: boolean;
   showBonusColumn: boolean;
   disabled?: boolean;
@@ -97,16 +103,18 @@ export function BonusRuleProductDualPanels({
   onTriggerChange,
   onBonusChange,
   onlyByAssortment,
+  onlyByCategory = false,
   showTriggerColumn,
   showBonusColumn,
   disabled = false
 }: BonusRuleProductDualPanelsProps) {
   const formDisabled = Boolean(disabled);
+  const triggerPickEnabled = onlyByAssortment || onlyByCategory;
 
   return (
     <div
       className={cn(
-        "grid gap-4",
+        "grid min-w-0 gap-4",
         showTriggerColumn && showBonusColumn ? "md:grid-cols-2" : "md:grid-cols-1"
       )}
     >
@@ -117,11 +125,13 @@ export function BonusRuleProductDualPanels({
           selectedIds={triggerProductIds}
           onSelectedIdsChange={onTriggerChange}
           formDisabled={formDisabled}
-          selectionDisabled={!onlyByAssortment}
+          selectionDisabled={!triggerPickEnabled}
           selectionHint={
-            !onlyByAssortment
-              ? "«Faqat assortiment» o‘chiq — trigger sifatida barcha mahsulotlar hisoblanadi. Cheklash uchun yuqoridagi «Faqat assortiment»ni yoqing."
-              : undefined
+            onlyByCategory
+              ? "Kategoriya + tanlangan SKU: yuqoridagi kategoriyalar va chapdagi belgilar birgalikda — zakazda faqat shu mahsulotlar shartga kiradi."
+              : !onlyByAssortment
+                ? "Ikkala cheklov ham o‘chiq — barcha mahsulotlar trigger. SKU yoki kategoriya bilan cheklash uchun «Faqat assortiment» yoki «Kategoriya»ni yoqing."
+                : undefined
           }
           querySuffix="dual-trigger"
         />

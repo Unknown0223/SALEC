@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatNumberGrouped } from "@/lib/format-numbers";
@@ -18,8 +18,9 @@ import {
 } from "@/lib/profile-ref-entries";
 import { isDatabaseSchemaMismatchError } from "@/lib/api-errors";
 import { DatabaseSchemaMismatchCallout } from "@/components/system/database-schema-mismatch-callout";
+import { cn } from "@/lib/utils";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState, useMemo, useCallback } from "react";
+import { Suspense, useState, useMemo, useCallback, useEffect, useRef } from "react";
 
 type ReturnRow = {
   id: number;
@@ -38,6 +39,8 @@ type ReturnRow = {
 };
 
 type ClientReturnData = {
+  /** API yangi maydon; eski kesh uchun ixtiyoriy */
+  polki_scope?: "period" | "order";
   orders: { id: number; number: string; status: string; total_sum: string; bonus_sum: string; created_at: string }[];
   items: {
     product_id: number; sku: string; name: string; unit: string;
@@ -55,14 +58,23 @@ type ClientReturnData = {
 
 type ClientForSelect = { id: number; name: string };
 
+type OrderPickRow = {
+  id: number;
+  number: string;
+  status: string;
+  created_at: string;
+};
+
 function ReturnsPageContent() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [limit, setLimit] = useState(50);
 
   const activeTab = searchParams.get("tab") === "polki" ? "polki" : "list";
+  const polkiMode = searchParams.get("polki_mode") === "order" ? "order" : "free";
 
   // ─── Returns list ──────────────────────────────────────────────────────
   const listQ = useQuery({
@@ -80,6 +92,13 @@ function ReturnsPageContent() {
   // ─── Polki form ───────────────────────────────────────────────────────
   const clientIdFromUrl = searchParams.get("client_id") ?? undefined;
   const client_id_num = clientIdFromUrl ? Number(clientIdFromUrl) : null;
+  const orderIdFromUrl = searchParams.get("order_id") ?? undefined;
+  const orderIdNum =
+    orderIdFromUrl != null &&
+    Number.isFinite(Number(orderIdFromUrl)) &&
+    Number(orderIdFromUrl) > 0
+      ? Number(orderIdFromUrl)
+      : null;
 
   const [clientId, setClientId] = useState(client_id_num ? String(client_id_num) : "");
   const [dateFrom, setDateFrom] = useState("");
@@ -120,6 +139,82 @@ function ReturnsPageContent() {
     [profileRefsQ.data]
   );
 
+  const orderForReturnQ = useQuery({
+    queryKey: ["order-for-return", tenantSlug, orderIdNum],
+    enabled: Boolean(
+      tenantSlug &&
+        orderIdNum &&
+        hydrated &&
+        activeTab === "polki" &&
+        polkiMode === "order"
+    ),
+    staleTime: STALE.detail,
+    queryFn: async () => {
+      const { data } = await api.get<{ client_id: number; number: string }>(
+        `/api/${tenantSlug}/orders/${orderIdNum}`
+      );
+      return data;
+    }
+  });
+
+  const didApplyClientFromOrder = useRef(false);
+  useEffect(() => {
+    didApplyClientFromOrder.current = false;
+  }, [orderIdNum]);
+
+  useEffect(() => {
+    const cid = orderForReturnQ.data?.client_id;
+    if (cid == null || orderIdNum == null || didApplyClientFromOrder.current) return;
+    if (client_id_num != null) return;
+    if (clientId === "") {
+      setClientId(String(cid));
+      didApplyClientFromOrder.current = true;
+    }
+  }, [orderForReturnQ.data?.client_id, orderIdNum, clientId, client_id_num]);
+
+  /** Chuqur havola: order_id bor, polki_mode yo‘q → zakaz rejimiga o‘tkazish */
+  useEffect(() => {
+    if (activeTab !== "polki") return;
+    const oid = searchParams.get("order_id");
+    if (!oid?.trim()) return;
+    if (searchParams.get("polki_mode")) return;
+    const p = new URLSearchParams(searchParams.toString());
+    p.set("polki_mode", "order");
+    router.replace(`/returns?${p.toString()}`, { scroll: false });
+  }, [activeTab, searchParams, router]);
+
+  /** `polki_mode=free` bo‘lsa, `order_id` URLda qolmasin */
+  useEffect(() => {
+    if (activeTab !== "polki") return;
+    if (searchParams.get("polki_mode") !== "free") return;
+    if (!searchParams.get("order_id")?.trim()) return;
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("order_id");
+    router.replace(`/returns?${p.toString()}`, { scroll: false });
+  }, [activeTab, searchParams, router]);
+
+  const polkiOrderIdForApi =
+    polkiMode === "order" && orderIdNum != null && orderIdNum > 0 ? orderIdNum : null;
+
+  const setPolkiMode = (mode: "free" | "order") => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.set("tab", "polki");
+    p.set("polki_mode", mode);
+    if (mode === "free") p.delete("order_id");
+    router.replace(`/returns?${p.toString()}`, { scroll: false });
+    setReturnLines([]);
+  };
+
+  const setPolkiOrderInUrl = (orderIdStr: string) => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.set("tab", "polki");
+    p.set("polki_mode", "order");
+    if (orderIdStr) p.set("order_id", orderIdStr);
+    else p.delete("order_id");
+    router.replace(`/returns?${p.toString()}`, { scroll: false });
+    setReturnLines([]);
+  };
+
   const warehouseQuery = useQuery({
     queryKey: ["warehouses", tenantSlug, "returns"],
     enabled: Boolean(tenantSlug),
@@ -133,15 +228,51 @@ function ReturnsPageContent() {
   });
   const returnWh = warehouseQuery.data?.find((w) => w.stock_purpose === "return");
 
-  // Client data
+  const clientOrdersPickQ = useQuery({
+    queryKey: ["returns-order-pick", tenantSlug, clientId, polkiMode],
+    enabled: Boolean(
+      tenantSlug &&
+        clientId &&
+        Number.isFinite(Number(clientId)) &&
+        Number(clientId) > 0 &&
+        activeTab === "polki" &&
+        polkiMode === "order"
+    ),
+    staleTime: STALE.list,
+    queryFn: async () => {
+      const { data: body } = await api.get<{ data: OrderPickRow[] }>(
+        `/api/${tenantSlug}/orders?page=1&limit=100&client_id=${encodeURIComponent(clientId)}`
+      );
+      return body.data ?? [];
+    }
+  });
+
   const clientDataQuery = useQuery({
-    queryKey: ["returns-client-data", tenantSlug, clientId, dateFrom, dateTo],
-    enabled: Boolean(tenantSlug && clientId && Number.isFinite(Number(clientId))),
+    queryKey: [
+      "returns-client-data",
+      tenantSlug,
+      clientId,
+      dateFrom,
+      dateTo,
+      polkiMode,
+      polkiOrderIdForApi
+    ],
+    enabled: Boolean(
+      tenantSlug &&
+        clientId &&
+        Number.isFinite(Number(clientId)) &&
+        Number(clientId) > 0 &&
+        (polkiMode === "free" || polkiOrderIdForApi != null)
+    ),
     staleTime: STALE.detail,
     queryFn: async () => {
       const params = new URLSearchParams({ client_id: clientId });
-      if (dateFrom) params.set("date_from", dateFrom);
-      if (dateTo) params.set("date_to", dateTo);
+      if (polkiMode === "free") {
+        if (dateFrom) params.set("date_from", dateFrom);
+        if (dateTo) params.set("date_to", dateTo);
+      } else if (polkiOrderIdForApi != null) {
+        params.set("order_id", String(polkiOrderIdForApi));
+      }
       const { data } = await api.get<ClientReturnData>(
         `/api/${tenantSlug}/returns/client-data?${params.toString()}`
       );
@@ -227,6 +358,10 @@ function ReturnsPageContent() {
     if (!clientId || !Number.isFinite(Number(clientId))) {
       setErr("Mijozni tanlang."); return;
     }
+    if (polkiMode === "order" && polkiOrderIdForApi == null) {
+      setErr("Zakazni tanlang.");
+      return;
+    }
     const lines = returnLines
       .map((l) => ({ product_id: Number(l.product_id), qty: Number(l.qty) }))
       .filter((l) => Number.isFinite(l.product_id) && l.product_id > 0 && l.qty > 0);
@@ -244,11 +379,17 @@ function ReturnsPageContent() {
     try {
       const body: Record<string, unknown> = { client_id: Number(clientId), lines };
       if (returnWh) body.warehouse_id = returnWh.id;
-      if (dateFrom) body.date_from = dateFrom;
-      if (dateTo) body.date_to = dateTo;
+      if (polkiMode === "free") {
+        if (dateFrom) body.date_from = dateFrom;
+        if (dateTo) body.date_to = dateTo;
+      }
+      if (polkiMode === "order" && polkiOrderIdForApi != null) {
+        body.order_id = polkiOrderIdForApi;
+      }
       if (note.trim()) body.note = note.trim();
       if (refusalReasonRef.trim()) body.refusal_reason_ref = refusalReasonRef.trim();
       await api.post(`/api/${tenantSlug}/returns/period`, body);
+      await queryClient.invalidateQueries({ queryKey: ["returns", tenantSlug] });
       router.push("/returns");
     } catch (e: unknown) {
       const data = (e as { response?: { data?: { error?: string } } })?.response?.data;
@@ -257,6 +398,7 @@ function ReturnsPageContent() {
       else if (data?.error === "NothingToReturn") setErr("Tanlangan davrda qaytariladigan mahsulot yo'q.");
       else if (data?.error === "BadClient") setErr("Mijoz topilmadi.");
       else if (data?.error === "BadProduct") setErr("Mahsulot topilmadi.");
+      else if (data?.error === "BadOrder") setErr("Zakaz topilmadi yoki bu mijozga tegishli emas.");
       else if (data?.error === "NoWarehouse") setErr("Qaytarish ombori topilmadi.");
       else if (data?.error === "DatabaseSchemaMismatch")
         setErr("Baza migratsiyasi qo‘llanmagan. backend: npm run db:deploy");
@@ -267,15 +409,27 @@ function ReturnsPageContent() {
   };
 
   const changeTab = (v: string | null) => {
-    if (v === "polki") router.push("/returns?tab=polki", { scroll: false });
-    else router.push("/returns", { scroll: false });
+    const p = new URLSearchParams(searchParams.toString());
+    if (v === "polki") {
+      p.set("tab", "polki");
+      if (!p.get("polki_mode")) {
+        p.set("polki_mode", "free");
+        p.delete("order_id");
+      }
+    } else {
+      p.delete("tab");
+      p.delete("polki_mode");
+      p.delete("order_id");
+    }
+    const qs = p.toString();
+    router.push(qs ? `/returns?${qs}` : "/returns", { scroll: false });
   };
 
   return (
     <PageShell>
       <PageHeader
         title="Qaytarishlar"
-        description="Vazvrat — oddiy va polki qaytarishlar"
+        description="Ro‘yxat, polki (mijoz+davr yoki zakaz bo‘yicha) — zakazga bog‘lanishi ixtiyoriy"
       />
 
       <Tabs value={activeTab} onValueChange={changeTab} className="mb-4">
@@ -287,16 +441,65 @@ function ReturnsPageContent() {
 
       {activeTab === "polki" ? (
         <div className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground max-w-xl">
+              <span className="font-medium text-foreground">Polki</span> — mahsulotlar qaytarish omboriga qaytadi;
+              pul bonus qoidalariga ko‘ra qayta hisoblanadi. Zakazsiz rejimda bir nechta buyurtmalar yig‘iladi;
+              zakaz rejimida faqat tanlangan hujjat qatorlari.
+            </p>
+            <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setPolkiMode("free")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  polkiMode === "free"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Mijoz + davr
+              </button>
+              <button
+                type="button"
+                onClick={() => setPolkiMode("order")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  polkiMode === "order"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Zakaz bo‘yicha
+              </button>
+            </div>
+          </div>
+
+          {polkiMode === "order" && orderIdNum != null && orderForReturnQ.data ? (
+            <p className="text-sm rounded-md border border-border bg-muted/20 px-3 py-2 text-muted-foreground">
+              Zakaz{" "}
+              <span className="font-mono font-medium text-foreground">
+                {orderForReturnQ.data.number}
+              </span>
+              — shu hujjat bo‘yicha qaytarish (hujjat bilan bog‘lanadi).
+            </p>
+          ) : null}
+
           {/* Filters card */}
           <Card className="shadow-panel">
             <CardContent className="p-4 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Mijoz</label>
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm"
                     value={clientId}
-                    onChange={(e) => { setClientId(e.target.value); setReturnLines([]); }}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setClientId(v);
+                      setReturnLines([]);
+                      if (polkiMode === "order") setPolkiOrderInUrl("");
+                    }}
                   >
                     <option value="">Mijozni tanlang…</option>
                     {(clientsQ.data ?? []).map((c) => (
@@ -304,24 +507,51 @@ function ReturnsPageContent() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Dan</label>
-                  <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); clearLines(); }} className="h-10" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Gacha</label>
-                  <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); clearLines(); }} className="h-10" />
-                </div>
-                {clientData && (
-                  <div className="flex items-end">
+                {polkiMode === "order" ? (
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs text-muted-foreground">Zakaz</label>
+                    <select
+                      className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm"
+                      value={orderIdNum != null ? String(orderIdNum) : ""}
+                      onChange={(e) => setPolkiOrderInUrl(e.target.value)}
+                      disabled={!clientId || clientOrdersPickQ.isLoading}
+                    >
+                      <option value="">Zakazni tanlang…</option>
+                      {(clientOrdersPickQ.data ?? []).map((o) => (
+                        <option key={o.id} value={String(o.id)}>
+                          {o.number} · {o.status} · {new Date(o.created_at).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
+                    {polkiMode === "order" && clientId && !clientOrdersPickQ.isLoading && (clientOrdersPickQ.data?.length ?? 0) === 0 ? (
+                      <p className="text-[11px] text-muted-foreground">Bu mijoz uchun zakaz topilmadi.</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Buyurtmalar: dan (sana)</label>
+                      <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); clearLines(); }} className="h-10" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">gacha</label>
+                      <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); clearLines(); }} className="h-10" />
+                    </div>
+                  </>
+                )}
+                {clientData ? (
+                  <div className="flex items-end lg:col-span-1">
                     <div className="text-xs space-y-0.5">
-                      <div>Buyurtmalar: <span className="font-medium">{formatNumberGrouped(clientData.total_orders)}</span></div>
+                      <div>
+                        {(clientData.polki_scope ?? "period") === "order" ? "Zakaz" : "Buyurtmalar"}:{" "}
+                        <span className="font-medium">{formatNumberGrouped(clientData.total_orders)}</span>
+                      </div>
                       <div>Qaytarilgan: <span className="font-medium">{formatNumberGrouped(clientData.already_returned_value, { maxFractionDigits: 2 })}</span></div>
                       <div>Max qaytarish: <span className="font-medium text-amber-600">{formatNumberGrouped(maxReturnable, { maxFractionDigits: 2 })}</span></div>
                       <div>Qarz: <span className="font-medium text-red-600">{formatNumberGrouped(clientDebt, { maxFractionDigits: 2 })}</span></div>
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
             </CardContent>
           </Card>
@@ -412,7 +642,12 @@ function ReturnsPageContent() {
                 {/* Summary */}
                 <div className="rounded-lg bg-muted/30 p-3 space-y-1 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Buyurtma qiymati (davr):</span>
+                    <span className="text-muted-foreground">
+                      {(clientData?.polki_scope ?? "period") === "order"
+                        ? "To‘langan summa (shu zakaz)"
+                        : "To‘langan summa (tanlangan davr)"}
+                      :
+                    </span>
                     <span className="tabular-nums font-medium">
                       {clientData ? formatNumberGrouped(clientData.total_paid_value, { maxFractionDigits: 2 }) : "—"}
                     </span>
@@ -479,8 +714,24 @@ function ReturnsPageContent() {
             </Card>
           )}
 
-          {clientId && clientDataQuery.isLoading && <p className="text-sm text-muted-foreground">Ma&apos;lumotlar Загрузка…</p>}
-          {clientId && clientData && productMap.size === 0 && <p className="text-sm text-muted-foreground">Tanlangan davrda mahsulot topilmadi.</p>}
+          {clientId && polkiMode === "order" && polkiOrderIdForApi == null ? (
+            <p className="text-sm text-muted-foreground">Zakazni tanlang — shundan keyin qaytarish uchun mahsulotlar ko‘rinadi.</p>
+          ) : null}
+          {clientId &&
+            (polkiMode === "free" || polkiOrderIdForApi != null) &&
+            clientDataQuery.isLoading && (
+              <p className="text-sm text-muted-foreground">Ma&apos;lumotlar yuklanmoqda…</p>
+            )}
+          {clientId &&
+            (polkiMode === "free" || polkiOrderIdForApi != null) &&
+            clientData &&
+            productMap.size === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {(clientData.polki_scope ?? "period") === "order"
+                  ? "Bu zakaz bo‘yicha qaytarish uchun qoldiq yo‘q yoki barchasi qaytarilgan."
+                  : "Tanlangan shartlarda mahsulot topilmadi."}
+              </p>
+            )}
           {!clientId && <p className="text-sm text-muted-foreground">Mijozni tanlang.</p>}
         </div>
       ) : (

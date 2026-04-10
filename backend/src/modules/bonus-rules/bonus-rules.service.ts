@@ -43,6 +43,7 @@ export type BonusRuleRow = {
   in_blocks: boolean;
   once_per_client: boolean;
   one_plus_one_gift: boolean;
+  prerequisite_rule_ids: number[];
   conditions: BonusConditionRow[];
 };
 
@@ -80,6 +81,7 @@ export type CreateBonusRuleInput = {
   in_blocks?: boolean;
   once_per_client?: boolean;
   one_plus_one_gift?: boolean;
+  prerequisite_rule_ids?: number[];
   conditions?: BonusConditionInput[];
 };
 
@@ -133,6 +135,7 @@ export function mapBonusRuleFull(r: RuleWithConditions): BonusRuleRow {
     in_blocks: r.in_blocks,
     once_per_client: r.once_per_client,
     one_plus_one_gift: r.one_plus_one_gift,
+    prerequisite_rule_ids: [...(r.prerequisite_rule_ids ?? [])],
     conditions: r.conditions.map(mapCondition)
   };
 }
@@ -200,6 +203,97 @@ function validateForType(
   }
 }
 
+/** Avtomatik qty / sum / discount: assortiment yoki kategoriya (kamida bittasi) majburiy — butun zakazga qo‘llanadigan «bo‘sh» qoidalarni oldini olish. */
+function ruleNeedsOrderContextScalars(rule: {
+  payment_type: string | null;
+  client_type: string | null;
+  sales_channel: string | null;
+  price_type: string | null;
+}): boolean {
+  const nonempty = (s: string | null | undefined) => s != null && String(s).trim() !== "";
+  return (
+    nonempty(rule.payment_type) ||
+    nonempty(rule.client_type) ||
+    nonempty(rule.sales_channel) ||
+    nonempty(rule.price_type)
+  );
+}
+
+async function validatePrerequisiteRuleIds(
+  tenantId: number,
+  hostId: number | null,
+  rawIds: number[] | undefined
+): Promise<void> {
+  const uniq = [...new Set((rawIds ?? []).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 200);
+  if (hostId != null && uniq.includes(hostId)) {
+    throw new Error("VALIDATION");
+  }
+  if (uniq.length === 0) return;
+
+  const rows = await prisma.bonusRule.findMany({
+    where: { tenant_id: tenantId, id: { in: uniq } },
+    select: {
+      id: true,
+      is_manual: true,
+      payment_type: true,
+      client_type: true,
+      sales_channel: true,
+      price_type: true
+    }
+  });
+  if (rows.length !== uniq.length) {
+    throw new Error("VALIDATION");
+  }
+  for (const r of rows) {
+    if (r.is_manual) throw new Error("VALIDATION");
+    if (ruleNeedsOrderContextScalars(r)) throw new Error("VALIDATION");
+  }
+
+  const all = await prisma.bonusRule.findMany({
+    where: { tenant_id: tenantId },
+    select: { id: true, prerequisite_rule_ids: true }
+  });
+  const adj = new Map<number, number[]>();
+  for (const r of all) {
+    if (hostId != null && r.id === hostId) continue;
+    adj.set(r.id, [...r.prerequisite_rule_ids]);
+  }
+  const virtualHost = hostId ?? 0;
+  adj.set(virtualHost, uniq);
+  if (hostId != null) {
+    adj.set(hostId, uniq);
+  }
+
+  const visiting = new Set<number>();
+  const visited = new Set<number>();
+  function dfs(u: number): boolean {
+    if (visiting.has(u)) return true;
+    if (visited.has(u)) return false;
+    visiting.add(u);
+    for (const v of adj.get(u) ?? []) {
+      if (dfs(v)) return true;
+    }
+    visiting.delete(u);
+    visited.add(u);
+    return false;
+  }
+  if (dfs(virtualHost)) {
+    throw new Error("VALIDATION");
+  }
+}
+
+function validateAutoBonusProductScope(
+  type: string,
+  isManual: boolean,
+  productIds: readonly number[],
+  categoryIds: readonly number[]
+): void {
+  if (isManual) return;
+  if (type !== "qty" && type !== "sum" && type !== "discount") return;
+  if (productIds.length > 0 || categoryIds.length > 0) return;
+  throw new Error("PRODUCT_SCOPE_REQUIRED");
+}
+
 function normalizeConditions(
   type: string,
   input: CreateBonusRuleInput
@@ -258,7 +352,8 @@ function ruleScalarsFromInput(
     is_manual: input.is_manual ?? false,
     in_blocks: input.in_blocks ?? true,
     once_per_client: input.once_per_client ?? false,
-    one_plus_one_gift: input.one_plus_one_gift ?? false
+    one_plus_one_gift: input.one_plus_one_gift ?? false,
+    prerequisite_rule_ids: [...new Set((input.prerequisite_rule_ids ?? []).filter((n) => n > 0))].slice(0, 200)
   };
 }
 
@@ -284,6 +379,14 @@ export async function createBonusRule(
   const valid_to = parseOptionalDate(input.valid_to ?? null);
 
   const scalars = ruleScalarsFromInput(tenantId, input, valid_from, valid_to, buyForVal, freeForVal);
+  validateAutoBonusProductScope(
+    scalars.type,
+    scalars.is_manual,
+    scalars.product_ids,
+    scalars.product_category_ids
+  );
+
+  await validatePrerequisiteRuleIds(tenantId, null, scalars.prerequisite_rule_ids);
 
   const created = await prisma.$transaction(async (tx) => {
     const rule = await tx.bonusRule.create({
@@ -369,7 +472,11 @@ export async function updateBonusRule(
     is_manual: input.is_manual ?? existing.is_manual,
     in_blocks: input.in_blocks ?? existing.in_blocks,
     once_per_client: input.once_per_client ?? existing.once_per_client,
-    one_plus_one_gift: input.one_plus_one_gift ?? existing.one_plus_one_gift
+    one_plus_one_gift: input.one_plus_one_gift ?? existing.one_plus_one_gift,
+    prerequisite_rule_ids:
+      input.prerequisite_rule_ids !== undefined
+        ? input.prerequisite_rule_ids
+        : [...existing.prerequisite_rule_ids]
   };
 
   let nextConditions: BonusConditionInput[] | undefined;
@@ -404,6 +511,17 @@ export async function updateBonusRule(
     normalized,
     Boolean(merged.one_plus_one_gift)
   );
+
+  validateAutoBonusProductScope(
+    type,
+    merged.is_manual ?? false,
+    merged.product_ids ?? [],
+    merged.product_category_ids ?? []
+  );
+
+  if (input.prerequisite_rule_ids !== undefined) {
+    await validatePrerequisiteRuleIds(tenantId, id, merged.prerequisite_rule_ids);
+  }
 
   let valid_from: Date | null | undefined = undefined;
   let valid_to: Date | null | undefined = undefined;
@@ -447,6 +565,9 @@ export async function updateBonusRule(
   if (input.in_blocks !== undefined) data.in_blocks = merged.in_blocks;
   if (input.once_per_client !== undefined) data.once_per_client = merged.once_per_client;
   if (input.one_plus_one_gift !== undefined) data.one_plus_one_gift = merged.one_plus_one_gift;
+  if (input.prerequisite_rule_ids !== undefined) {
+    data.prerequisite_rule_ids = [...new Set((merged.prerequisite_rule_ids ?? []).filter((n) => n > 0))].slice(0, 200);
+  }
 
   await prisma.$transaction(async (tx) => {
     if (input.type !== undefined && type !== "qty") {

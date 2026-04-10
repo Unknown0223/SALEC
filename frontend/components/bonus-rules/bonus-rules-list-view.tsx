@@ -23,7 +23,6 @@ import {
   Download,
   LayoutGrid,
   Pencil,
-  Plus,
   Power,
   RefreshCw,
   RotateCcw,
@@ -78,6 +77,18 @@ function bonusTypeLabel(type: string): string {
   }
 }
 
+/** Skidkalar bo‘limi jadvali: `sum` va `discount` uchun qisqa tur. */
+function skidkaTypeLabel(type: string): string {
+  switch (type) {
+    case "sum":
+      return "Minimal summa · sovg‘a";
+    case "discount":
+      return "Foizli chegirma (%)";
+    default:
+      return type;
+  }
+}
+
 function formatRuleDateTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -119,14 +130,19 @@ function termBadge(kind: TermKind) {
   }
 }
 
+export type BonusRulesListVariant = "bonuses" | "discounts";
+
 type Props = {
   activeOnly: boolean;
+  /** `discounts` — faqat foizli chegirma qoidalari (alohida «Скидки» bo‘limi) */
+  variant?: BonusRulesListVariant;
 };
 
-const BONUS_RULE_DATA_COLUMNS = [
+/** Bonuslar ro‘yxati: miqdor + summa (chegirmasiz). */
+const BONUS_LIST_COLUMNS = [
   { id: "name", label: "Nomi" },
   { id: "type", label: "Bonus turi" },
-  { id: "linked", label: "Birlashtirish (stack)" },
+  { id: "linked", label: "Oldindan shart / stack" },
   { id: "only_assortment", label: "Faqat assortiment" },
   { id: "once_per_client", label: "Har mijozga bir marta" },
   { id: "valid_from", label: "Boshlanishi" },
@@ -134,9 +150,29 @@ const BONUS_RULE_DATA_COLUMNS = [
   { id: "method", label: "Usul" },
   { id: "term", label: "Muddat" },
   { id: "priority", label: "Ustunlik" },
-  { id: "summary", label: "Shart" },
+  { id: "summary", label: "Shart (miqdor yoki summa)" },
   { id: "active", label: "Faol" }
 ] as const;
+
+/** Chegirmalar ro‘yxati: foizli chegirma + minimal summa bo‘yicha sovg‘a (`sum`). */
+const DISCOUNT_LIST_COLUMNS = [
+  { id: "name", label: "Nomi" },
+  { id: "type", label: "Skidka turi" },
+  { id: "linked", label: "Oldindan shart / stack" },
+  { id: "only_assortment", label: "Faqat assortiment" },
+  { id: "once_per_client", label: "Har mijozga bir marta" },
+  { id: "valid_from", label: "Boshlanishi" },
+  { id: "valid_to", label: "Tugashi" },
+  { id: "method", label: "Usul" },
+  { id: "term", label: "Muddat" },
+  { id: "priority", label: "Ustunlik" },
+  { id: "summary", label: "Chegirma foizi / qisqa shart" },
+  { id: "active", label: "Faol" }
+] as const;
+
+function listColumnsForVariant(v: BonusRulesListVariant) {
+  return v === "discounts" ? DISCOUNT_LIST_COLUMNS : BONUS_LIST_COLUMNS;
+}
 
 const DEFAULT_HIDDEN = ["priority", "summary", "active"] as const;
 
@@ -166,6 +202,7 @@ function buildDuplicatePayload(rule: BonusRuleRow) {
     in_blocks: rule.in_blocks,
     once_per_client: rule.once_per_client,
     one_plus_one_gift: rule.one_plus_one_gift,
+    prerequisite_rule_ids: [...(rule.prerequisite_rule_ids ?? [])],
     conditions: rule.conditions.map((c) => ({
       min_qty: c.min_qty,
       max_qty: c.max_qty,
@@ -177,7 +214,9 @@ function buildDuplicatePayload(rule: BonusRuleRow) {
   };
 }
 
-export function BonusRulesListView({ activeOnly }: Props) {
+export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
+  const isDiscounts = variant === "discounts";
+  const listBase = isDiscounts ? "/settings/discount-rules" : "/settings/bonus-rules";
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
@@ -187,22 +226,38 @@ export function BonusRulesListView({ activeOnly }: Props) {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState<"all" | "auto" | "manual">("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | "qty" | "sum" | "discount">("all");
   const [termFilter, setTermFilter] = useState<"all" | "expired" | "current" | "upcoming">("all");
   const [ruleIdFilter, setRuleIdFilter] = useState<"all" | string>("all");
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [focusedRowId, setFocusedRowId] = useState<number | null>(null);
 
-  const bonusTableId = activeOnly ? "bonus_rules.list.active.v2" : "bonus_rules.list.inactive.v2";
+  const listColumns = useMemo(() => listColumnsForVariant(variant), [variant]);
+
+  const bonusTableId = isDiscounts
+    ? activeOnly
+      ? "discount_rules.list.active.v3"
+      : "discount_rules.list.inactive.v3"
+    : activeOnly
+      ? "bonus_rules.list.active.v4"
+      : "bonus_rules.list.inactive.v4";
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
     tableId: bonusTableId,
-    defaultColumnOrder: BONUS_RULE_DATA_COLUMNS.map((c) => c.id),
+    defaultColumnOrder: listColumns.map((c) => c.id),
     defaultPageSize: 10,
     allowedPageSizes: [10, 25, 50, 100],
     defaultHiddenColumnIds: [...DEFAULT_HIDDEN]
   });
+
+  const allowedColumnIds = useMemo(
+    () => new Set<string>(listColumns.map((c) => c.id)),
+    [listColumns]
+  );
+  const visibleDataColumns = useMemo(
+    () => tablePrefs.visibleColumnOrder.filter((id) => allowedColumnIds.has(id)),
+    [tablePrefs.visibleColumnOrder, allowedColumnIds]
+  );
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
@@ -211,7 +266,11 @@ export function BonusRulesListView({ activeOnly }: Props) {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, methodFilter, typeFilter, termFilter, ruleIdFilter, activeOnly, tablePrefs.pageSize]);
+  }, [debouncedSearch, methodFilter, termFilter, ruleIdFilter, activeOnly, tablePrefs.pageSize, variant]);
+
+  useEffect(() => {
+    setRuleIdFilter("all");
+  }, [variant]);
 
   const filterKey = activeOnly ? "active" : "inactive";
 
@@ -224,16 +283,29 @@ export function BonusRulesListView({ activeOnly }: Props) {
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (methodFilter === "auto") params.set("manual", "false");
     if (methodFilter === "manual") params.set("manual", "true");
-    if (typeFilter !== "all") params.set("type", typeFilter);
+    if (isDiscounts) {
+      params.set("types", "sum,discount");
+    } else {
+      params.set("types", "qty");
+    }
     if (termFilter === "expired") params.set("term", "expired");
     if (termFilter === "current") params.set("term", "current");
     if (termFilter === "upcoming") params.set("term", "upcoming");
     if (ruleIdFilter !== "all") params.set("rule_id", ruleIdFilter);
     return params.toString();
-  }, [page, tablePrefs.pageSize, activeOnly, debouncedSearch, methodFilter, typeFilter, termFilter, ruleIdFilter]);
+  }, [
+    page,
+    tablePrefs.pageSize,
+    activeOnly,
+    debouncedSearch,
+    methodFilter,
+    termFilter,
+    ruleIdFilter,
+    isDiscounts
+  ]);
 
   const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["bonus-rules", tenantSlug, filterKey, listParams],
+    queryKey: ["bonus-rules", tenantSlug, variant, filterKey, listParams],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.list,
     placeholderData: keepPreviousData,
@@ -254,7 +326,9 @@ export function BonusRulesListView({ activeOnly }: Props) {
     },
     onSuccess: async (created) => {
       await qc.invalidateQueries({ queryKey: ["bonus-rules", tenantSlug] });
-      router.push(`/settings/bonus-rules/${created.id}/edit`);
+      const base =
+        created.type === "qty" ? "/settings/bonus-rules" : "/settings/discount-rules";
+      router.push(`${base}/${created.id}/edit`);
     }
   });
 
@@ -273,11 +347,13 @@ export function BonusRulesListView({ activeOnly }: Props) {
       limit: "500",
       is_active: activeOnly ? "true" : "false"
     });
+    if (isDiscounts) p.set("types", "sum,discount");
+    else p.set("types", "qty");
     return p.toString();
-  }, [activeOnly]);
+  }, [activeOnly, isDiscounts]);
 
   const { data: shartOptionsRows } = useQuery({
-    queryKey: ["bonus-rules", tenantSlug, filterKey, "shart-options", shartOptionsParams],
+    queryKey: ["bonus-rules", tenantSlug, variant, filterKey, "shart-options", shartOptionsParams],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.list,
     queryFn: async () => {
@@ -314,7 +390,6 @@ export function BonusRulesListView({ activeOnly }: Props) {
   const resetListFilters = useCallback(() => {
     setMethodFilter("all");
     setTermFilter("all");
-    setTypeFilter("all");
     setRuleIdFilter("all");
     setSearchInput("");
   }, []);
@@ -322,41 +397,68 @@ export function BonusRulesListView({ activeOnly }: Props) {
   const exportCsv = useCallback(() => {
     if (!rows.length) return;
     const sep = ";";
-    const headers = [
-      "Nomi",
-      "Turi",
-      "Faqat assortiment",
-      "Har mijozga bir marta",
-      "Boshlanishi",
-      "Tugashi",
-      "Usul",
-      "Muddat holati"
-    ];
+    const headers = isDiscounts
+      ? [
+          "Nomi",
+          "Skidka turi",
+          "Qiymat (foiz yoki min. summa)",
+          "Faqat assortiment",
+          "Har mijozga bir marta",
+          "Boshlanishi",
+          "Tugashi",
+          "Usul",
+          "Muddat holati"
+        ]
+      : [
+          "Nomi",
+          "Bonus turi",
+          "Faqat assortiment",
+          "Har mijozga bir marta",
+          "Boshlanishi",
+          "Tugashi",
+          "Usul",
+          "Muddat holati"
+        ];
     const lines = rows.map((r) => {
       const tk = termKind(r);
       const termLabel = tk === "expired" ? "Tugagan" : tk === "upcoming" ? "Kutilmoqda" : "Amal qiladi";
-      return [
+      const skidkaValue =
+        r.type === "discount"
+          ? String(r.discount_pct ?? "—")
+          : r.type === "sum"
+            ? String(r.min_sum ?? "—")
+            : "—";
+      const base = [
         `"${r.name.replace(/"/g, '""')}"`,
-        bonusTypeLabel(r.type),
+        ...(isDiscounts
+          ? [skidkaTypeLabel(r.type), skidkaValue]
+          : [bonusTypeLabel(r.type)]),
         onlyByAssortment(r) ? "Ha" : "Yo‘q",
         r.once_per_client ? "Ha" : "Yo‘q",
         formatRuleDateTime(r.valid_from),
         formatRuleDateTime(r.valid_to),
         r.is_manual ? "Qo‘lda" : "Avto",
         termLabel
-      ].join(sep);
+      ];
+      return base.join(sep);
     });
     const blob = new Blob(["\uFEFF" + [headers.join(sep), ...lines].join("\n")], {
       type: "text/csv;charset=utf-8"
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `bonus-qoidalari-${filterKey}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${isDiscounts ? "chegirma" : "bonus"}-qoidalari-${filterKey}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-  }, [rows, filterKey]);
+  }, [rows, filterKey, isDiscounts]);
 
-  const title = activeOnly ? "Bonuslar (faol)" : "Bonuslar (nofaol)";
+  const title = isDiscounts
+    ? activeOnly
+      ? "Chegirmalar (faol)"
+      : "Chegirmalar (nofaol)"
+    : activeOnly
+      ? "Bonuslar (faol)"
+      : "Bonuslar (nofaol)";
 
   return (
     <PageShell>
@@ -364,19 +466,29 @@ export function BonusRulesListView({ activeOnly }: Props) {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <p className="text-sm text-muted-foreground">
-            {tenantSlug ? `Tenant: ${tenantSlug}` : "Ro‘yxat va filtrlash"}
+            {tenantSlug
+              ? isDiscounts
+                ? `Tenant: ${tenantSlug} · foizli chegirma va minimal summa (sovg‘a); dona bonuslari alohida`
+                : `Tenant: ${tenantSlug} · faqat dona (miqdor) bonuslari; summa/skidka alohida bo‘limda`
+              : isDiscounts
+                ? "Foiz + minimal summa qoidalari"
+                : "Faqat miqdor (dona) bonuslari"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
-            Bonus toifasi
-          </Button>
-          <Link className={cn(buttonVariants({ size: "sm" }))} href="/settings/bonus-rules/new">
-            Bonus yaratish
+          {!isDiscounts ? (
+            <>
+              <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
+                Bonus toifasi
+              </Button>
+              <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
+                Bonuslarni uzaytirish
+              </Button>
+            </>
+          ) : null}
+          <Link className={cn(buttonVariants({ size: "sm" }))} href={`${listBase}/new`}>
+            {isDiscounts ? "Chegirma yaratish" : "Bonus yaratish"}
           </Link>
-          <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
-            Bonuslarni uzaytirish
-          </Button>
         </div>
       </div>
 
@@ -384,8 +496,12 @@ export function BonusRulesListView({ activeOnly }: Props) {
         open={columnDialogOpen}
         onOpenChange={setColumnDialogOpen}
         title="Ustunlarni boshqarish"
-        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi."
-        columns={[...BONUS_RULE_DATA_COLUMNS]}
+        description={
+          isDiscounts
+            ? "Chegirmalar jadvali: ko‘rinadigan ustunlar va tartib (bonuslar jadvalidan alohida saqlanadi)."
+            : "Bonuslar jadvali: ko‘rinadigan ustunlar va tartib (chegirmalar jadvalidan alohida saqlanadi)."
+        }
+        columns={[...listColumns]}
         columnOrder={tablePrefs.columnOrder}
         hiddenColumnIds={tablePrefs.hiddenColumnIds}
         saving={tablePrefs.saving}
@@ -398,7 +514,9 @@ export function BonusRulesListView({ activeOnly }: Props) {
           <Card className="rounded-none border-0 bg-transparent shadow-none hover:shadow-none">
             <CardContent className="space-y-2 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-foreground/80">Filtr</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-foreground/80">
+                  {isDiscounts ? "Filtr (chegirmalar)" : "Filtr (bonuslar)"}
+                </p>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     type="button"
@@ -452,29 +570,17 @@ export function BonusRulesListView({ activeOnly }: Props) {
                       <option value="upcoming">Hali boshlanmagan</option>
                     </select>
                   </div>
-                  <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-                    <Label className="text-xs font-medium text-foreground/88">Bonus turi</Label>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label="Bonus turi"
-                      value={typeFilter}
-                      onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
-                    >
-                      <option value="all">Barchasi</option>
-                      <option value="qty">Miqdor bo‘yicha</option>
-                      <option value="sum">Summa bo‘yicha</option>
-                      <option value="discount">Chegirma (%)</option>
-                    </select>
-                  </div>
                   <div className="grid min-w-[12rem] max-w-[280px] flex-[1_1_12rem] gap-1.5">
-                    <Label className="text-xs font-medium text-foreground/88">Sharti</Label>
+                    <Label className="text-xs font-medium text-foreground/88">
+                      {isDiscounts ? "Chegirma qoidasi" : "Bonus qoidasi"}
+                    </Label>
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label="Sharti"
+                      aria-label={isDiscounts ? "Chegirma qoidasi bo‘yicha filtr" : "Bonus qoidasi bo‘yicha filtr"}
                       value={ruleIdFilter}
                       onChange={(e) => setRuleIdFilter(e.target.value === "all" ? "all" : e.target.value)}
                     >
-                      <option value="all">Barchasi</option>
+                      <option value="all">{isDiscounts ? "Barcha chegirmalar" : "Barcha bonuslar"}</option>
                       {shartOptionsSorted.map((r) => (
                         <option key={r.id} value={String(r.id)}>
                           {r.name}
@@ -505,7 +611,9 @@ export function BonusRulesListView({ activeOnly }: Props) {
               <div
                 className="table-toolbar flex flex-wrap items-end justify-between gap-3 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4"
                 role="toolbar"
-                aria-label="Jadval: qatorlar va qidiruv"
+                aria-label={
+                  isDiscounts ? "Chegirmalar jadvali: qatorlar va qidiruv" : "Bonuslar jadvali: qatorlar va qidiruv"
+                }
               >
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="grid gap-0.5">
@@ -537,10 +645,10 @@ export function BonusRulesListView({ activeOnly }: Props) {
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       className="h-9 bg-background pl-8 text-sm"
-                      placeholder="Qidirish"
+                      placeholder={isDiscounts ? "Chegirma nomi…" : "Bonus nomi…"}
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
-                      aria-label="Bonus nomi bo‘yicha qidirish"
+                      aria-label={isDiscounts ? "Chegirma nomi bo‘yicha qidirish" : "Bonus nomi bo‘yicha qidirish"}
                     />
                   </div>
                   <Button
@@ -596,8 +704,8 @@ export function BonusRulesListView({ activeOnly }: Props) {
                         aria-label="Sahifadagi barchasini tanlash"
                       />
                     </th>
-                    {tablePrefs.visibleColumnOrder.map((colId) => {
-                      const meta = BONUS_RULE_DATA_COLUMNS.find((c) => c.id === colId);
+                    {visibleDataColumns.map((colId) => {
+                      const meta = listColumns.find((c) => c.id === colId);
                       return (
                         <th key={colId} className="px-3 py-2 font-medium">
                           {meta?.label ?? colId}
@@ -611,10 +719,16 @@ export function BonusRulesListView({ activeOnly }: Props) {
                   {rows.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={tablePrefs.visibleColumnOrder.length + 2}
+                        colSpan={visibleDataColumns.length + 2}
                         className="px-3 py-8 text-center text-muted-foreground"
                       >
-                        {activeOnly ? "Shartlarga mos qoida yo‘q" : "Nofaol qoida yo‘q"}
+                        {activeOnly
+                          ? isDiscounts
+                            ? "Chegirma qoidasi yo‘q"
+                            : "Bonus qoidasi yo‘q"
+                          : isDiscounts
+                            ? "Nofaol chegirma yo‘q"
+                            : "Nofaol bonus yo‘q"}
                       </td>
                     </tr>
                   ) : (
@@ -645,25 +759,31 @@ export function BonusRulesListView({ activeOnly }: Props) {
                               aria-label={`Tanlash: ${row.name}`}
                             />
                           </td>
-                          {tablePrefs.visibleColumnOrder.map((colId) => (
+                          {visibleDataColumns.map((colId) => (
                             <td key={colId} className="px-3 py-2 align-middle">
                               {colId === "name" ? (
                                 <span className="font-medium">{row.name}</span>
                               ) : colId === "type" ? (
-                                <span className="text-muted-foreground">{bonusTypeLabel(row.type)}</span>
+                                <span className="text-muted-foreground">
+                                  {isDiscounts ? skidkaTypeLabel(row.type) : bonusTypeLabel(row.type)}
+                                </span>
                               ) : colId === "linked" ? (
-                                <Link
-                                  href="/settings/bonus-rules/strategy"
-                                  className={cn(
-                                    buttonVariants({ variant: "outline", size: "icon-sm" }),
-                                    "inline-flex text-muted-foreground hover:text-foreground"
-                                  )}
-                                  title="Tenant uchun umumiy sozlama: bir zakazda chegirma, summa va miqdor bonuslarini qanday birlashtirish (stack). Har bir qatorga alohida bog‘lanish emas."
-                                  aria-label="Bonus strategiyasi — birlashtirish (stack)"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Plus className="size-3.5" />
-                                </Link>
+                                <div className="flex flex-col gap-1.5 text-xs">
+                                  <span className="text-muted-foreground">
+                                    {(row.prerequisite_rule_ids?.length ?? 0) > 0
+                                      ? `${row.prerequisite_rule_ids!.length} ta oldindan`
+                                      : "—"}
+                                  </span>
+                                  <Link
+                                    href="/settings/bonus-rules/strategy"
+                                    className="inline-flex w-fit items-center gap-1 text-[10px] text-primary underline-offset-4 hover:underline"
+                                    title="Tenant bo‘yicha umumiy stack: bir zakazda chegirma, summa va miqdor bonuslarini qanday birlashtirish."
+                                    aria-label="Bonus strategiyasi"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Umumiy stack
+                                  </Link>
+                                </div>
                               ) : colId === "only_assortment" ? (
                                 <span>{onlyByAssortment(row) ? "Ha" : "Yo‘q"}</span>
                               ) : colId === "once_per_client" ? (
@@ -727,7 +847,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
                                 <Copy className="size-3.5" />
                               </Button>
                               <Link
-                                href={`/settings/bonus-rules/${row.id}/edit`}
+                                href={`${listBase}/${row.id}/edit`}
                                 className={cn(
                                   buttonVariants({ variant: "ghost", size: "icon-sm" }),
                                   "text-muted-foreground hover:text-foreground"
@@ -738,7 +858,7 @@ export function BonusRulesListView({ activeOnly }: Props) {
                                 <UserRound className="size-3.5" />
                               </Link>
                               <Link
-                                href={`/settings/bonus-rules/${row.id}/edit`}
+                                href={`${listBase}/${row.id}/edit`}
                                 className={cn(
                                   buttonVariants({ variant: "outline", size: "icon-sm" }),
                                   "text-muted-foreground hover:text-foreground"

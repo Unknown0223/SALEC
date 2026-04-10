@@ -1040,6 +1040,8 @@ model BonusRule {
   in_blocks            Boolean              @default(true)
   once_per_client      Boolean              @default(false)
   one_plus_one_gift    Boolean              @default(false)
+  /// Shu qoida qo‘llanishidan oldin zakazda bajarilgan bo‘lishi kerak bo‘lgan boshqa avto-qoidalar (ID lar tartibsiz).
+  prerequisite_rule_ids Int[]              @default([])
   conditions           BonusRuleCondition[]
   tenant               Tenant               @relation(fields: [tenant_id], references: [id])
 

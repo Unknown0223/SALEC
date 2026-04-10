@@ -34,5 +34,7 @@ export type BonusRuleRow = {
   in_blocks: boolean;
   once_per_client: boolean;
   one_plus_one_gift: boolean;
+  /** Oldindan bajarilishi kerak bo‘lgan qoidalar (API eski bo‘lsa bo‘sh). */
+  prerequisite_rule_ids?: number[];
   conditions: BonusConditionRow[];
 };

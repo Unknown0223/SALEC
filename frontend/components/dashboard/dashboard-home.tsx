@@ -19,7 +19,6 @@ import {
   Plus,
   Receipt,
   ShoppingCart,
-  Undo2,
   UserPlus,
   Users,
   Wallet
@@ -62,7 +61,6 @@ const modules = [
   { href: "/clients", title: "Клиенты", desc: "Поиск, карточка", icon: Users },
   { href: "/payments", title: "Платежи", desc: "Список и ввод", icon: Wallet },
   { href: "/payments/new", title: "Новый платёж", desc: "На баланс клиента", icon: UserPlus },
-  { href: "/returns", title: "Возвраты", desc: "Склад и возврат средств", icon: Undo2 },
   { href: "/stock/transfers", title: "Перемещение склада", desc: "Трансферы A → B, фильтр", icon: ArrowLeftRight },
   { href: "/expenses", title: "Расходы", desc: "PnL, статус, таблица", icon: Receipt },
   { href: "/territories", title: "Территории", desc: "Список территорий", icon: MapPin },

@@ -9,7 +9,7 @@ import { STALE } from "@/lib/query-stale";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { Gift, Layers, ListChecks, ListX, Settings } from "lucide-react";
+import { Gift, Layers, ListChecks, ListX, Percent, Settings } from "lucide-react";
 import Link from "next/link";
 
 type BonusStackJson = {
@@ -58,8 +58,14 @@ export default function BonusStackHubPage() {
     {
       href: "/settings/bonus-rules",
       title: "Bonus qoidalari",
-      desc: "Barcha qoidalar ro‘yxati va tahrirlash.",
+      desc: "Miqdor va summa bo‘yicha bonuslar — ro‘yxat va tahrirlash.",
       icon: Gift
+    },
+    {
+      href: "/settings/discount-rules/active",
+      title: "Chegirmalar (skidka)",
+      desc: "Foizli chegirma qoidalari — alohida bo‘lim.",
+      icon: Percent
     },
     {
       href: "/settings/bonus-rules/strategy",

@@ -107,4 +107,20 @@ describe("resolveQtyGiftProductId", () => {
     const r = rule({ id: 3, bonus_product_ids: [8, 9] });
     expect(resolveQtyGiftProductId(r, QTY_AGGREGATE_PURCHASED_PID, new Map([[3, 9]]))).toBe(9);
   });
+  it("qator mahsuloti ro‘yxatda lekin omborda yetarli emas — boshqa SKU (qoldiq bo‘yicha)", () => {
+    const r = rule({ bonus_product_ids: [10, 20] });
+    const avail = new Map<number, number>([
+      [10, 0],
+      [20, 5]
+    ]);
+    expect(resolveQtyGiftProductId(r, 10, new Map(), { availableByProductId: avail, minUnits: 2 })).toBe(20);
+  });
+  it("barcha variantlarda yetarli emas — ro‘yxatdagi birinchi (fallback)", () => {
+    const r = rule({ bonus_product_ids: [10, 20] });
+    const avail = new Map<number, number>([
+      [10, 0],
+      [20, 0]
+    ]);
+    expect(resolveQtyGiftProductId(r, 10, new Map(), { availableByProductId: avail, minUnits: 3 })).toBe(10);
+  });
 });

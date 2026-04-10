@@ -108,13 +108,27 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
       if (!Number.isFinite(clientId) || clientId < 1) {
         return reply.status(400).send({ error: "ClientIdRequired" });
       }
-      const data = await getClientReturnsData(
-        request.tenant!.id,
-        clientId,
-        q.date_from,
-        q.date_to
-      );
-      return reply.send(data);
+      const orderRaw = q.order_id?.trim();
+      let orderId: number | undefined;
+      if (orderRaw) {
+        const n = Number.parseInt(orderRaw, 10);
+        if (!Number.isNaN(n) && n > 0) orderId = n;
+      }
+      try {
+        const data = await getClientReturnsData(
+          request.tenant!.id,
+          clientId,
+          q.date_from,
+          q.date_to,
+          orderId
+        );
+        return reply.send(data);
+      } catch (e) {
+        const code = e instanceof Error ? e.message : "";
+        if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (code === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
+        throw e;
+      }
     }
   );
 
@@ -142,6 +156,7 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
           return reply.status(400).send({ error: "QtyExceedsOrdered" });
         if (code === "NOTHING_TO_RETURN")
           return reply.status(400).send({ error: "NothingToReturn" });
+        if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
         if (code === "NO_WAREHOUSE") return reply.status(400).send({ error: "NoWarehouse" });
         throw e;
       }
@@ -164,6 +179,10 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
       } catch (e) {
         const code = e instanceof Error ? e.message : "";
         if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (code === "ORDER_NOT_RETURNABLE")
+          return reply.status(400).send({ error: "OrderNotReturnable" });
+        if (code === "ORDER_ALREADY_FULLY_RETURNED")
+          return reply.status(409).send({ error: "OrderAlreadyFullyReturned" });
         if (code === "NO_WAREHOUSE") return reply.status(400).send({ error: "NoWarehouse" });
         throw e;
       }

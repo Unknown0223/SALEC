@@ -152,7 +152,10 @@ export default function OrderDetailPage() {
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href={`/payments/new?order_id=${orderId}`}>
               To’lov qabul
             </Link>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href={`/returns/new?order_id=${orderId}`}>
+            <Link
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+              href={`/returns?tab=polki&polki_mode=order&order_id=${orderId}`}
+            >
               Qaytarish
             </Link>
           </>

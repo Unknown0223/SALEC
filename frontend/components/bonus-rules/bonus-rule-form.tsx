@@ -1,6 +1,8 @@
 "use client";
 
 import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
+import { BonusRuleCategoryHoverField } from "@/components/bonus-rules/bonus-rule-category-hover-field";
+import { BonusRulePrerequisitesField } from "@/components/bonus-rules/bonus-rule-prerequisites-field";
 import { BonusRuleProductDualPanels } from "@/components/bonus-rules/bonus-rule-product-dual-panels";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +13,7 @@ import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type BonusType = "qty" | "sum" | "discount";
 
@@ -62,9 +64,20 @@ const emptyCond = (): CondForm => ({
   max_bonus_qty: ""
 });
 
+type ErrorTarget = "basics" | "restrictions" | "products" | "conditions" | "discount" | null;
+
+function scrollToRef(el: HTMLElement | null) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 const inputCls =
   "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring";
-const selectCls = cn(inputCls, "py-0");
+/** `<select>` ga `flex` bermang — OS dropdown noto‘g‘ri chiziladi (Windows Chrome/Edge). */
+const selectCls =
+  "box-border h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-0 text-sm shadow-sm outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring";
 
 function parseCondRow(c: CondForm) {
   const min_qty = c.min_qty.trim() === "" ? null : Number.parseFloat(c.min_qty);
@@ -90,12 +103,22 @@ function parseCondRow(c: CondForm) {
   };
 }
 
+/** Ikkala cheklov ham o‘chiq bo‘lsa — Saqlashda chiqadigan xabar (matn bir xil bo‘lishi kerak). */
+const BONUS_SCOPE_REQUIRED_MSG = "Shartlardan birini tanlash majburiy.";
+const NAME_REQUIRED_MSG = "Qoida nomini kiriting.";
+
+export type BonusRuleFormVariant = "default" | "discountOnly";
+
 type Props = {
   tenantSlug: string;
   initialRule: BonusRuleRow | null;
+  /** Chegirma bo‘limi: tur doim discount, saqlashdan keyin chegirmalar ro‘yxatiga qaytish */
+  variant?: BonusRuleFormVariant;
 };
 
-export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
+export function BonusRuleForm({ tenantSlug, initialRule, variant = "default" }: Props) {
+  const discountOnly = variant === "discountOnly";
+  const listHref = discountOnly ? "/settings/discount-rules/active" : "/settings/bonus-rules/active";
   const router = useRouter();
   const qc = useQueryClient();
   const isEdit = Boolean(initialRule);
@@ -104,23 +127,44 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   const profileRefsQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "bonus-form-refs"],
     staleTime: STALE.profile,
+    enabled: Boolean(tenantSlug),
     queryFn: async () => {
       const { data } = await api.get<{
-        references: {
-          payment_method_entries?: { name: string; active?: boolean }[];
+        references?: {
+          /** Yangi spravochnik */
+          payment_method_entries?: { id?: string; name: string; active?: boolean }[];
+          /** Legacy: faqat nomlar (backend `resolvePaymentMethodEntries` bilan bir xil manba) */
+          payment_types?: string[];
           client_category_entries?: ClientRefEntry[];
         };
       }>(`/api/${tenantSlug}/settings/profile`);
-      return data.references;
+      return data?.references ?? {};
     }
   });
 
-  const paymentOptions = (profileRefsQ.data?.payment_method_entries ?? []).filter((p) => p.active !== false);
+  /** Faol yozuvlar; bo‘sh bo‘lsa `payment_types` dan (barchasi nofaol bo‘lib qolgan ham). */
+  const paymentOptions = useMemo(() => {
+    const refs = profileRefsQ.data;
+    if (!refs) return [] as { key: string; name: string }[];
+    const activeEntries = (refs.payment_method_entries ?? []).filter((p) => p.active !== false);
+    if (activeEntries.length > 0) {
+      return activeEntries.map((p, i) => ({
+        key: p.id?.trim() || `pm-${i}-${p.name}`,
+        name: p.name.trim()
+      }));
+    }
+    const legacy = refs.payment_types ?? [];
+    return legacy
+      .map((n) => String(n).trim())
+      .filter(Boolean)
+      .map((name, i) => ({ key: `pt-${i}-${name}`, name }));
+  }, [profileRefsQ.data]);
   const clientCategoryOptions = (profileRefsQ.data?.client_category_entries ?? []).filter((c) => c.active !== false);
 
   const priceTypesQ = useQuery({
     queryKey: ["price-types", tenantSlug, "bonus-form"],
     staleTime: STALE.reference,
+    enabled: Boolean(tenantSlug),
     queryFn: async () => {
       const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types`);
       return data.data;
@@ -128,7 +172,7 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   });
 
   const [name, setName] = useState("");
-  const [type, setType] = useState<BonusType>("qty");
+  const [type, setType] = useState<BonusType>(discountOnly ? "discount" : "qty");
   const [minSum, setMinSum] = useState("");
   const [discountPct, setDiscountPct] = useState("");
   const [priority, setPriority] = useState("0");
@@ -143,22 +187,48 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
   const [priceType, setPriceType] = useState("");
   const [triggerProductIds, setTriggerProductIds] = useState<number[]>([]);
   const [bonusProductIds, setBonusProductIds] = useState<number[]>([]);
-  /** UI da ko‘rsatilmaydi — mavjud qoida kategoriya filtrini saqlash uchun */
-  const [categoryIdsStr, setCategoryIdsStr] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [targetAllClients, setTargetAllClients] = useState(true);
   const [selectedClientIdsStr, setSelectedClientIdsStr] = useState("");
   const [isManual, setIsManual] = useState(false);
   const [inBlocks, setInBlocks] = useState(false);
   const [oncePerClient, setOncePerClient] = useState(false);
+  const [prerequisiteRuleIds, setPrerequisiteRuleIds] = useState<number[]>([]);
   const [onlyByAssortment, setOnlyByAssortment] = useState(false);
+  const [onlyByCategory, setOnlyByCategory] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  /** Qaysi blokka scroll, ramka va ichki bildirishnoma bog‘langan */
+  const [errorTarget, setErrorTarget] = useState<ErrorTarget>(null);
+  const [errorShake, setErrorShake] = useState(false);
+  const basicsRef = useRef<HTMLDivElement>(null);
+  const restrictionsRef = useRef<HTMLDivElement>(null);
+  const conditionsRef = useRef<HTMLDivElement>(null);
+  const discountRef = useRef<HTMLDivElement>(null);
+  const productsRef = useRef<HTMLDivElement>(null);
+
+  const pulseErrorOn = (target: ErrorTarget) => {
+    setErrorShake(true);
+    window.setTimeout(() => setErrorShake(false), 500);
+    if (target === "restrictions") scrollToRef(restrictionsRef.current);
+    else if (target === "products") scrollToRef(productsRef.current);
+    else if (target === "conditions") scrollToRef(conditionsRef.current);
+    else if (target === "discount") scrollToRef(discountRef.current);
+    else if (target === "basics") scrollToRef(basicsRef.current);
+  };
 
   useEffect(() => {
     setLocalError(null);
+    setErrorTarget(null);
     const rule = initialRule;
     if (rule) {
       setName(rule.name);
-      setType((rule.type as BonusType) || "qty");
+      setType(
+        discountOnly
+          ? rule.type === "sum" || rule.type === "discount"
+            ? (rule.type as BonusType)
+            : "discount"
+          : ((rule.type as BonusType) || "qty")
+      );
       setMinSum(rule.min_sum != null ? String(rule.min_sum) : "");
       setDiscountPct(rule.discount_pct != null ? String(rule.discount_pct) : "");
       setPriority(String(rule.priority));
@@ -191,20 +261,39 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       setClientType(rule.client_type ?? "");
       setSalesChannel(rule.sales_channel ?? "");
       setPriceType(rule.price_type ?? "");
-      setTriggerProductIds([...(rule.product_ids ?? [])]);
       setBonusProductIds([...(rule.bonus_product_ids ?? [])]);
-      setCategoryIdsStr(formatIdList(rule.product_category_ids ?? []));
       setTargetAllClients(rule.target_all_clients ?? true);
       setSelectedClientIdsStr(formatIdList(rule.selected_client_ids ?? []));
       setIsManual(rule.is_manual ?? false);
       setInBlocks(rule.in_blocks ?? false);
       setOncePerClient(rule.once_per_client ?? false);
-      const hasScope =
-        (rule.product_ids?.length ?? 0) > 0 || (rule.product_category_ids?.length ?? 0) > 0;
-      setOnlyByAssortment(hasScope);
+      setPrerequisiteRuleIds([...(rule.prerequisite_rule_ids ?? [])]);
+      const pids = [...(rule.product_ids ?? [])];
+      const cids = [...(rule.product_category_ids ?? [])];
+      if (cids.length > 0 && pids.length > 0) {
+        setOnlyByCategory(true);
+        setOnlyByAssortment(false);
+        setTriggerProductIds(pids);
+        setSelectedCategoryIds(cids);
+      } else if (pids.length > 0) {
+        setOnlyByAssortment(true);
+        setOnlyByCategory(false);
+        setTriggerProductIds(pids);
+        setSelectedCategoryIds([]);
+      } else if (cids.length > 0) {
+        setOnlyByAssortment(false);
+        setOnlyByCategory(true);
+        setTriggerProductIds([]);
+        setSelectedCategoryIds(cids);
+      } else {
+        setOnlyByAssortment(false);
+        setOnlyByCategory(false);
+        setTriggerProductIds([]);
+        setSelectedCategoryIds([]);
+      }
     } else {
       setName("");
-      setType("qty");
+      setType(discountOnly ? "discount" : "qty");
       setMinSum("");
       setDiscountPct("");
       setPriority("0");
@@ -219,21 +308,65 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       setPriceType("");
       setTriggerProductIds([]);
       setBonusProductIds([]);
-      setCategoryIdsStr("");
+      setSelectedCategoryIds([]);
       setTargetAllClients(true);
       setSelectedClientIdsStr("");
       setIsManual(false);
       setInBlocks(false);
       setOncePerClient(false);
+      setPrerequisiteRuleIds([]);
       setOnlyByAssortment(false);
+      setOnlyByCategory(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- faqat id o‘zgarganda seed
   }, [seedKey]);
 
+  useEffect(() => {
+    if (onlyByAssortment || onlyByCategory) {
+      setErrorTarget((t) => (t === "restrictions" ? null : t));
+      setLocalError((prev) => (prev === BONUS_SCOPE_REQUIRED_MSG ? null : prev));
+    }
+  }, [onlyByAssortment, onlyByCategory]);
+
+  useEffect(() => {
+    if (errorTarget !== "basics" || localError !== NAME_REQUIRED_MSG) return;
+    if (name.trim()) {
+      setLocalError(null);
+      setErrorTarget(null);
+    }
+  }, [name, errorTarget, localError]);
+
+  useEffect(() => {
+    if (errorTarget !== "products") return;
+    if (triggerProductIds.length > 0) {
+      setLocalError(null);
+      setErrorTarget(null);
+    }
+  }, [triggerProductIds.length, errorTarget]);
+
+  const errorTargetRef = useRef<ErrorTarget>(null);
+  errorTargetRef.current = errorTarget;
+
+  useEffect(() => {
+    if (errorTargetRef.current !== "conditions") return;
+    setLocalError(null);
+    setErrorTarget(null);
+  }, [conditions, minSum, type]);
+
+  useEffect(() => {
+    if (errorTargetRef.current !== "discount") return;
+    setLocalError(null);
+    setErrorTarget(null);
+  }, [discountPct]);
+
   const mutation = useMutation({
     mutationFn: async () => {
       const p = Number.parseInt(priority, 10);
-      const product_ids = onlyByAssortment ? triggerProductIds : [];
+      const product_ids = onlyByAssortment || onlyByCategory ? triggerProductIds : [];
+      const product_category_ids = onlyByCategory ? selectedCategoryIds : [];
+      const assortmentOnlyNoBonusPicker = onlyByAssortment && !onlyByCategory;
+      const bonus_product_ids =
+        assortmentOnlyNoBonusPicker && (type === "qty" || type === "sum") ? [] : bonusProductIds;
       const payload: Record<string, unknown> = {
         name: name.trim(),
         type,
@@ -247,14 +380,15 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
         sales_channel: salesChannel.trim() || null,
         price_type: priceType.trim() || null,
         product_ids,
-        bonus_product_ids: bonusProductIds,
-        product_category_ids: parseIdList(categoryIdsStr),
+        bonus_product_ids,
+        product_category_ids,
         target_all_clients: targetAllClients,
         selected_client_ids: targetAllClients ? [] : parseIdList(selectedClientIdsStr),
         is_manual: isManual,
         in_blocks: inBlocks,
         once_per_client: oncePerClient,
-        one_plus_one_gift: isEdit && initialRule ? initialRule.one_plus_one_gift : false
+        one_plus_one_gift: isEdit && initialRule ? initialRule.one_plus_one_gift : false,
+        prerequisite_rule_ids: prerequisiteRuleIds
       };
 
       if (type === "qty") {
@@ -290,67 +424,157 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
       if (initialRule?.id != null) {
         await qc.invalidateQueries({ queryKey: ["bonus-rule", tenantSlug, initialRule.id] });
       }
-      router.push("/settings/bonus-rules/active");
+      router.push(listHref);
     },
     onError: (e: unknown) => {
       const ax = e as { response?: { data?: { error?: string }; status?: number } };
       if (ax.response?.status === 403) {
         setLocalError("Ruxsat yo‘q (faqat admin yoki operator).");
+        setErrorTarget(null);
         return;
       }
       if (ax.response?.data?.error === "ValidationError") {
-        setLocalError("Maydonlarni tekshiring.");
+        setLocalError("Server tekshiruvi: maydonlarni qayta ko‘rib chiqing (nom, muddat, mahsulotlar, shartlar).");
+        setErrorTarget("basics");
+        pulseErrorOn("basics");
+        return;
+      }
+      if (ax.response?.data?.error === "ProductScopeRequired") {
+        setLocalError(BONUS_SCOPE_REQUIRED_MSG);
+        setErrorTarget("restrictions");
+        pulseErrorOn("restrictions");
         return;
       }
       setLocalError(e instanceof Error ? e.message : "Saqlashda xato");
+      setErrorTarget(null);
     }
   });
 
   const submit = () => {
     setLocalError(null);
-    if (!name.trim()) return;
+    setErrorTarget(null);
+
+    if (!name.trim()) {
+      setLocalError(NAME_REQUIRED_MSG);
+      setErrorTarget("basics");
+      pulseErrorOn("basics");
+      return;
+    }
+    if (!onlyByAssortment && !onlyByCategory) {
+      setLocalError(BONUS_SCOPE_REQUIRED_MSG);
+      setErrorTarget("restrictions");
+      pulseErrorOn("restrictions");
+      return;
+    }
     if (onlyByAssortment) {
-      const hasCategoryScope = parseIdList(categoryIdsStr).length > 0;
-      if ((type === "qty" || type === "sum") && triggerProductIds.length === 0 && !hasCategoryScope) {
+      if ((type === "qty" || type === "sum") && triggerProductIds.length === 0) {
+        setLocalError("«Faqat assortiment» yoqilgan: chapdan kamida bitta trigger mahsulotni belgilang.");
+        setErrorTarget("products");
+        pulseErrorOn("products");
+        return;
+      }
+      if (type === "discount" && triggerProductIds.length === 0) {
         setLocalError(
-          "«Faqat assortiment» yoqilgan: chapdan mahsulot tanlang yoki (mavjud qoida) kategoriya filtri saqlangan bo‘lsa mahsulot qo‘shing."
+          "Assortiment cheklovi uchun kamida bitta mahsulotni chapdan tanlang yoki «Faqat assortiment»ni o‘chiring."
         );
-        return;
-      }
-      if (type === "discount" && triggerProductIds.length === 0 && !hasCategoryScope) {
-        setLocalError("Assortiment cheklovi uchun kamida bitta mahsulot tanlang yoki «Faqat assortiment»ni o‘chiring.");
+        setErrorTarget("products");
+        pulseErrorOn("products");
         return;
       }
     }
-    if ((type === "qty" || type === "sum") && bonusProductIds.length === 0) {
-      setLocalError("Kamida bitta bonus mahsulotni o‘ng ro‘yxatdan tanlang.");
+    if (
+      onlyByCategory &&
+      (type === "qty" || type === "sum" || type === "discount") &&
+      triggerProductIds.length === 0
+    ) {
+      setLocalError(
+        "«Kategoriya» rejimida chapdan kamida bitta trigger mahsulotni belgilang (kategoriya + tanlangan SKU lar bo‘yicha shart)."
+      );
+      setErrorTarget("products");
+      pulseErrorOn("products");
       return;
     }
-    try {
-      if (type === "qty") {
-        for (const row of conditions) parseCondRow(row);
+    if (type === "sum") {
+      const m = Number.parseFloat(minSum);
+      if (minSum.trim() === "" || Number.isNaN(m) || m < 0) {
+        setLocalError("Minimal summani kiriting: 0 yoki undan katta haqiqiy son.");
+        setErrorTarget("conditions");
+        pulseErrorOn("conditions");
+        return;
       }
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : "Shartlarni tekshiring");
-      return;
+    }
+    if (type === "discount") {
+      const d = Number.parseFloat(discountPct);
+      if (discountPct.trim() === "" || Number.isNaN(d) || d < 0 || d > 100) {
+        setLocalError("Chegirma foizini 0 dan 100 gacha kiriting.");
+        setErrorTarget("discount");
+        pulseErrorOn("discount");
+        return;
+      }
+    }
+    if (type === "qty") {
+      for (let i = 0; i < conditions.length; i++) {
+        try {
+          parseCondRow(conditions[i]);
+        } catch (err) {
+          const base = err instanceof Error ? err.message : "Shartlarni tekshiring";
+          setLocalError(conditions.length > 1 ? `${base} (shart #${i + 1})` : base);
+          setErrorTarget("conditions");
+          pulseErrorOn("conditions");
+          return;
+        }
+      }
     }
     mutation.mutate();
   };
 
-  const showBonusColumn = type === "qty" || type === "sum";
-  const showTriggerColumn = type === "qty" || type === "sum" || (type === "discount" && onlyByAssortment);
+  const showBonusColumn =
+    (type === "qty" || type === "sum") && !(onlyByAssortment && !onlyByCategory);
+  const showTriggerColumn =
+    type === "qty" || type === "sum" || (type === "discount" && (onlyByAssortment || onlyByCategory));
+
+  const sectionAlert = (target: ErrorTarget) =>
+    errorTarget === target && localError ? (
+      <div
+        role="alert"
+        aria-live="assertive"
+        className="mb-4 rounded-lg border border-destructive/45 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-destructive"
+      >
+        {localError}
+      </div>
+    ) : null;
 
   return (
     <div className="w-full space-y-6">
+      {localError && errorTarget === null ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
+          {localError}
+        </div>
+      ) : null}
+      <div
+        ref={basicsRef}
+        className={cn(
+          "rounded-xl",
+          errorTarget === "basics" &&
+            "ring-2 ring-destructive ring-offset-2 ring-offset-background",
+          errorTarget === "basics" && errorShake && "animate-bonus-rule-shake"
+        )}
+      >
       <Card className="shadow-panel">
         <CardHeader className="border-b border-border/60 pb-4">
           <CardTitle>Asosiy sozlamalar</CardTitle>
           <CardDescription>
-            Yuqorida — nom, bonus turi, muddat va profil filtrlari; pastda — to‘lov, kim uchun, usul va belgilar
-            (ketma-ketlik uchun ustunlik oxirida).
+            {discountOnly
+              ? "Nom, muddat va profil filtrlari. Tur: foizli chegirma yoki minimal summa (sovg‘a) — shartlar mos blokda. Pastda — to‘lov, kim uchun, usul va belgilar."
+              : "Yuqorida — nom, bonus turi (faqat dona/miqdor), muddat va profil filtrlari; pastda — to‘lov, kim uchun, usul va belgilar (ketma-ketlik uchun ustunlik oxirida)."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5 pt-6">
+          {sectionAlert("basics")}
           {/* 1-bo‘lim: 2 qator — siqilishsiz, barcha ustunlarda bir xil label→maydon tartibi */}
           <div className="flex flex-col gap-5">
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(14rem,22rem)] md:items-start">
@@ -362,23 +586,33 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={mutation.isPending}
+                  aria-invalid={errorTarget === "basics" && !name.trim()}
                 />
               </div>
-              <div className="grid min-w-0 gap-1.5">
-                <Label htmlFor="br-type">Bonus turi</Label>
-                <select
-                  id="br-type"
-                  className={selectCls}
-                  title="Qoida qanday hisoblanishini tanlang: miqdor, summa yoki foizli chegirma"
-                  value={type}
-                  onChange={(e) => setType(e.target.value as BonusType)}
-                  disabled={mutation.isPending}
-                >
-                  <option value="qty">Miqdor bo‘yicha bonus</option>
-                  <option value="sum">Buyurtma summasi bo‘yicha</option>
-                  <option value="discount">Chegirma (%)</option>
-                </select>
-              </div>
+              {discountOnly ? (
+                <div className="grid min-w-0 gap-1.5">
+                  <Label htmlFor="br-skidka-type">Skidka turi</Label>
+                  <select
+                    id="br-skidka-type"
+                    className={selectCls}
+                    title="Foizli chegirma yoki minimal summa bo‘yicha sovg‘a"
+                    value={type === "sum" || type === "discount" ? type : "discount"}
+                    onChange={(e) => setType(e.target.value as BonusType)}
+                    disabled={mutation.isPending}
+                  >
+                    <option value="discount">Foizli chegirma (%)</option>
+                    <option value="sum">Minimal buyurtma summasi (sovg‘a)</option>
+                  </select>
+                </div>
+              ) : (
+                <div className="grid min-w-0 gap-1.5 rounded-lg border border-border/70 bg-muted/15 p-3 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tur</span>
+                  <p className="text-foreground/90">
+                    Faqat <strong>miqdor (dona)</strong> bo‘yicha bonus. Minimal summa va foizli chegirma —{" "}
+                    <strong>Skidkalar</strong> bo‘limida.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(12.5rem,1.15fr)_minmax(12.5rem,1.15fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(5.25rem,5.5rem)]">
@@ -466,28 +700,38 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
             </div>
           </div>
 
-          {/* 2-qator: to‘lov + yonma-yon guruhlar (kim / usul / holat / cheklovlar) */}
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-stretch">
-            <div className="grid min-w-0 shrink-0 gap-1.5 xl:w-52 xl:max-w-[14rem]">
-              <Label htmlFor="br-payment">To‘lov usuli</Label>
-              <select
-                id="br-payment"
-                className={selectCls}
-                value={paymentType}
-                onChange={(e) => setPaymentType(e.target.value)}
-                disabled={mutation.isPending}
-              >
-                <option value="">Barchasi</option>
-                {paymentOptions.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+          {/* 2-qator: barcha guruhlar bir xil karta ko‘rinishida (5 ustun) */}
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="flex min-h-full min-w-0 flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  To‘lov usuli
+                </p>
+                <select
+                  id="br-payment"
+                  className={selectCls}
+                  value={paymentType}
+                  onChange={(e) => setPaymentType(e.target.value)}
+                  disabled={mutation.isPending || profileRefsQ.isLoading}
+                  aria-label="To‘lov usuli"
+                >
+                  <option value="">Barchasi</option>
+                  {paymentOptions.map((p) => (
+                    <option key={p.key} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {profileRefsQ.isSuccess && paymentOptions.length === 0 ? (
+                  <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+                    Faol to‘lov turi topilmadi.{" "}
+                    <a className="underline underline-offset-2 hover:text-foreground" href="/settings/payment-methods">
+                      To‘lov turlari
+                    </a>
+                    da qo‘shing.
+                  </p>
+                ) : null}
             </div>
-
-            <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+            <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Kim uchun
                 </p>
@@ -527,9 +771,9 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                     />
                   </div>
                 ) : null}
-              </div>
+            </div>
 
-              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+            <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Usul</p>
                 <div className="flex flex-col gap-3">
                   <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -555,9 +799,9 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                     Qo‘lda
                   </label>
                 </div>
-              </div>
+            </div>
 
-              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+            <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Holat</p>
                 <div className="flex flex-col gap-3">
                   <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -581,9 +825,20 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                     Bloklarda
                   </label>
                 </div>
-              </div>
+            </div>
 
-              <div className="flex flex-col rounded-lg border border-border/80 bg-muted/15 p-4">
+            <div
+              ref={restrictionsRef}
+              id="bonus-rule-restrictions"
+              className={cn(
+                "flex flex-col rounded-lg border bg-muted/15 p-4 transition-[border-color,box-shadow] duration-200",
+                errorTarget === "restrictions"
+                  ? "border-2 border-destructive shadow-[0_0_0_1px_hsl(var(--destructive)/0.35)]"
+                  : "border-border/80",
+                errorTarget === "restrictions" && errorShake && "animate-bonus-rule-shake"
+              )}
+            >
+                {sectionAlert("restrictions")}
                 <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Cheklovlar
                 </p>
@@ -596,12 +851,28 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                       onChange={(e) => {
                         const v = e.target.checked;
                         setOnlyByAssortment(v);
+                        if (v) {
+                          setOnlyByCategory(false);
+                          setSelectedCategoryIds([]);
+                          setBonusProductIds([]);
+                        }
                         if (!v) setTriggerProductIds([]);
                       }}
                       disabled={mutation.isPending}
                     />
                     Faqat assortiment
                   </label>
+                  <BonusRuleCategoryHoverField
+                    checked={onlyByCategory}
+                    onCheckedChange={(v) => {
+                      setOnlyByCategory(v);
+                      if (v) {
+                        setOnlyByAssortment(false);
+                      }
+                      if (!v) setSelectedCategoryIds([]);
+                    }}
+                    disabled={mutation.isPending}
+                  />
                   <label className="flex cursor-pointer items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -613,24 +884,52 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
                     Har mijozga bir marta
                   </label>
                 </div>
-              </div>
             </div>
           </div>
+
+          {!isManual ? (
+            <div className="mt-4 rounded-lg border border-border/80 bg-muted/15 p-4">
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Oldindan shartlar (bog‘langan qoidalar)
+              </p>
+              <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+                Tanlangan qoidalar shu zakazda o‘z turi bo‘yicha avtomatik tekshiruvdan o‘tmasa, ushbu qoida qo‘llanmaydi.
+                Boshqa zakazlarda ular mustaqil ishlashda davom etadi.
+              </p>
+              <BonusRulePrerequisitesField
+                tenantSlug={tenantSlug}
+                excludeRuleId={initialRule?.id ?? null}
+                value={prerequisiteRuleIds}
+                onChange={setPrerequisiteRuleIds}
+                disabled={mutation.isPending}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
+      </div>
 
+      {type === "qty" || type === "sum" ? (
+      <div
+        ref={conditionsRef}
+        className={cn(
+          "rounded-xl",
+          errorTarget === "conditions" &&
+            "ring-2 ring-destructive ring-offset-2 ring-offset-background",
+          errorTarget === "conditions" && errorShake && "animate-bonus-rule-shake"
+        )}
+      >
       <Card className="shadow-panel">
         <CardHeader className="border-b border-border/60 pb-4">
           <CardTitle>Shartlar</CardTitle>
           <CardDescription>
             {type === "qty"
-              ? "Minimal / maksimal miqdor oralig‘i, qadam, bonus va maks. bonus. «Yana qo‘shish» bilan bir nechta pog‘ona."
-              : type === "sum"
-                ? "Buyurtma summasi ushbu qiymatdan oshganda."
-                : "Buyurtmaga qo‘llanadigan chegirma foizi."}
+              ? "Har bir qator — alohida «pog‘ona»: min/max oralig‘i, qadam (masalan 6), bonus (masalan 1). Zakazda sotilgan miqdor qaysi qator oralig‘iga tushsa, faqat o‘sha qator qo‘llanadi (bir vaqtda bitta). «Yana shart qo‘shish» — yangi pog‘ona qo‘shadi (masalan 6–11 dona uchun boshqa qadam)."
+              : "Buyurtma summasi ushbu qiymatdan oshganda."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-6">
+          {sectionAlert("conditions")}
           {type === "qty" ? (
             <>
               {conditions.map((row, idx) => (
@@ -743,35 +1042,81 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
               />
             </div>
           ) : null}
-
-          {type === "discount" ? (
-            <div className="grid max-w-md gap-1.5">
-              <Label>Chegirma (%)</Label>
-              <Input
-                className={inputCls}
-                type="number"
-                min={0}
-                max={100}
-                step="0.01"
-                value={discountPct}
-                onChange={(e) => setDiscountPct(e.target.value)}
-                disabled={mutation.isPending}
-              />
-            </div>
-          ) : null}
         </CardContent>
       </Card>
+      </div>
+      ) : null}
+
+      {type === "discount" ? (
+        <div
+          ref={discountRef}
+          className={cn(
+            "rounded-xl",
+            errorTarget === "discount" &&
+              "ring-2 ring-destructive ring-offset-2 ring-offset-background",
+            errorTarget === "discount" && errorShake && "animate-bonus-rule-shake"
+          )}
+        >
+          <Card className="shadow-panel">
+            <CardHeader className="border-b border-border/60 pb-4">
+              <CardTitle>Chegirma (skidka)</CardTitle>
+              <CardDescription>
+                Foizli chegirma tanlangan mahsulotlar (assortiment yoki kategoriya + trigger SKU) bo‘yicha buyurtma
+                qatorlariga avtomatik qo‘llanadi; ombor qoldig‘iga ta’sir qilmaydi. Pastdagi «Mahsulotlar» blokida
+                qaysi pozitsiyalar uchun ishlayishini belgilang.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-6">
+              {sectionAlert("discount")}
+              <div className="grid max-w-md gap-1.5">
+                <Label htmlFor="br-discount-pct">Chegirma foizi (%)</Label>
+                <Input
+                  id="br-discount-pct"
+                  className={inputCls}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={discountPct}
+                  onChange={(e) => setDiscountPct(e.target.value)}
+                  disabled={mutation.isPending}
+                  aria-invalid={errorTarget === "discount"}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
       {showTriggerColumn || showBonusColumn ? (
+        <div
+          ref={productsRef}
+          className={cn(
+            "rounded-xl",
+            errorTarget === "products" &&
+              "ring-2 ring-destructive ring-offset-2 ring-offset-background",
+            errorTarget === "products" && errorShake && "animate-bonus-rule-shake"
+          )}
+        >
         <Card className="shadow-panel">
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle>Mahsulotlar</CardTitle>
-            <CardDescription>
-              Chapda trigger, o‘ngda bonus mahsulotlari — faol mahsulotlar kategoriya bo‘yicha ochiladi. «Faqat
-              assortiment» o‘chiq bo‘lsa ham ro‘yxat ko‘rinadi; tanlov saqlanmaydi, barcha mahsulotlar trigger hisoblanadi.
+            <CardDescription className="space-y-2 text-pretty">
+              <span className="block">
+                Bu yerda <strong>o‘tmishdagi savdalar ro‘yxati</strong> emas: trigger va bonus — katalogdagi mahsulotlar
+                bo‘lib, ular <strong>buyurtma tuzilganda</strong> qator sifatida qo‘shilganda qoida ishlaydi.
+              </span>
+              <span className="block">
+                <strong>Faqat assortiment:</strong> chapda trigger SKU lar; bonus o‘ngda ko‘rinmaydi — sovg‘a
+                shart bajarilgan qatordagi mahsulotdan (yoki minimal summa bonusida zakazdagi eng ko‘p miqdorli qatordan).
+                <strong> Kategoriya:</strong> chapda trigger SKU lar; o‘ngda bonus mahsulotlari.{" "}
+                <strong>Bonuslar (dona):</strong> va <strong>Skidkalar (foiz yoki min. summa)</strong> uchun ham saqlashdan
+                oldin «Faqat assortiment» yoki «Kategoriya»dan bittasini belgilash majburiy.
+              </span>
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent className="min-w-0 pt-6">
+            {sectionAlert("products")}
             <BonusRuleProductDualPanels
               tenantSlug={tenantSlug}
               triggerProductIds={triggerProductIds}
@@ -779,26 +1124,26 @@ export function BonusRuleForm({ tenantSlug, initialRule }: Props) {
               onTriggerChange={setTriggerProductIds}
               onBonusChange={setBonusProductIds}
               onlyByAssortment={onlyByAssortment}
+              onlyByCategory={onlyByCategory}
               showTriggerColumn={showTriggerColumn}
               showBonusColumn={showBonusColumn}
               disabled={mutation.isPending}
             />
           </CardContent>
         </Card>
+        </div>
       ) : null}
-
-      {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
 
       <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-6">
         <Button
           type="button"
           variant="outline"
-          onClick={() => router.push("/settings/bonus-rules/active")}
+          onClick={() => router.push(listHref)}
           disabled={mutation.isPending}
         >
           Bekor
         </Button>
-        <Button type="button" onClick={submit} disabled={mutation.isPending || !name.trim()}>
+        <Button type="button" onClick={submit} disabled={mutation.isPending}>
           {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
         </Button>
       </div>

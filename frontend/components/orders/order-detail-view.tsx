@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { getUserFacingError } from "@/lib/error-utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
 import { refEntryLabelByStored } from "@/lib/profile-ref-entries";
@@ -326,6 +327,37 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
     }
   });
 
+  const [fullReturnError, setFullReturnError] = useState<string | null>(null);
+
+  const fullReturnMut = useMutation({
+    mutationFn: async () => {
+      await api.post(`/api/${tenantSlug}/returns/full-order`, { order_id: orderId });
+    },
+    onSuccess: async () => {
+      setFullReturnError(null);
+      await qc.invalidateQueries({ queryKey: ["order", tenantSlug, orderId] });
+      await qc.invalidateQueries({ queryKey: ["order-returns", tenantSlug, orderId] });
+      await qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      await qc.invalidateQueries({ queryKey: ["returns", tenantSlug] });
+    },
+    onError: (err: unknown) => {
+      if (!axios.isAxiosError(err)) {
+        setFullReturnError("So‘rov bajarilmadi.");
+        return;
+      }
+      const code = (err.response?.data as { error?: string } | undefined)?.error;
+      if (code === "OrderNotReturnable") {
+        setFullReturnError("Bu holatda to‘liq qaytarish mumkin emas.");
+      } else if (code === "OrderAlreadyFullyReturned") {
+        setFullReturnError("Bu zakaz allaqachon to‘liq qaytarilgan.");
+      } else if (code === "NoWarehouse") {
+        setFullReturnError("Qaytarish ombori topilmadi.");
+      } else {
+        setFullReturnError(getUserFacingError(err, "To‘liq qaytarish bajarilmadi."));
+      }
+    }
+  });
+
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug],
     enabled: enabled && canOperate,
@@ -370,6 +402,11 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
 
   const canEditOrderLines =
     role === "admin" && data != null && ORDER_LINES_EDITABLE_STATUSES.has(data.status);
+
+  const canFullReturn =
+    canOperate &&
+    data != null &&
+    data.allowed_next_statuses.includes("returned");
 
   const productsQ = useQuery({
     queryKey: ["products", tenantSlug, "order-edit"],
@@ -850,12 +887,41 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                   ) : null}
                 </div>
               )}
-              <Link
-                className="inline-block text-sm text-primary underline-offset-2 hover:underline"
-                href={`/returns/new?client_id=${data.client_id}&order_id=${orderId}`}
-              >
-                Bu zakaz bo‘yicha qaytarish
-              </Link>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                <Link
+                  className="text-sm text-primary underline-offset-2 hover:underline"
+                  href={`/returns?tab=polki&polki_mode=order&client_id=${data.client_id}&order_id=${orderId}`}
+                >
+                  Qisman qaytarish (polki)
+                </Link>
+                {canFullReturn ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 border-destructive/40 text-destructive hover:bg-destructive/10"
+                    disabled={fullReturnMut.isPending}
+                    onClick={() => {
+                      setFullReturnError(null);
+                      if (
+                        !window.confirm(
+                          "Butun zakaz qaytariladi: mahsulotlar qaytarish omboriga qaytadi, mijoz balansiga zakaz summasi qo‘shiladi, zakaz «Qaytarildi» holatiga o‘tadi. Davom etasizmi?"
+                        )
+                      ) {
+                        return;
+                      }
+                      fullReturnMut.mutate();
+                    }}
+                  >
+                    {fullReturnMut.isPending ? "Bajarilmoqda…" : "Butun zakazni qaytarish"}
+                  </Button>
+                ) : null}
+              </div>
+              {fullReturnError ? (
+                <p className="mt-1 text-xs text-destructive" role="alert">
+                  {fullReturnError}
+                </p>
+              ) : null}
             </section>
           ) : null}
 

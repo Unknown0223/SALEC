@@ -593,7 +593,8 @@ export async function createOrder(
         orderedProductIds,
         stackPolicy,
         usedRuleIds,
-        validatedGiftOverrides
+        validatedGiftOverrides,
+        input.warehouse_id
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;
@@ -998,7 +999,8 @@ export async function updateOrderLines(
         orderedProductIds,
         stackPolicy,
         usedRuleIds,
-        giftSelectionMap
+        giftSelectionMap,
+        warehouseId
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;

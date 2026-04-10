@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -355,7 +355,8 @@ export function BonusRuleProductCategoryTree({
   const [uncOpen, setUncOpen] = useState(false);
 
   const catsQ = useQuery({
-    queryKey: ["product-categories", tenantSlug, "bonus-rule-tree", querySuffix],
+    // querySuffix emas — ikki ustun bir xil ro‘yxatni ikkilan yuklamasligi uchun
+    queryKey: ["product-categories", tenantSlug, "bonus-rule-tree"],
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductCategoryRow[] }>(`/api/${tenantSlug}/product-categories`);
       return data.data;
@@ -365,6 +366,40 @@ export function BonusRuleProductCategoryTree({
   });
 
   const tree = useMemo(() => nestCategories(catsQ.data ?? []), [catsQ.data]);
+
+  /**
+   * Qidiruv bo‘yicha natijani ko‘rish uchun kategoriyalarni ochish.
+   * `tree` ni dependency qilmaslik kerak — har safar yangi referens bo‘lib, effekt qayta ishlab
+   * foydalanuvchi yopgan tugunlarni qayta ochardi (trigger «ishlamayapti» taassuroti).
+   * Bir xil qidiruv uchun faqat bir marta avto-ochamiz; qidiruv o‘zgaganda qayta.
+   */
+  const lastAutoExpandForSearchRef = useRef<string>("");
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) {
+      lastAutoExpandForSearchRef.current = "";
+      return;
+    }
+    const data = catsQ.data ?? [];
+    if (!data.length) return;
+
+    if (lastAutoExpandForSearchRef.current === q) return;
+    lastAutoExpandForSearchRef.current = q;
+
+    const t = nestCategories(data);
+    setExpandedCats((prev) => {
+      const next = new Set(prev);
+      const walk = (nodes: TreeNode[]) => {
+        for (const n of nodes) {
+          next.add(n.id);
+          if (n.children.length) walk(n.children);
+        }
+      };
+      walk(t);
+      return next;
+    });
+    setUncOpen(true);
+  }, [search, catsQ.data]);
 
   const toggleExpanded = (id: number) => {
     setExpandedCats((prev) => {
