@@ -15,27 +15,25 @@ function normalizeCell(cell: string | number | boolean | null | undefined): stri
  * Matnlar Unicode NFC normalizatsiyasidan o‘tadi.
  * `xlsx` paketi faqat chaqirilganda yuklanadi (bosh sahifa bundle kichrayadi).
  */
-export function downloadXlsxSheet(
+export async function downloadXlsxSheet(
   filename: string,
   sheetName: string,
   headers: string[],
   rows: (string | number | boolean | null | undefined)[][],
   options?: DownloadXlsxOptions
-): void {
+): Promise<void> {
   const safeName = sheetName.replace(/[:\\/?*[\]]/g, "_").slice(0, 31) || "Sheet1";
   const aoa: (string | number | boolean)[][] = [
     headers.map((h) => normalizeCell(h) as string),
-    ...rows.map((line) => line.map((cell) => normalizeCell(cell))),
+    ...rows.map((line) => line.map((cell) => normalizeCell(cell)))
   ];
-  void (async () => {
-    const XLSX = await import("xlsx");
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    if (options?.colWidths?.length) {
-      ws["!cols"] = options.colWidths.map((wch) => ({ wch: Math.min(Math.max(wch, 6), 60) }));
-    }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, safeName);
-    const out = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
-    XLSX.writeFile(wb, out, { bookType: "xlsx", compression: true });
-  })();
+  const XLSX = await import("xlsx");
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  if (options?.colWidths?.length) {
+    ws["!cols"] = options.colWidths.map((wch) => ({ wch: Math.min(Math.max(wch, 6), 60) }));
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, safeName);
+  const out = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, out, { bookType: "xlsx", compression: true });
 }

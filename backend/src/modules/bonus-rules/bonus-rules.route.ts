@@ -6,6 +6,7 @@ import { ensureTenantContext } from "../../lib/tenant-context";
 import { prisma } from "../../config/database";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
+  bonusRuleConditionSummary,
   bonusRuleInclude,
   createBonusRule,
   fetchBonusRuleFull,
@@ -43,7 +44,11 @@ const targetingFields = {
   once_per_client: z.boolean().optional(),
   one_plus_one_gift: z.boolean().optional(),
   prerequisite_rule_ids: z.array(z.number().int().positive()).max(200).optional(),
-  conditions: z.array(conditionSchema).optional()
+  conditions: z.array(conditionSchema).optional(),
+  sum_threshold_scope: z.enum(["order", "calendar_month"]).optional(),
+  scope_branch_codes: z.array(z.string().max(500)).max(200).optional(),
+  scope_agent_user_ids: z.array(z.number().int().positive()).max(2000).optional(),
+  scope_trade_direction_ids: z.array(z.number().int().positive()).max(200).optional()
 };
 
 const createBodySchema = z
@@ -159,8 +164,34 @@ export async function registerBonusRuleRoutes(app: FastifyInstance) {
         })
       ]);
 
+      const mapped = rows.map(mapBonusRuleFull);
+      const tenantId = request.tenant!.id;
+      const prereqIdSet = new Set<number>();
+      for (const row of mapped) {
+        for (const pid of row.prerequisite_rule_ids) {
+          if (pid > 0) prereqIdSet.add(pid);
+        }
+      }
+      const prereqById = new Map<number, (typeof rows)[number]>();
+      if (prereqIdSet.size > 0) {
+        const prereqRows = await prisma.bonusRule.findMany({
+          where: { tenant_id: tenantId, id: { in: [...prereqIdSet] } },
+          include: bonusRuleInclude
+        });
+        for (const pr of prereqRows) {
+          prereqById.set(pr.id, pr);
+        }
+      }
+      const data = mapped.map((row) => ({
+        ...row,
+        prerequisite_summaries: row.prerequisite_rule_ids.map((pid) => {
+          const pr = prereqById.get(pid);
+          return pr ? bonusRuleConditionSummary(pr) : `— #${pid}`;
+        })
+      }));
+
       return reply.send({
-        data: rows.map(mapBonusRuleFull),
+        data,
         total,
         page: pageNum,
         limit: limitNum

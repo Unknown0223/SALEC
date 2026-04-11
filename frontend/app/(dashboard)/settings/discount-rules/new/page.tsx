@@ -1,16 +1,28 @@
 "use client";
 
+import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
 import { BonusRuleForm } from "@/components/bonus-rules/bonus-rule-form";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { readBonusRuleCloneDraft } from "@/lib/bonus-rule-clone-draft";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
 export default function NewDiscountRulePage() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const authHydrated = useAuthStoreHydrated();
+  const [clonePack, setClonePack] = useState<{ rule: BonusRuleRow; nonce: string } | null>(null);
+  useEffect(() => {
+    const rule = readBonusRuleCloneDraft("discount");
+    if (rule) setClonePack({ rule, nonce: `clone-${Date.now()}` });
+  }, []);
+  const pageTitle = useMemo(
+    () => (clonePack ? "Новое правило скидки (копия)" : "Новое правило скидки"),
+    [clonePack]
+  );
 
   return (
     <PageShell>
@@ -18,11 +30,15 @@ export default function NewDiscountRulePage() {
         href="/settings/discount-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Chegirmalar ro‘yxati
+        ← Список скидок
       </Link>
       <PageHeader
-        title="Yangi skidka qoidasi"
-        description="Foizli chegirma yoki minimal buyurtma summasi (sovg‘a), muddat, filtrlar va mahsulot doirasi — dona bonuslari «Bonuslar»da."
+        title={pageTitle}
+        description={
+          clonePack
+            ? "Поля заполнены с выбранной скидки. Измените название или процент и нажмите «Сохранить», чтобы создать новую запись."
+            : "Основные данные, параметры скидки или порог по сумме, срок, фильтры и клиенты — в одной форме. Бонусы за количество — в «Бонусах»."
+        }
         actions={
           <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
             Панель управления
@@ -39,7 +55,12 @@ export default function NewDiscountRulePage() {
           </Link>
         </p>
       ) : (
-        <BonusRuleForm tenantSlug={tenantSlug} initialRule={null} variant="discountOnly" />
+        <BonusRuleForm
+          tenantSlug={tenantSlug}
+          initialRule={clonePack?.rule ?? null}
+          prefillNonce={clonePack?.nonce ?? null}
+          variant="discountOnly"
+        />
       )}
     </PageShell>
   );

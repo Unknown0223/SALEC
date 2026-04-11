@@ -15,6 +15,8 @@ export type BonusRuleRow = {
   buy_qty: number | null;
   free_qty: number | null;
   min_sum: number | null;
+  /** `sum` va `qty`: `order` | `calendar_month` */
+  sum_threshold_scope?: string;
   discount_pct: number | null;
   priority: number;
   is_active: boolean;
@@ -36,5 +38,13 @@ export type BonusRuleRow = {
   one_plus_one_gift: boolean;
   /** Oldindan bajarilishi kerak bo‘lgan qoidalar (API eski bo‘lsa bo‘sh). */
   prerequisite_rule_ids?: number[];
+  /** Bo‘sh = barcha filiallar (cheklov yo‘q). */
+  scope_branch_codes?: string[];
+  /** Bo‘sh = barcha agentlar (cheklov yo‘q). Filial bilan birga — OR. */
+  scope_agent_user_ids?: number[];
+  /** Bo‘sh = barcha yo‘nalishlar (cheklov yo‘q). */
+  scope_trade_direction_ids?: number[];
+  /** Ro‘yxat API: har bir bog‘langan qoida uchun qisqa shart matni (nomisiz). */
+  prerequisite_summaries?: string[];
   conditions: BonusConditionRow[];
 };

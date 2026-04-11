@@ -48,7 +48,7 @@ export default function EditDiscountRulePage() {
         href="/settings/discount-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Chegirmalar ro‘yxati
+        ← Список скидок
       </Link>
 
       {!authHydrated ? (
@@ -68,11 +68,11 @@ export default function EditDiscountRulePage() {
           {error instanceof Error ? error.message : "Правило не найдено или ошибка"}
         </p>
       ) : data && data.type === "qty" ? (
-        <p className="text-sm text-muted-foreground">Bonuslar bo‘limiga yo‘naltirilmoqda…</p>
+        <p className="text-sm text-muted-foreground">Переход в раздел бонусов…</p>
       ) : data ? (
         <>
           <PageHeader
-            title="Chegirma qoidasini tahrirlash"
+            title="Редактирование правила скидки"
             description={`${data.name} · #${data.id}`}
             actions={
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">

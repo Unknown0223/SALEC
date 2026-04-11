@@ -15,6 +15,8 @@ import { registerStockRoutes } from "./modules/stock/stock.route";
 import { registerSupplierRoutes } from "./modules/stock/suppliers.route";
 import { registerDashboardRoutes } from "./modules/dashboard/dashboard.route";
 import { registerPaymentRoutes } from "./modules/payments/payments.route";
+import { registerOpeningBalanceRoutes } from "./modules/opening-balances/opening-balances.route";
+import { registerClientBalanceRoutes } from "./modules/client-balances/client-balances.route";
 import { registerSalesReturnRoutes } from "./modules/returns/sales-returns.route";
 import { registerCashDeskRoutes } from "./modules/cash-desks/cash-desks.route";
 import { registerProductCatalogRoutes } from "./modules/products/product-catalog.route";
@@ -65,6 +67,8 @@ export function buildApp() {
   app.register(registerOrderStreamRoutes);
   app.register(registerDashboardRoutes);
   app.register(registerPaymentRoutes);
+  app.register(registerOpeningBalanceRoutes);
+  app.register(registerClientBalanceRoutes);
   app.register(registerSalesReturnRoutes);
   app.register(registerReferenceRoutes);
   app.register(registerTenantSettingsRoutes);
@@ -165,6 +169,14 @@ export function buildApp() {
         message:
           "Baza migratsiyalari to‘liq qo‘llanmagan (jadval/ustun yetishmayapti). Backend papkasida: npm run db:deploy",
         prismaCode,
+        requestId
+      });
+    }
+    const errName = (error as { name?: string }).name;
+    if (errName === "PrismaClientValidationError") {
+      return reply.status(400).send({
+        error: "DatabaseValidationError",
+        message: (error as Error).message,
         requestId
       });
     }

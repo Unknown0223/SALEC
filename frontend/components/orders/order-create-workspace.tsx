@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -12,19 +13,32 @@ import { getUserFacingError, isApiUnreachable } from "@/lib/error-utils";
 import type { ClientRow } from "@/lib/client-types";
 import type { ProductRow } from "@/lib/product-types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction
+} from "react";
+import { createPortal } from "react-dom";
 import type { AxiosError } from "axios";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import { MAX_RETURN_PHYSICAL_UNITS_PER_DOCUMENT } from "@/lib/return-limits";
 import {
   activeRefSelectOptions,
   refEntryLabelByStored,
 } from "@/lib/profile-ref-entries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, Search } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, Gift, Search } from "lucide-react";
 
 type Props = {
   tenantSlug: string | null;
@@ -62,7 +76,7 @@ function formatQtyState(n: number): string {
   return s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
 }
 
-const MAX_POLKI_RETURN_QTY = 12;
+const MAX_POLKI_RETURN_QTY = MAX_RETURN_PHYSICAL_UNITS_PER_DOCUMENT;
 
 const POLKI_TRADE_DIRECTION_OPTS = [
   { value: "", label: "— Направление торговли" },
@@ -76,72 +90,143 @@ const POLKI_SKIDKA_OPTS = [
   { value: "line", label: "По строкам (API)" }
 ];
 
-type PolkiRowModel = {
+const POLKI_PRICE_TYPE_LABEL_RU: Record<string, string> = {
+  retail: "Розница",
+  wholesale: "Опт"
+};
+
+/** Русские подписи к внутренним кодам статуса заказа (для подсказок и сообщений). */
+const ORDER_STATUS_LABEL_RU: Record<string, string> = {
+  new: "Новый",
+  confirmed: "Подтверждён",
+  picking: "Комплектация",
+  delivering: "Доставка",
+  delivered: "Доставлен",
+  returned: "Возвращён",
+  cancelled: "Отменён"
+};
+
+function orderStatusLabelRu(status: string): string {
+  const k = status.trim().toLowerCase();
+  return ORDER_STATUS_LABEL_RU[k] ?? status;
+}
+
+/** Zakaz + mahsulot bitta qatorda: pullik va bonus alohida input. */
+type PolkiPairRowModel = {
+  pair_key: string;
+  order_id: number;
+  order_number: string;
+  product_id: number;
+  name: string;
+  sku: string;
+  unit: string;
+  max_paid: number;
+  max_bonus: number;
+  unit_price_paid: number;
+  unit_price_bonus: number;
+  category_id: number | null;
+  volume_m3: string | null | undefined;
+};
+
+type PolkiClientItem = {
   product_id: number;
   sku: string;
   name: string;
   unit: string;
-  max_qty: number;
-  unit_price: number;
-  has_bonus: boolean;
-  category_id: number | null;
-  volume_m3: string | null | undefined;
-  qty_per_block: number | null;
+  qty: string;
+  price: string;
+  is_bonus: boolean;
+  order_id?: number;
+  order_number?: string;
 };
 
-function buildPolkiRowsFromClientData(
-  items: Array<{
-    product_id: number;
-    sku: string;
-    name: string;
-    unit: string;
-    qty: string;
-    price: string;
-    is_bonus: boolean;
-  }>,
-  products: ProductRow[]
-): PolkiRowModel[] {
+function buildPolkiPairRows(items: PolkiClientItem[], products: ProductRow[]): PolkiPairRowModel[] {
   const pmap = new Map(products.map((p) => [p.id, p]));
-  const map = new Map<
-    number,
-    { sku: string; name: string; unit: string; total_qty: number; unit_price: number; has_bonus: boolean }
-  >();
+  type Acc = {
+    order_id: number;
+    order_number: string;
+    product_id: number;
+    name: string;
+    sku: string;
+    unit: string;
+    max_paid: number;
+    max_bonus: number;
+    unit_price_paid: number;
+    unit_price_bonus: number;
+  };
+  const groups = new Map<string, Acc>();
+
   for (const it of items) {
     const q = Number.parseFloat(String(it.qty).replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(q) || q <= 0) continue;
+    const oid = it.order_id ?? 0;
+    if (!(oid > 0)) continue;
     const price = Number.parseFloat(String(it.price).replace(/\s/g, "").replace(",", "."));
     const up = Number.isFinite(price) ? price : 0;
-    const cur = map.get(it.product_id);
-    if (cur) {
-      cur.total_qty += q;
-      if (it.is_bonus) cur.has_bonus = true;
-    } else {
-      map.set(it.product_id, {
-        sku: it.sku,
+    const key = `${oid}-${it.product_id}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        order_id: oid,
+        order_number: it.order_number ?? `#${oid}`,
+        product_id: it.product_id,
         name: it.name,
+        sku: it.sku,
         unit: it.unit,
-        total_qty: q,
-        unit_price: up,
-        has_bonus: it.is_bonus
-      });
+        max_paid: 0,
+        max_bonus: 0,
+        unit_price_paid: up,
+        unit_price_bonus: up
+      };
+      groups.set(key, g);
+    }
+    if (it.is_bonus) {
+      g.max_bonus += q;
+      g.unit_price_bonus = up;
+    } else {
+      g.max_paid += q;
+      g.unit_price_paid = up;
     }
   }
-  return Array.from(map.entries()).map(([product_id, v]) => {
-    const p = pmap.get(product_id);
-    return {
-      product_id,
-      sku: v.sku,
-      name: v.name,
-      unit: v.unit,
-      max_qty: v.total_qty,
-      unit_price: v.unit_price,
-      has_bonus: v.has_bonus,
-      category_id: p?.category_id ?? null,
-      volume_m3: p?.volume_m3,
-      qty_per_block: p?.qty_per_block ?? null
-    };
-  });
+
+  return Array.from(groups.values())
+    .map((g) => {
+      const p = pmap.get(g.product_id);
+      return {
+        pair_key: `${g.order_id}-${g.product_id}`,
+        order_id: g.order_id,
+        order_number: g.order_number,
+        product_id: g.product_id,
+        name: g.name,
+        sku: g.sku,
+        unit: g.unit,
+        max_paid: g.max_paid,
+        max_bonus: g.max_bonus,
+        unit_price_paid: g.unit_price_paid,
+        unit_price_bonus: g.unit_price_bonus,
+        category_id: p?.category_id ?? null,
+        volume_m3: p?.volume_m3
+      };
+    })
+    .sort((a, b) => (a.order_id - b.order_id || a.product_id - b.product_id));
 }
+
+/** Umumiy qaytarish: avval pullik qoldiq, keyin bonus (FIFO). */
+function polkiSplitTotal(r: PolkiPairRowModel, totalIn: number): { effPaid: number; effBonus: number } {
+  const raw = Number.isFinite(totalIn) && totalIn > 0 ? totalIn : 0;
+  const maxTot = r.max_paid + r.max_bonus;
+  const t = Math.min(raw, maxTot);
+  const effPaid = Math.min(t, r.max_paid);
+  const effBonus = Math.min(Math.max(0, t - effPaid), r.max_bonus);
+  return { effPaid, effBonus };
+}
+
+type PolkiOrderGroup = {
+  orderId: number;
+  orderNumber: string;
+  orderDate: string;
+  rows: PolkiPairRowModel[];
+};
 
 type PolkiLinesTableProps = {
   canShowPolkiGrid: boolean;
@@ -151,16 +236,21 @@ type PolkiLinesTableProps = {
   polkiError: boolean;
   polkiSuccess: boolean;
   polkiRowsAllLength: number;
-  polkiDisplayRows: PolkiRowModel[];
-  qtyByProductId: Record<number, string>;
-  setQtyByProductId: Dispatch<SetStateAction<Record<number, string>>>;
-  blockByProductId: Record<number, string>;
-  setBlockByProductId: Dispatch<SetStateAction<Record<number, string>>>;
+  polkiOrderGroups: PolkiOrderGroup[];
+  polkiTotalQty: Record<string, string>;
+  setPolkiTotalQty: Dispatch<SetStateAction<Record<string, string>>>;
+  polkiBonusToBalance: Record<string, boolean>;
+  setPolkiBonusToBalance: Dispatch<SetStateAction<Record<string, boolean>>>;
+  polkiBonusCash: Record<string, string>;
+  setPolkiBonusCash: Dispatch<SetStateAction<Record<string, string>>>;
   mutationPending: boolean;
   polkiTotalReturnQtySum: number;
   polkiVolumeM3: number;
   polkiEstimatedSum: number;
+  polkiDebtHintSum: number;
 };
+
+const POLKI_TABLE_COLS = 5;
 
 function PolkiReturnLinesTable({
   canShowPolkiGrid,
@@ -170,39 +260,45 @@ function PolkiReturnLinesTable({
   polkiError,
   polkiSuccess,
   polkiRowsAllLength,
-  polkiDisplayRows,
-  qtyByProductId,
-  setQtyByProductId,
-  blockByProductId,
-  setBlockByProductId,
+  polkiOrderGroups,
+  polkiTotalQty,
+  setPolkiTotalQty,
+  polkiBonusToBalance,
+  setPolkiBonusToBalance,
+  polkiBonusCash,
+  setPolkiBonusCash,
   mutationPending,
   polkiTotalReturnQtySum,
   polkiVolumeM3,
-  polkiEstimatedSum
+  polkiEstimatedSum,
+  polkiDebtHintSum
 }: PolkiLinesTableProps) {
+  const flatRowCount = polkiOrderGroups.reduce((a, g) => a + g.rows.length, 0);
   return (
     <div className="overflow-hidden rounded-lg border border-teal-800/20 bg-card shadow-sm dark:border-teal-800/35">
-      <div className="max-h-[min(60vh,720px)] overflow-auto">
-        <table className="w-full min-w-[720px] border-collapse text-sm">
+      <div className="max-h-[min(75vh,920px)] min-h-[220px] overflow-auto">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead className="app-table-thead sticky top-0 z-[1] backdrop-blur-sm">
             <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="min-w-[12rem] px-3 py-2.5">Ассортимент</th>
-              <th className="min-w-[5.5rem] px-3 py-2.5 text-right">Цена</th>
+              <th className="min-w-[5rem] px-2 py-1.5">Заказ</th>
+              <th className="min-w-[9rem] px-2 py-1.5">Товар</th>
               <th
-                className="min-w-[5.5rem] px-3 py-2.5 text-center"
-                title="Упаковка / блок. Если в карточке задано шт. в блоке, количество = блок × шт."
+                className="min-w-[13rem] px-2 py-1.5"
+                title={`Введите общее количество по строке (макс. см. подсказку в ячейке). Автораспределение: сначала оплата, затем бонус. В одном документе суммарно не более ${MAX_POLKI_RETURN_QTY} шт на склад, считая и оплату, и бонус (если бонус возвращается на склад).`}
               >
-                Блок
+                Дата · всего к возврату
               </th>
-              <th className="min-w-[5.5rem] px-3 py-2.5 text-center">Кол-во</th>
-              <th className="min-w-[4.5rem] px-3 py-2.5 text-right">Объём m³</th>
-              <th className="min-w-[6rem] px-3 py-2.5 text-right">Сумма</th>
+              <th className="min-w-[15rem] px-2 py-1.5">Бонус / баланс</th>
+              <th className="min-w-[3.5rem] px-2 py-1.5 text-right">m³</th>
             </tr>
           </thead>
           <tbody>
             {!canShowPolkiGrid ? (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                <td
+                  colSpan={POLKI_TABLE_COLS}
+                  className="px-3 py-8 text-center text-xs text-muted-foreground"
+                >
                   Выберите клиента
                   {isPolkiByOrder ? " и заказ" : ""}
                   {isPolkiFree ? " (период опционально)" : ""}.
@@ -211,259 +307,288 @@ function PolkiReturnLinesTable({
             ) : null}
             {canShowPolkiGrid && polkiLoading ? (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-sm text-muted-foreground">
+                <td
+                  colSpan={POLKI_TABLE_COLS}
+                  className="px-3 py-8 text-center text-sm text-muted-foreground"
+                >
                   Загрузка контекста возврата…
                 </td>
               </tr>
             ) : null}
             {canShowPolkiGrid && polkiError ? (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-sm text-destructive">
+                <td
+                  colSpan={POLKI_TABLE_COLS}
+                  className="px-3 py-8 text-center text-sm text-destructive"
+                >
                   Не удалось загрузить данные. Проверьте параметры и попробуйте снова.
                 </td>
               </tr>
             ) : null}
             {canShowPolkiGrid && polkiSuccess && polkiRowsAllLength === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                <td
+                  colSpan={POLKI_TABLE_COLS}
+                  className="px-3 py-8 text-center text-xs text-muted-foreground"
+                >
                   Нет позиций для возврата за период / по заказу.
                 </td>
               </tr>
             ) : null}
             {canShowPolkiGrid && polkiSuccess && polkiRowsAllLength > 0
-              ? polkiDisplayRows.map((r) => {
-                  const pid = r.product_id;
-                  const availNum = r.max_qty;
-                  const qpb = r.qty_per_block;
-                  const lineQtyRaw = qtyByProductId[pid] ?? "";
-                  const lineQ = Number.parseFloat(lineQtyRaw.replace(",", "."));
-                  const blockRaw = blockByProductId[pid] ?? "";
-                  const blockN = Number.parseFloat(blockRaw.replace(",", "."));
-                  let impliedFromBlock = NaN;
-                  if (qpb != null && qpb > 0) {
-                    if (Number.isFinite(blockN) && blockN > 0) impliedFromBlock = blockN * qpb;
-                  } else if (Number.isFinite(blockN)) {
-                    impliedFromBlock = blockN;
-                  }
-                  const qtyOver =
-                    Boolean(lineQtyRaw.trim()) &&
-                    Number.isFinite(lineQ) &&
-                    lineQ > 0 &&
-                    lineQ > availNum;
-                  const blockOver =
-                    Boolean(blockRaw.trim()) &&
-                    Number.isFinite(impliedFromBlock) &&
-                    impliedFromBlock > availNum;
-                  const effQ =
-                    Number.isFinite(lineQ) && lineQ > 0 ? Math.min(lineQ, availNum) : 0;
-                  const volU =
-                    r.volume_m3 != null ? Number.parseFloat(String(r.volume_m3)) : NaN;
-                  const lineVolM3 = Number.isFinite(volU) && effQ > 0 ? effQ * volU : 0;
-                  const lineTotalMoney =
-                    effQ > 0 && r.unit_price > 0 ? effQ * r.unit_price : null;
-                  const maxLabel = formatNumberGrouped(availNum, { maxFractionDigits: 3 });
-                  return (
-                    <tr
-                      key={pid}
-                      className="border-b border-border/80 last:border-0 hover:bg-muted/25"
-                    >
-                      <td className="px-3 py-2 align-top">
-                        <div className="font-medium leading-snug text-foreground">{r.name}</div>
-                        {r.sku || r.unit || r.has_bonus ? (
-                          <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                            {[r.sku, r.unit].filter(Boolean).join(" · ")}
-                            {r.has_bonus ? (
-                              <span className="ml-1 text-amber-600 dark:text-amber-400">bonus</span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground align-middle">
-                        {r.unit_price > 0
-                          ? formatNumberGrouped(r.unit_price, { maxFractionDigits: 2 })
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className="mx-auto flex max-w-[6.5rem] flex-col items-stretch">
-                          {blockOver ? (
-                            <span className="mb-0.5 text-center text-[11px] font-semibold text-destructive">
-                              Макс: {maxLabel}
-                            </span>
-                          ) : null}
-                          <Input
-                            type="number"
-                            min={0}
-                            step="any"
-                            placeholder="0"
-                            title={
-                              qpb != null && qpb > 0
-                                ? `1 блок = ${qpb} шт (макс ${maxLabel} шт)`
-                                : "Блок и количество совпадают (макс продано)"
-                            }
-                            className={cn(
-                              "h-9 w-full tabular-nums text-center",
-                              blockOver && "border-destructive focus-visible:ring-destructive"
-                            )}
-                            value={blockRaw}
-                            onChange={(e) => {
-                              const blockStr = e.target.value;
-                              setBlockByProductId((prev) => ({ ...prev, [pid]: blockStr }));
-                              const qpbN = r.qty_per_block;
-                              if (qpbN != null && qpbN > 0) {
-                                if (!blockStr.trim()) {
-                                  setQtyByProductId((prev) => ({ ...prev, [pid]: "" }));
-                                  return;
-                                }
-                                const blocks = Number.parseFloat(blockStr.replace(",", "."));
-                                if (!Number.isFinite(blocks) || blocks <= 0) return;
-                                setQtyByProductId((prev) => ({
-                                  ...prev,
-                                  [pid]: formatQtyState(blocks * qpbN)
-                                }));
-                                return;
-                              }
-                              setQtyByProductId((prev) => ({ ...prev, [pid]: blockStr }));
-                            }}
-                            onBlur={() => {
-                              const br = blockByProductId[pid];
-                              if (!br?.trim()) return;
-                              const blocks = Number.parseFloat(br.replace(",", "."));
-                              if (!Number.isFinite(blocks) || blocks <= 0) return;
-                              const qpbN = r.qty_per_block;
-                              if (qpbN != null && qpbN > 0) {
-                                let qtyVal = blocks * qpbN;
-                                if (qtyVal > availNum) {
-                                  qtyVal = availNum;
-                                  setBlockByProductId((prev) => ({
-                                    ...prev,
-                                    [pid]: availNum > 0 ? formatQtyState(availNum / qpbN) : ""
-                                  }));
-                                  setQtyByProductId((prev) => ({
-                                    ...prev,
-                                    [pid]: qtyVal > 0 ? formatQtyState(qtyVal) : ""
-                                  }));
-                                }
-                                return;
-                              }
-                              if (blocks > availNum) {
-                                const cap = availNum > 0 ? String(availNum) : "";
-                                setBlockByProductId((prev) => ({ ...prev, [pid]: cap }));
-                                setQtyByProductId((prev) => ({ ...prev, [pid]: cap }));
-                              }
-                            }}
-                            disabled={mutationPending}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <div className="mx-auto flex max-w-[6.5rem] flex-col items-stretch">
-                          {qtyOver ? (
-                            <span className="mb-0.5 text-center text-[11px] font-semibold text-destructive">
-                              Макс: {maxLabel}
-                            </span>
-                          ) : null}
-                          <Input
-                            type="number"
-                            min={0}
-                            step="any"
-                            placeholder="0"
-                            data-testid="oc-polki-line-qty"
-                            data-oc-product-id={pid}
-                            className={cn(
-                              "h-9 w-full tabular-nums text-center",
-                              qtyOver && "border-destructive focus-visible:ring-destructive"
-                            )}
-                            value={lineQtyRaw}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setQtyByProductId((prev) => ({ ...prev, [pid]: v }));
-                              const qpbN = r.qty_per_block;
-                              if (qpbN != null && qpbN > 0) {
-                                const q = Number.parseFloat(v.replace(",", "."));
-                                if (!v.trim() || !Number.isFinite(q) || q <= 0) {
-                                  setBlockByProductId((prev) => ({ ...prev, [pid]: "" }));
-                                } else {
-                                  setBlockByProductId((prev) => ({
-                                    ...prev,
-                                    [pid]: formatQtyState(q / qpbN)
-                                  }));
-                                }
-                              } else {
-                                setBlockByProductId((prev) => ({ ...prev, [pid]: v }));
-                              }
-                            }}
-                            onBlur={() => {
-                              const raw = qtyByProductId[pid];
-                              if (!raw?.trim()) return;
-                              const n = Number.parseFloat(raw.replace(",", "."));
-                              if (!Number.isFinite(n) || n <= 0) return;
-                              if (n > availNum) {
-                                const capped = availNum > 0 ? formatQtyState(availNum) : "";
-                                setQtyByProductId((prev) => ({ ...prev, [pid]: capped }));
-                                const qpbN = r.qty_per_block;
-                                if (qpbN != null && qpbN > 0 && capped) {
-                                  const q = Number.parseFloat(capped.replace(",", "."));
-                                  if (Number.isFinite(q) && q > 0) {
-                                    setBlockByProductId((prev) => ({
-                                      ...prev,
-                                      [pid]: formatQtyState(q / qpbN)
-                                    }));
-                                  }
-                                } else {
-                                  setBlockByProductId((prev) => ({ ...prev, [pid]: capped }));
-                                }
-                              }
-                            }}
-                            disabled={mutationPending}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground align-middle">
-                        {lineVolM3 > 0
-                          ? formatNumberGrouped(lineVolM3, { maxFractionDigits: 4 })
-                          : "0"}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-foreground align-middle">
-                        {lineTotalMoney != null && lineTotalMoney > 0
-                          ? formatNumberGrouped(lineTotalMoney, { maxFractionDigits: 0 })
-                          : "—"}
+              ? polkiOrderGroups.map((g) => (
+                  <Fragment key={g.orderId}>
+                    <tr className="border-b border-teal-800/20 bg-teal-950/10 dark:bg-teal-950/25">
+                      <td
+                        colSpan={POLKI_TABLE_COLS}
+                        className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-teal-900 dark:text-teal-100/90"
+                      >
+                        Заказ {g.orderNumber} · {g.orderDate || "—"}
                       </td>
                     </tr>
-                  );
-                })
+                    {g.rows.map((r) => {
+                      const pk = r.pair_key;
+                      const totalRaw = polkiTotalQty[pk] ?? "";
+                      const totalQ = Number.parseFloat(totalRaw.replace(",", "."));
+                      const totalOver =
+                        Boolean(totalRaw.trim()) &&
+                        Number.isFinite(totalQ) &&
+                        totalQ > r.max_paid + r.max_bonus;
+                      const defer = Boolean(polkiBonusToBalance[pk]);
+                      const { effPaid, effBonus } = polkiSplitTotal(
+                        r,
+                        Number.isFinite(totalQ) ? totalQ : 0
+                      );
+                      const physBonus = defer ? 0 : effBonus;
+                      const volU =
+                        r.volume_m3 != null ? Number.parseFloat(String(r.volume_m3)) : NaN;
+                      const lineVol =
+                        Number.isFinite(volU) && effPaid + physBonus > 0
+                          ? (effPaid + physBonus) * volU
+                          : 0;
+                      const maxTot = r.max_paid + r.max_bonus;
+                      const suggestedBonusCash = effBonus * r.unit_price_bonus;
+                      const maxCashDefer =
+                        r.max_bonus > 0 ? r.max_bonus * r.unit_price_bonus : 0;
+                      const maxCashExtra =
+                        r.max_bonus > 0
+                          ? Math.max(0, (r.max_bonus - physBonus) * r.unit_price_bonus)
+                          : 0;
+                      const cashRaw = polkiBonusCash[pk] ?? "";
+                      const cashParsed = parsePriceAmount(cashRaw);
+                      const cashCap = defer ? maxCashDefer : maxCashExtra;
+                      const debtLine =
+                        defer && effBonus > 0
+                          ? Math.max(0, suggestedBonusCash - Math.min(cashParsed, cashCap))
+                          : 0;
+                      return (
+                        <tr
+                          key={pk}
+                          className="border-b border-border/80 last:border-0 hover:bg-muted/25"
+                        >
+                          <td className="px-2 py-1.5 align-top font-mono text-[11px] text-muted-foreground">
+                            #{r.order_id}
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <div className="font-medium leading-snug text-foreground text-[13px]">
+                              {r.name}
+                            </div>
+                            <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                              {[r.sku, r.unit].filter(Boolean).join(" · ")}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <div className="mb-1 text-[11px] text-muted-foreground">
+                              Продажа: <span className="font-medium text-foreground">{g.orderDate}</span>
+                              {r.unit_price_paid > 0 ? (
+                                <span className="ml-1 tabular-nums">
+                                  · {formatNumberGrouped(r.unit_price_paid, { maxFractionDigits: 2 })}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              макс всего {formatNumberGrouped(maxTot, { maxFractionDigits: 3 })} шт (опл.{" "}
+                              {formatNumberGrouped(r.max_paid, { maxFractionDigits: 3 })} + бон.{" "}
+                              {formatNumberGrouped(r.max_bonus, { maxFractionDigits: 3 })})
+                            </div>
+                            <Input
+                              type="number"
+                              min={0}
+                              step="any"
+                              placeholder="0"
+                              data-testid="oc-polki-total-qty"
+                              data-oc-product-id={r.product_id}
+                              className={cn(
+                                "mt-1 h-8 w-full max-w-[7rem] tabular-nums text-sm",
+                                totalOver && "border-destructive"
+                              )}
+                              value={totalRaw}
+                              onChange={(e) =>
+                                setPolkiTotalQty((prev) => ({ ...prev, [pk]: e.target.value }))
+                              }
+                              onBlur={() => {
+                                if (!totalRaw.trim()) return;
+                                const n = Number.parseFloat(totalRaw.replace(",", "."));
+                                if (!Number.isFinite(n) || n <= 0) return;
+                                if (n > maxTot) {
+                                  setPolkiTotalQty((prev) => ({
+                                    ...prev,
+                                    [pk]: formatQtyState(maxTot)
+                                  }));
+                                }
+                              }}
+                              disabled={mutationPending || maxTot <= 0}
+                            />
+                            {Number.isFinite(totalQ) && totalQ > 0 ? (
+                              <p className="mt-1 text-[10px] leading-snug text-teal-800 dark:text-teal-200/90">
+                                Авто: опл.{" "}
+                                <span className="font-semibold tabular-nums">{effPaid}</span>
+                                {" · "}
+                                бон.{" "}
+                                <span className="font-semibold tabular-nums">{effBonus}</span>
+                                {defer ? (
+                                  <span className="text-muted-foreground"> (бонус → баланс)</span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            {r.max_bonus > 0 ? (
+                              <>
+                                <div className="font-medium leading-snug text-[13px] text-amber-700 dark:text-amber-400">
+                                  {r.name} <span className="text-[10px] font-normal">(бонус)</span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground">
+                                  макс {formatNumberGrouped(r.max_bonus, { maxFractionDigits: 3 })} шт
+                                  {r.unit_price_bonus > 0 ? (
+                                    <span className="ml-1 tabular-nums">
+                                      · {formatNumberGrouped(r.unit_price_bonus, { maxFractionDigits: 2 })}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <label className="mt-2 flex cursor-pointer items-start gap-2 text-[11px] leading-tight text-foreground">
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-input"
+                                    checked={defer}
+                                    disabled={mutationPending}
+                                    onChange={(e) => {
+                                      const on = e.target.checked;
+                                      setPolkiBonusToBalance((prev) => ({ ...prev, [pk]: on }));
+                                      if (on) {
+                                        const t = Number.parseFloat(
+                                          (polkiTotalQty[pk] ?? "").replace(",", ".")
+                                        );
+                                        const sp = polkiSplitTotal(
+                                          r,
+                                          Number.isFinite(t) ? t : 0
+                                        );
+                                        const sug = sp.effBonus * r.unit_price_bonus;
+                                        if (sug > 0) {
+                                          setPolkiBonusCash((prev) => ({
+                                            ...prev,
+                                            [pk]: String(Math.round(sug))
+                                          }));
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <span>
+                                    Бонус не на склад (сумма на баланс / без возврата бонуса)
+                                  </span>
+                                </label>
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-muted-foreground">Нет бонуса по строке</p>
+                            )}
+                            <div className="mt-2 border-t border-border/60 pt-2">
+                              <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">
+                                {defer
+                                  ? `Сумма на баланс (компенсация бонуса), макс ${formatNumberGrouped(maxCashDefer, { maxFractionDigits: 0 })}`
+                                  : `Доп. вместо бонуса (баланс), макс ≈ ${formatNumberGrouped(maxCashExtra, { maxFractionDigits: 0 })}`}
+                              </p>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="any"
+                                placeholder="0"
+                                className="h-8 w-full max-w-[8rem] tabular-nums text-sm"
+                                value={cashRaw}
+                                onChange={(e) =>
+                                  setPolkiBonusCash((prev) => ({ ...prev, [pk]: e.target.value }))
+                                }
+                                disabled={mutationPending || r.max_bonus <= 0}
+                              />
+                              {defer && effBonus > 0 && suggestedBonusCash > 0 ? (
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  По бонусу: {effBonus} шт ≈{" "}
+                                  {formatNumberGrouped(suggestedBonusCash, { maxFractionDigits: 0 })}{" "}
+                                  сум
+                                </p>
+                              ) : null}
+                              {debtLine > 0 ? (
+                                <p className="mt-1 text-[10px] font-medium text-amber-800 dark:text-amber-200">
+                                  К долгу (оценка):{" "}
+                                  {formatNumberGrouped(debtLine, { maxFractionDigits: 0 })} — учтите
+                                  вручную, если компенсация не внесена.
+                                </p>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground align-middle text-[13px]">
+                            {lineVol > 0
+                              ? formatNumberGrouped(lineVol, { maxFractionDigits: 4 })
+                              : "0"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                ))
               : null}
             {canShowPolkiGrid &&
             polkiSuccess &&
             polkiRowsAllLength > 0 &&
-            polkiDisplayRows.length === 0 ? (
+            flatRowCount === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-xs text-muted-foreground">
+                <td
+                  colSpan={POLKI_TABLE_COLS}
+                  className="px-3 py-8 text-center text-xs text-muted-foreground"
+                >
                   По поиску ничего не найдено.
                 </td>
               </tr>
             ) : null}
           </tbody>
-          {canShowPolkiGrid &&
-          polkiSuccess &&
-          !polkiLoading &&
-          polkiDisplayRows.length > 0 ? (
+          {canShowPolkiGrid && polkiSuccess && !polkiLoading && flatRowCount > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-border bg-muted/40 font-semibold">
-                <td className="px-3 py-2.5 text-foreground" colSpan={3}>
-                  Итого
+                <td className="px-2 py-2 text-foreground text-sm" colSpan={3}>
+                  Итого (на склад, шт · m³ · сумма на баланс)
                 </td>
-                <td className="px-3 py-2.5 text-center tabular-nums text-foreground">
+                <td className="px-2 py-2 text-center tabular-nums text-foreground text-sm">
                   {formatNumberGrouped(polkiTotalReturnQtySum, { maxFractionDigits: 3 })}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-foreground">
+                <td className="px-2 py-2 text-right tabular-nums text-foreground text-sm">
                   {formatNumberGrouped(polkiVolumeM3, { maxFractionDigits: 4 })}
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-teal-800 dark:text-teal-200">
-                  {polkiEstimatedSum > 0
-                    ? formatNumberGrouped(polkiEstimatedSum, { maxFractionDigits: 0 })
-                    : "—"}
+                  <span className="ml-3 inline-block tabular-nums text-teal-800 dark:text-teal-200">
+                    {polkiEstimatedSum > 0
+                      ? formatNumberGrouped(polkiEstimatedSum, { maxFractionDigits: 0 })
+                      : "—"}
+                  </span>
                 </td>
               </tr>
+              {polkiDebtHintSum > 0 ? (
+                <tr className="border-t border-border bg-amber-500/10 text-[11px] text-amber-950 dark:text-amber-100">
+                  <td colSpan={POLKI_TABLE_COLS} className="px-2 py-1.5 font-medium">
+                    Суммарно «к долгу» по бонусу (компенсация меньше расчёта):{" "}
+                    <span className="tabular-nums">
+                      {formatNumberGrouped(polkiDebtHintSum, { maxFractionDigits: 0 })}
+                    </span>{" "}
+                    — оформите в карточке клиента / оплатах при необходимости.
+                  </td>
+                </tr>
+              ) : null}
             </tfoot>
           ) : null}
         </table>
@@ -478,6 +603,260 @@ function unitPriceForType(p: ProductRow, priceTypeKey: string): string | null {
   const want = priceTypeKey.trim().toLowerCase();
   const exact = list.find((x) => x.price_type.trim().toLowerCase() === want);
   return exact?.price ?? null;
+}
+
+type PolkiOrderPickRow = {
+  id: number;
+  number: string;
+  status: string;
+  created_at: string;
+  order_type?: string | null;
+  qty?: string;
+  total_sum?: string;
+  bonus_qty?: string;
+  bonus_sum?: string;
+  warehouse_name?: string | null;
+};
+
+/** Polki «по заказу»: faqat sotuv zakazi; bekor va VR-ko‘zgu hujjatlari tanlanmaydi. */
+function isPolkiShelfSourceOrder(o: PolkiOrderPickRow): boolean {
+  if (o.status === "cancelled") return false;
+  const t = (o.order_type ?? "order").trim();
+  return t === "order";
+}
+
+/** Возврат с полки по заказу — только со статусом «доставлен». */
+function isPolkiReturnByOrderPickable(o: PolkiOrderPickRow): boolean {
+  if (!isPolkiShelfSourceOrder(o)) return false;
+  return o.status.trim().toLowerCase() === "delivered";
+}
+
+function polkiOrderRowHasBonus(o: PolkiOrderPickRow): boolean {
+  const bq = parseStockQty(o.bonus_qty);
+  if (bq > 0) return true;
+  return parsePriceAmount(o.bonus_sum ?? "0") > 0;
+}
+
+/** Polki sahifalarida klient: server qidiruv + dropdown (200 ta cheklovsiz). */
+function PolkiClientSearchSelect({
+  tenantSlug,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  className,
+  selectedLabel,
+  "data-testid": testId,
+  id: inputId
+}: {
+  tenantSlug: string | null;
+  value: string;
+  onValueChange: (id: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+  selectedLabel: string | null;
+  "data-testid"?: string;
+  id?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [draftSearch, setDraftSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 320 });
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(draftSearch), 300);
+    return () => clearTimeout(t);
+  }, [draftSearch]);
+
+  useEffect(() => {
+    if (!open) {
+      setDraftSearch("");
+      setDebouncedSearch("");
+    }
+  }, [open]);
+
+  const pickerQ = useQuery({
+    queryKey: ["clients", tenantSlug, "polki-client-search", debouncedSearch.trim()],
+    enabled: Boolean(tenantSlug) && open,
+    staleTime: STALE.list,
+    queryFn: async () => {
+      const sp = new URLSearchParams({ page: "1", limit: "50", is_active: "true" });
+      const q = debouncedSearch.trim();
+      if (q) sp.set("search", q);
+      const { data } = await api.get<{ data: ClientRow[] }>(
+        `/api/${tenantSlug}/clients?${sp.toString()}`
+      );
+      return data.data ?? [];
+    }
+  });
+
+  const updatePosition = useCallback(() => {
+    const t = triggerRef.current;
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+    const w = Math.min(Math.max(r.width, 280), vw - 16);
+    let left = r.left;
+    if (left + w > vw - 8) left = Math.max(8, vw - w - 8);
+    setCoords({ top: r.bottom + 6, left, width: w });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updatePosition) : null;
+    if (ro && triggerRef.current) ro.observe(triggerRef.current);
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setTimeout(() => searchInputRef.current?.focus(), 50);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const node = e.target as Node;
+      if (triggerRef.current?.contains(node)) return;
+      if (popRef.current?.contains(node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const rows = pickerQ.data ?? [];
+  const valueNum = value.trim() ? Number.parseInt(value.trim(), 10) : NaN;
+  const showPlaceholder = !value.trim() || !selectedLabel;
+
+  const popover = (
+    <div
+      ref={popRef}
+      id={listId}
+      role="listbox"
+      aria-label="Клиенты"
+      className="fixed z-[500] flex max-h-[min(55vh,400px)] flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-lg ring-1 ring-black/5 dark:ring-white/10"
+      style={{ top: coords.top, left: coords.left, width: coords.width }}
+    >
+      <div className="relative shrink-0 border-b border-border/60 px-3 py-2">
+        <Search
+          className="pointer-events-none absolute left-5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden
+        />
+        <Input
+          ref={searchInputRef}
+          className="h-9 border-input bg-background pl-9 text-sm shadow-none"
+          placeholder="Имя, телефон, ИНН…"
+          value={draftSearch}
+          onChange={(e) => setDraftSearch(e.target.value)}
+          onMouseDown={(e) => e.stopPropagation()}
+          aria-label="Поиск клиента"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {pickerQ.isLoading ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">Загрузка…</p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            {debouncedSearch.trim() ? "Ничего не найдено" : "Нет клиентов"}
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/60">
+            {rows.map((c) => {
+              const selected = Number.isFinite(valueNum) && c.id === valueNum;
+              const subtitle = [c.phone, c.inn].filter(Boolean).join(" · ") || null;
+              return (
+                <li key={c.id} role="option" aria-selected={selected}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/50",
+                      selected && "bg-primary/[0.06]"
+                    )}
+                    onClick={() => {
+                      onValueChange(String(c.id));
+                      setOpen(false);
+                    }}
+                  >
+                    {selected ? (
+                      <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                    ) : (
+                      <span className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      {subtitle ? (
+                        <span className="block font-mono text-[10px] font-medium leading-tight text-muted-foreground">
+                          {subtitle}
+                        </span>
+                      ) : null}
+                      <span className="block leading-snug">{c.name}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      <div className="shrink-0 border-t border-border/60 bg-muted/20 px-3 py-1.5 text-[10px] text-muted-foreground">
+        Показано: <span className="font-medium tabular-nums text-foreground/80">{rows.length}</span>
+        {debouncedSearch.trim() ? " (поиск)" : ""} · до 50 строк
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={cn("min-w-0", className)}>
+      <button
+        ref={triggerRef}
+        id={inputId}
+        type="button"
+        data-testid={testId}
+        disabled={disabled}
+        className={cn(
+          fieldClass,
+          "flex items-center justify-between gap-2 text-left",
+          !disabled && "cursor-pointer hover:bg-muted/30"
+        )}
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-haspopup="listbox"
+        onClick={() => !disabled && setOpen((v) => !v)}
+      >
+        <span className={cn("min-w-0 flex-1 truncate", showPlaceholder && "text-muted-foreground")}>
+          {showPlaceholder ? (placeholder ?? "Выберите клиента") : selectedLabel}
+        </span>
+        <ChevronDown
+          className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+          aria-hidden
+        />
+      </button>
+      {mounted && open && tenantSlug ? createPortal(popover, document.body) : null}
+    </div>
+  );
 }
 
 export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderType }: Props) {
@@ -507,11 +886,21 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const [orderOpenedAt] = useState(() => new Date());
   const [polkiDateFrom, setPolkiDateFrom] = useState("");
   const [polkiDateTo, setPolkiDateTo] = useState("");
-  const [polkiOrderId, setPolkiOrderId] = useState("");
+  const polkiRangeAnchorRef = useRef<HTMLElement | null>(null);
+  const [polkiRangeOpen, setPolkiRangeOpen] = useState(false);
+  const [polkiOrderIds, setPolkiOrderIds] = useState<number[]>([]);
+  const [polkiTotalQty, setPolkiTotalQty] = useState<Record<string, string>>({});
+  const [polkiBonusToBalance, setPolkiBonusToBalance] = useState<Record<string, boolean>>({});
+  const [polkiBonusCash, setPolkiBonusCash] = useState<Record<string, string>>({});
   const [refusalReasonRefPolki, setRefusalReasonRefPolki] = useState("");
   const [polkiHeaderDate, setPolkiHeaderDate] = useState("");
   const [polkiTradeDirection, setPolkiTradeDirection] = useState("");
   const [polkiSkidkaType, setPolkiSkidkaType] = useState("none");
+
+  const polkiOrderIdsSortedKey = useMemo(
+    () => [...polkiOrderIds].sort((a, b) => a - b).join(","),
+    [polkiOrderIds]
+  );
 
   useEffect(() => {
     setQtyByProductId({});
@@ -522,7 +911,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     if (!isPolkiSheet) return;
     setQtyByProductId({});
     setBlockByProductId({});
-  }, [isPolkiSheet, polkiDateFrom, polkiDateTo, polkiOrderId, clientId]);
+    setPolkiTotalQty({});
+    setPolkiBonusToBalance({});
+    setPolkiBonusCash({});
+  }, [isPolkiSheet, polkiDateFrom, polkiDateTo, clientId]);
 
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "order-form"],
@@ -607,10 +999,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   });
 
   const clientIdNum = clientId.trim() ? Number.parseInt(clientId.trim(), 10) : NaN;
-  const polkiOrderNum = polkiOrderId.trim() ? Number.parseInt(polkiOrderId.trim(), 10) : NaN;
 
   type ClientReturnDataPolki = {
     polki_scope?: "period" | "order";
+    orders?: Array<{
+      id: number;
+      number: string;
+      created_at: string;
+    }>;
     items: Array<{
       product_id: number;
       sku: string;
@@ -619,6 +1015,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       qty: string;
       price: string;
       is_bonus: boolean;
+      order_id?: number;
+      order_number?: string;
     }>;
     max_returnable_value: string;
   };
@@ -630,12 +1028,46 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     ),
     staleTime: STALE.list,
     queryFn: async () => {
-      const { data: body } = await api.get<{
-        data: Array<{ id: number; number: string; status: string; created_at: string }>;
-      }>(`/api/${tenantSlug}/orders?page=1&limit=100&client_id=${clientIdNum}`);
+      const { data: body } = await api.get<{ data: PolkiOrderPickRow[] }>(
+        `/api/${tenantSlug}/orders?page=1&limit=100&client_id=${clientIdNum}`
+      );
       return body.data ?? [];
     }
   });
+
+  const polkiOrdersForPick = useMemo(
+    () => (polkiOrdersPickQ.data ?? []).filter(isPolkiReturnByOrderPickable),
+    [polkiOrdersPickQ.data]
+  );
+
+  const polkiOrdersPickRawCount = polkiOrdersPickQ.data?.length ?? 0;
+
+  const polkiOrderPickHalfLists = useMemo((): [PolkiOrderPickRow[], PolkiOrderPickRow[]] => {
+    const list = polkiOrdersForPick;
+    const mid = Math.ceil(list.length / 2);
+    return [list.slice(0, mid), list.slice(mid)];
+  }, [polkiOrdersForPick]);
+
+  useEffect(() => {
+    if (!isPolkiByOrder) return;
+    const valid = new Set(polkiOrdersForPick.map((o) => o.id));
+    setPolkiOrderIds((prev) => {
+      const next = prev.filter((id) => valid.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [isPolkiByOrder, polkiOrdersForPick]);
+
+  const togglePolkiOrderPick = (id: number, checked: boolean) => {
+    setPolkiOrderIds((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id];
+      return prev.filter((x) => x !== id);
+    });
+  };
+
+  const togglePolkiOrdersSelectAll = (checked: boolean) => {
+    if (checked) setPolkiOrderIds(polkiOrdersForPick.map((o) => o.id));
+    else setPolkiOrderIds([]);
+  };
 
   useEffect(() => {
     if (!isPolkiSheet) return;
@@ -645,11 +1077,16 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       else setPolkiHeaderDate(new Date().toISOString().slice(0, 10));
       return;
     }
-    if (isPolkiByOrder && polkiOrderId.trim()) {
-      const oid = Number.parseInt(polkiOrderId, 10);
-      const o = (polkiOrdersPickQ.data ?? []).find((x) => x.id === oid);
-      if (o?.created_at) {
-        setPolkiHeaderDate(String(o.created_at).slice(0, 10));
+    if (isPolkiByOrder && polkiOrderIds.length > 0) {
+      const orders = polkiOrdersForPick;
+      let best = "";
+      for (const id of polkiOrderIds) {
+        const o = orders.find((x) => x.id === id);
+        const ca = o?.created_at ? String(o.created_at).slice(0, 10) : "";
+        if (ca && (!best || ca > best)) best = ca;
+      }
+      if (best) {
+        setPolkiHeaderDate(best);
         return;
       }
     }
@@ -660,8 +1097,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     isPolkiByOrder,
     polkiDateFrom,
     polkiDateTo,
-    polkiOrderId,
-    polkiOrdersPickQ.data
+    polkiOrderIds,
+    polkiOrdersForPick
   ]);
 
   const polkiContextQ = useQuery({
@@ -671,7 +1108,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       clientIdNum,
       polkiDateFrom,
       polkiDateTo,
-      polkiOrderNum,
+      polkiOrderIdsSortedKey,
       isPolkiFree,
       isPolkiByOrder
     ],
@@ -680,7 +1117,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         isPolkiSheet &&
         Number.isFinite(clientIdNum) &&
         clientIdNum > 0 &&
-        (isPolkiFree || (isPolkiByOrder && Number.isFinite(polkiOrderNum) && polkiOrderNum > 0))
+        (isPolkiFree || (isPolkiByOrder && polkiOrderIds.length > 0))
     ),
     staleTime: STALE.detail,
     queryFn: async () => {
@@ -688,8 +1125,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       if (isPolkiFree) {
         if (polkiDateFrom) params.set("date_from", polkiDateFrom);
         if (polkiDateTo) params.set("date_to", polkiDateTo);
-      } else {
-        params.set("order_id", String(polkiOrderNum));
+      } else if (polkiOrderIds.length > 1) {
+        params.set("order_ids", [...polkiOrderIds].sort((a, b) => a - b).join(","));
+      } else if (polkiOrderIds.length === 1) {
+        params.set("order_id", String(polkiOrderIds[0]));
       }
       const { data } = await api.get<ClientReturnDataPolki>(
         `/api/${tenantSlug}/returns/client-data?${params.toString()}`
@@ -704,6 +1143,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     staleTime: STALE.detail,
     queryFn: async () => {
       const { data } = await api.get<{
+        name: string;
+        phone: string | null;
         account_balance: string;
         credit_limit: string;
         open_orders_total: string;
@@ -754,6 +1195,21 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   });
 
   const clients = clientsQ.data ?? [];
+  const polkiSelectedClientLabel = useMemo(() => {
+    if (!clientId.trim()) return null;
+    const id = Number.parseInt(clientId.trim(), 10);
+    if (!Number.isFinite(id) || id < 1) return null;
+    const fromList = clients.find((c) => c.id === id);
+    if (fromList) {
+      return `${fromList.name}${fromList.phone ? ` · ${fromList.phone}` : ""}`;
+    }
+    if (clientSummaryQ.isFetching) return "Загрузка…";
+    const d = clientSummaryQ.data;
+    if (d?.name) {
+      return `${d.name}${d.phone ? ` · ${d.phone}` : ""}`;
+    }
+    return `Клиент #${id}`;
+  }, [clientId, clients, clientSummaryQ.data, clientSummaryQ.isFetching]);
   const products = productsQ.data ?? [];
   const warehouses = warehousesQ.data ?? [];
   const users = usersQ.data ?? [];
@@ -774,21 +1230,53 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   );
   const selectedCategoryNum = selectedCategoryId ? Number.parseInt(selectedCategoryId, 10) : null;
 
-  const polkiRowsAll = useMemo((): PolkiRowModel[] => {
+  const polkiRowsAll = useMemo((): PolkiPairRowModel[] => {
     if (!isPolkiSheet || !polkiContextQ.data?.items?.length) return [];
-    return buildPolkiRowsFromClientData(polkiContextQ.data.items, products);
+    return buildPolkiPairRows(polkiContextQ.data.items as PolkiClientItem[], products);
   }, [isPolkiSheet, polkiContextQ.data?.items, products]);
 
-  const polkiRowsFiltered = useMemo(() => {
-    if (!isPolkiSheet) return [] as PolkiRowModel[];
+  const polkiLineKeySet = useMemo(
+    () => new Set(polkiRowsAll.map((r) => r.pair_key)),
+    [polkiRowsAll]
+  );
+  useEffect(() => {
+    if (!isPolkiSheet) return;
+    const pruneRecord = <T,>(prev: Record<string, T>): Record<string, T> => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!polkiLineKeySet.has(k)) delete next[k];
+      }
+      return next;
+    };
+    setPolkiTotalQty((p) => pruneRecord(p));
+    setPolkiBonusCash((p) => pruneRecord(p));
+    setPolkiBonusToBalance((p) => pruneRecord(p));
+  }, [isPolkiSheet, polkiLineKeySet]);
+
+  const polkiOrderDateById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const o of polkiContextQ.data?.orders ?? []) {
+      const d = o.created_at ? String(o.created_at).slice(0, 10) : "";
+      m.set(o.id, d);
+    }
+    for (const o of polkiOrdersForPick) {
+      if (m.has(o.id)) continue;
+      const d = o.created_at ? String(o.created_at).slice(0, 10) : "";
+      if (d) m.set(o.id, d);
+    }
+    return m;
+  }, [polkiContextQ.data?.orders, polkiOrdersForPick]);
+
+  const polkiRowsFiltered = useMemo((): PolkiPairRowModel[] => {
+    if (!isPolkiSheet) return [];
     return polkiRowsAll.filter((r) => {
       if (selectedCategoryNum != null && r.category_id !== selectedCategoryNum) return false;
       return true;
     });
   }, [isPolkiSheet, polkiRowsAll, selectedCategoryNum]);
 
-  const polkiDisplayRows = useMemo(() => {
-    if (!isPolkiSheet) return [] as PolkiRowModel[];
+  const polkiDisplayRows = useMemo((): PolkiPairRowModel[] => {
+    if (!isPolkiSheet) return [];
     const n = productSearch.trim().toLowerCase();
     if (!n) return polkiRowsFiltered;
     return polkiRowsFiltered.filter(
@@ -796,69 +1284,160 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     );
   }, [isPolkiSheet, polkiRowsFiltered, productSearch]);
 
+  const polkiOrderGroups = useMemo((): PolkiOrderGroup[] => {
+    if (!isPolkiSheet) return [];
+    const byOrder = new Map<number, PolkiPairRowModel[]>();
+    for (const r of polkiDisplayRows) {
+      const arr = byOrder.get(r.order_id) ?? [];
+      arr.push(r);
+      byOrder.set(r.order_id, arr);
+    }
+    return Array.from(byOrder.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([orderId, rows]) => ({
+        orderId,
+        orderNumber: rows[0]?.order_number ?? String(orderId),
+        orderDate: polkiOrderDateById.get(orderId) ?? "",
+        rows
+      }));
+  }, [isPolkiSheet, polkiDisplayRows, polkiOrderDateById]);
+
   const hasPolkiQtyOverMax = useMemo(() => {
     if (!isPolkiSheet) return false;
     for (const r of polkiRowsAll) {
-      const raw = qtyByProductId[r.product_id];
-      if (!raw?.trim()) continue;
-      const q = Number.parseFloat(raw.replace(",", "."));
-      if (!Number.isFinite(q) || q <= 0) continue;
-      if (q > r.max_qty) return true;
+      const pk = r.pair_key;
+      const tr = polkiTotalQty[pk] ?? "";
+      if (!tr.trim()) continue;
+      const tq = Number.parseFloat(tr.replace(",", "."));
+      if (Number.isFinite(tq) && tq > 0 && tq > r.max_paid + r.max_bonus) return true;
     }
     return false;
-  }, [isPolkiSheet, polkiRowsAll, qtyByProductId]);
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty]);
+
+  const hasPolkiBonusCashOverMax = useMemo(() => {
+    if (!isPolkiSheet) return false;
+    for (const r of polkiRowsAll) {
+      if (r.max_bonus <= 0) continue;
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effPaid, effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const bq = defer ? 0 : effBonus;
+      const maxCash = defer
+        ? r.max_bonus * r.unit_price_bonus
+        : Math.max(0, (r.max_bonus - bq) * r.unit_price_bonus);
+      const cash = parsePriceAmount(polkiBonusCash[pk] ?? "");
+      if (cash > maxCash + 1e-6) return true;
+    }
+    return false;
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance, polkiBonusCash]);
 
   const polkiTotalReturnQtySum = useMemo(() => {
     if (!isPolkiSheet) return 0;
     let s = 0;
     for (const r of polkiRowsAll) {
-      const raw = qtyByProductId[r.product_id];
-      const q = Number.parseFloat((raw ?? "").replace(",", "."));
-      if (!Number.isFinite(q) || q <= 0) continue;
-      s += Math.min(q, r.max_qty);
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effPaid, effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const physBonus = defer ? 0 : effBonus;
+      s += effPaid + physBonus;
     }
     return s;
-  }, [isPolkiSheet, polkiRowsAll, qtyByProductId]);
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance]);
+
+  const polkiTotalBonusCashSum = useMemo(() => {
+    if (!isPolkiSheet) return 0;
+    let t = 0;
+    for (const r of polkiRowsAll) {
+      if (r.max_bonus <= 0) continue;
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const bq = defer ? 0 : effBonus;
+      const maxCash = defer
+        ? r.max_bonus * r.unit_price_bonus
+        : Math.max(0, (r.max_bonus - bq) * r.unit_price_bonus);
+      const cash = parsePriceAmount(polkiBonusCash[pk] ?? "");
+      t += Math.min(cash, maxCash);
+    }
+    return t;
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance, polkiBonusCash]);
+
+  const polkiDebtHintSum = useMemo(() => {
+    if (!isPolkiSheet) return 0;
+    let d = 0;
+    for (const r of polkiRowsAll) {
+      if (!polkiBonusToBalance[r.pair_key]) continue;
+      const total = Number.parseFloat((polkiTotalQty[r.pair_key] ?? "").replace(",", "."));
+      const { effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      if (effBonus <= 0) continue;
+      const suggested = effBonus * r.unit_price_bonus;
+      const maxC = r.max_bonus * r.unit_price_bonus;
+      const cash = Math.min(parsePriceAmount(polkiBonusCash[r.pair_key] ?? ""), maxC);
+      d += Math.max(0, suggested - cash);
+    }
+    return d;
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance, polkiBonusCash]);
 
   const polkiSelectedLinesCount = useMemo(() => {
     if (!isPolkiSheet) return 0;
     let n = 0;
     for (const r of polkiRowsAll) {
-      const raw = qtyByProductId[r.product_id];
-      const q = Number.parseFloat((raw ?? "").replace(",", "."));
-      if (Number.isFinite(q) && q > 0) n++;
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effPaid, effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const bq = defer ? 0 : effBonus;
+      const maxCash =
+        r.max_bonus > 0
+          ? defer
+            ? r.max_bonus * r.unit_price_bonus
+            : Math.max(0, (r.max_bonus - bq) * r.unit_price_bonus)
+          : 0;
+      const effCash = r.max_bonus > 0 ? Math.min(parsePriceAmount(polkiBonusCash[pk] ?? ""), maxCash) : 0;
+      if (effPaid + bq + effCash > 0) n++;
     }
     return n;
-  }, [isPolkiSheet, polkiRowsAll, qtyByProductId]);
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance, polkiBonusCash]);
 
   const polkiEstimatedSum = useMemo(() => {
     if (!isPolkiSheet) return 0;
     let t = 0;
     for (const r of polkiRowsAll) {
-      const raw = qtyByProductId[r.product_id];
-      if (!raw?.trim()) continue;
-      const q = Number.parseFloat(raw.replace(",", "."));
-      if (!Number.isFinite(q) || q <= 0) continue;
-      const eff = Math.min(q, r.max_qty);
-      t += eff * r.unit_price;
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effPaid, effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const bq = defer ? 0 : effBonus;
+      const maxCash =
+        r.max_bonus > 0
+          ? defer
+            ? r.max_bonus * r.unit_price_bonus
+            : Math.max(0, (r.max_bonus - bq) * r.unit_price_bonus)
+          : 0;
+      const cash = r.max_bonus > 0 ? Math.min(parsePriceAmount(polkiBonusCash[pk] ?? ""), maxCash) : 0;
+      t += effPaid * r.unit_price_paid;
+      t += cash;
     }
     return t;
-  }, [isPolkiSheet, polkiRowsAll, qtyByProductId]);
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance, polkiBonusCash]);
 
   const polkiVolumeM3 = useMemo(() => {
     if (!isPolkiSheet) return 0;
     let v = 0;
     for (const r of polkiRowsAll) {
-      const raw = qtyByProductId[r.product_id];
-      if (!raw?.trim()) continue;
-      const q = Number.parseFloat(raw.replace(",", "."));
-      if (!Number.isFinite(q) || q <= 0) continue;
-      const eff = Math.min(q, r.max_qty);
+      const pk = r.pair_key;
+      const total = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+      const { effPaid, effBonus } = polkiSplitTotal(r, Number.isFinite(total) ? total : 0);
+      const defer = Boolean(polkiBonusToBalance[pk]);
+      const physBonus = defer ? 0 : effBonus;
       const vol = r.volume_m3 != null ? Number.parseFloat(String(r.volume_m3)) : NaN;
-      if (Number.isFinite(vol)) v += eff * vol;
+      if (Number.isFinite(vol) && effPaid + physBonus > 0) v += (effPaid + physBonus) * vol;
     }
     return v;
-  }, [isPolkiSheet, polkiRowsAll, qtyByProductId]);
+  }, [isPolkiSheet, polkiRowsAll, polkiTotalQty, polkiBonusToBalance]);
 
   const catalogProducts = useMemo(() => {
     const stockMap = new Map((stockQ.data ?? []).map((s) => [s.product_id, s]));
@@ -995,33 +1574,65 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         if (!Number.isFinite(cid) || cid < 1) throw new Error("client");
         const wid = Number.parseInt(warehouseId, 10);
         if (!warehouseId.trim() || !Number.isFinite(wid) || wid < 1) throw new Error("warehouse");
-        if (isPolkiByOrder && (!Number.isFinite(polkiOrderNum) || polkiOrderNum < 1)) {
+        if (isPolkiByOrder && polkiOrderIds.length < 1) {
           throw new Error("polki_order");
         }
-        const lines: { product_id: number; qty: number }[] = [];
-        let sumQty = 0;
+        const distinctOrderCount = new Set(polkiRowsAll.map((row) => row.order_id)).size;
+        const usePeriodBatch =
+          (isPolkiByOrder && polkiOrderIds.length > 1) ||
+          (isPolkiFree && distinctOrderCount > 1);
+
+        let sumPhysical = 0;
+        const batchLines: {
+          order_id: number;
+          product_id: number;
+          paid_qty: number;
+          bonus_qty: number;
+          bonus_cash: number;
+        }[] = [];
+        const periodMerge = new Map<number, { paid: number; bonus: number; cash: number }>();
+
         for (const r of polkiRowsAll) {
-          const raw = qtyByProductId[r.product_id];
-          if (!raw?.trim()) continue;
-          const q = Number.parseFloat(raw.replace(",", "."));
-          if (!Number.isFinite(q) || q <= 0) continue;
-          if (q > r.max_qty) throw new Error("polki_qty_over");
-          lines.push({ product_id: r.product_id, qty: q });
-          sumQty += q;
+          const pk = r.pair_key;
+          const totalParsed = Number.parseFloat((polkiTotalQty[pk] ?? "").replace(",", "."));
+          const { effPaid, effBonus } = polkiSplitTotal(
+            r,
+            Number.isFinite(totalParsed) ? totalParsed : 0
+          );
+          const defer = Boolean(polkiBonusToBalance[pk]);
+          const pq = effPaid;
+          const bq = defer ? 0 : effBonus;
+          let cash = parsePriceAmount(polkiBonusCash[pk] ?? "");
+          const maxCash =
+            r.max_bonus > 0
+              ? defer
+                ? r.max_bonus * r.unit_price_bonus
+                : Math.max(0, (r.max_bonus - bq) * r.unit_price_bonus)
+              : 0;
+          if (r.max_bonus <= 0) cash = 0;
+          else cash = Math.min(cash, maxCash);
+
+          if (pq + bq + cash <= 0) continue;
+          sumPhysical += pq + bq;
+          if (usePeriodBatch) {
+            const oid = r.order_id;
+            if (!oid || oid < 1) throw new Error("polki_missing_order");
+            batchLines.push({
+              order_id: oid,
+              product_id: r.product_id,
+              paid_qty: pq,
+              bonus_qty: bq,
+              bonus_cash: cash
+            });
+          } else {
+            const cur = periodMerge.get(r.product_id) ?? { paid: 0, bonus: 0, cash: 0 };
+            cur.paid += pq;
+            cur.bonus += bq;
+            cur.cash += cash;
+            periodMerge.set(r.product_id, cur);
+          }
         }
-        if (lines.length === 0) throw new Error("nolines");
-        if (sumQty > MAX_POLKI_RETURN_QTY) throw new Error("polki_too_many");
-        const body: Record<string, unknown> = {
-          client_id: cid,
-          warehouse_id: wid,
-          lines
-        };
-        if (isPolkiFree) {
-          if (polkiDateFrom) body.date_from = polkiDateFrom;
-          if (polkiDateTo) body.date_to = polkiDateTo;
-        } else {
-          body.order_id = polkiOrderNum;
-        }
+        if (sumPhysical > MAX_POLKI_RETURN_QTY) throw new Error("polki_too_many");
         const noteParts: string[] = [];
         if (polkiHeaderDate.trim()) noteParts.push(`Дата заявки: ${polkiHeaderDate.trim()}`);
         if (polkiTradeDirection.trim()) {
@@ -1043,6 +1654,41 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         }
         if (orderComment.trim()) noteParts.push(orderComment.trim());
         const noteJoined = noteParts.join("\n").trim();
+
+        if (usePeriodBatch) {
+          if (batchLines.length === 0) throw new Error("nolines");
+          const body: Record<string, unknown> = {
+            client_id: cid,
+            warehouse_id: wid,
+            lines: batchLines
+          };
+          if (noteJoined) body.note = noteJoined;
+          if (refusalReasonRefPolki.trim()) body.refusal_reason_ref = refusalReasonRefPolki.trim();
+          await api.post(`/api/${tenantSlug}/returns/period-batch`, body);
+          return;
+        }
+
+        const lines = Array.from(periodMerge.entries())
+          .map(([product_id, v]) => ({
+            product_id,
+            paid_qty: v.paid,
+            bonus_qty: v.bonus,
+            bonus_cash: v.cash
+          }))
+          .filter((l) => l.paid_qty + l.bonus_qty + l.bonus_cash > 0);
+        if (lines.length === 0) throw new Error("nolines");
+
+        const body: Record<string, unknown> = {
+          client_id: cid,
+          warehouse_id: wid,
+          lines
+        };
+        if (isPolkiFree) {
+          if (polkiDateFrom) body.date_from = polkiDateFrom;
+          if (polkiDateTo) body.date_to = polkiDateTo;
+        } else if (polkiOrderIds.length === 1) {
+          body.order_id = polkiOrderIds[0];
+        }
         if (noteJoined) body.note = noteJoined;
         if (refusalReasonRefPolki.trim()) body.refusal_reason_ref = refusalReasonRefPolki.trim();
         await api.post(`/api/${tenantSlug}/returns/period`, body);
@@ -1123,6 +1769,48 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       onCreated();
     },
     onError: (e: Error) => {
+      if (isPolkiSheet) {
+        if (e.message === "warehouse") {
+          setLocalError("Выберите склад возврата.");
+          return;
+        }
+        if (e.message === "client") {
+          setLocalError("Выберите клиента.");
+          return;
+        }
+        if (e.message === "polki_order") {
+          setLocalError(
+            "Отметьте хотя бы один заказ со статусом «Доставлен» (доступны только такие заказы)."
+          );
+          return;
+        }
+        if (e.message === "polki_missing_order") {
+          setLocalError("Для строки не указан заказ — обновите страницу.");
+          return;
+        }
+        if (e.message === "polki_qty_over") {
+          setLocalError("Количество возврата не больше проданного.");
+          return;
+        }
+        if (e.message === "polki_too_many") {
+          setLocalError(
+            `В одном документе не более ${MAX_POLKI_RETURN_QTY} шт к возврату на склад.`
+          );
+          return;
+        }
+        if (e.message === "nolines") {
+          setLocalError("Укажите хотя бы одну позицию с количеством или компенсацией бонуса.");
+          return;
+        }
+        if (e.message === "qty") {
+          setLocalError("Во всех строках количество должно быть положительным.");
+          return;
+        }
+        if (e.message === "qty_over_stock") {
+          setLocalError("Количество не больше остатка по каждой позиции.");
+          return;
+        }
+      }
       if (e.message === "warehouse") {
         setLocalError("Omborni tanlash shart.");
         return;
@@ -1132,7 +1820,11 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         return;
       }
       if (e.message === "polki_order") {
-        setLocalError("«Zakaz bo‘yicha» rejimida zakazni tanlang.");
+        setLocalError("«Zakaz bo‘yicha» rejimida kamida bitta zakazni tanlang.");
+        return;
+      }
+      if (e.message === "polki_missing_order") {
+        setLocalError("Qator uchun zakaz identifikatori yo‘q — qayta yuklang.");
         return;
       }
       if (e.message === "polki_qty_over") {
@@ -1157,6 +1849,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }
       const ax = e as AxiosError<{
         error?: string;
+        message?: string;
         product_id?: number;
         credit_limit?: string;
         outstanding?: string;
@@ -1165,6 +1858,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }>;
       const code = ax.response?.data?.error;
       const d = ax.response?.data;
+      if (code === "DatabaseSchemaMismatch") {
+        const msg = d?.message?.trim();
+        setLocalError(
+          msg ||
+            "Bazada kerakli ustunlar yo‘q (migratsiya qo‘llanmagan). Backend papkasida: npm run db:deploy"
+        );
+        return;
+      }
       if (code === "ValidationError" && d?.details != null) {
         setLocalError(
           `Server tekshiruvi: ${typeof d.details === "string" ? d.details : JSON.stringify(d.details)}`
@@ -1233,6 +1934,16 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         setLocalError("Qaytarish miqdori sotilgan / buyurtma miqdoridan oshmasin.");
         return;
       }
+      if (code === "BonusCashExceeds") {
+        setLocalError(
+          "Bonus o‘rniga qaytariladigan naqd summa qolgan bonus qiymatidan oshmasin (dona + summa birgalikda hisoblanadi)."
+        );
+        return;
+      }
+      if (code === "DatabaseValidationError" && d?.message) {
+        setLocalError(String(d.message).slice(0, 500));
+        return;
+      }
       if (code === "NothingToReturn") {
         setLocalError("Qaytarish uchun mos pozitsiya yo‘q yoki limit tugagan.");
         return;
@@ -1258,7 +1969,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const canShowPolkiGrid =
     isPolkiSheet &&
     hasClient &&
-    (isPolkiFree || (isPolkiByOrder && Number.isFinite(polkiOrderNum) && polkiOrderNum > 0));
+    (isPolkiFree || (isPolkiByOrder && polkiOrderIds.length > 0));
 
   const stockReadyForLines = isPolkiSheet
     ? !polkiContextQ.isLoading && !polkiContextQ.isError
@@ -1270,12 +1981,13 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           hasWarehouse &&
           polkiContextQ.isSuccess &&
           polkiSelectedLinesCount > 0 &&
-          polkiTotalReturnQtySum > 0 &&
+          (polkiTotalReturnQtySum > 0 || polkiTotalBonusCashSum > 0) &&
           polkiTotalReturnQtySum <= MAX_POLKI_RETURN_QTY &&
           !hasPolkiQtyOverMax &&
+          !hasPolkiBonusCashOverMax &&
           !mutation.isPending &&
           stockReadyForLines &&
-          (isPolkiFree || (isPolkiByOrder && polkiOrderNum > 0))
+          (isPolkiFree || (isPolkiByOrder && polkiOrderIds.length > 0))
       )
     : Boolean(
         hasClient &&
@@ -1287,6 +1999,54 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           !hasQtyOverStock &&
           !hasMissingPriceForSelected
       );
+
+  /** Nega «Возврат» o‘chiq — foydalanuvchiga aniq sabab (rus.). */
+  const polkiSubmitBlockedReason = useMemo((): string | null => {
+    if (!isPolkiSheet || mutation.isPending) return null;
+    if (!hasClient) return "Выберите клиента.";
+    if (isPolkiByOrder && polkiOrderIds.length === 0) {
+      return "В блоке «Заказы» отметьте хотя бы один доставленный заказ.";
+    }
+    if (!hasWarehouse) return "Выберите склад возврата (блок «Параметры возврата»).";
+    if (polkiContextQ.isLoading) return "Загрузка состава возврата…";
+    if (polkiContextQ.isError) {
+      return "Не удалось загрузить состав. Проверьте клиента, заказы и сеть.";
+    }
+    if (!polkiContextQ.isSuccess) return "Ожидание данных для возврата…";
+    if (polkiSelectedLinesCount === 0) {
+      return "В «Состав заявки» введите количество к возврату или сумму компенсации бонуса хотя бы в одной строке.";
+    }
+    if (polkiTotalReturnQtySum <= 0 && polkiTotalBonusCashSum <= 0) {
+      return "Суммарно к возврату 0: укажите шт в колонке «всего к возврату» и/или сумму в блоке бонуса.";
+    }
+    if (polkiTotalReturnQtySum > MAX_POLKI_RETURN_QTY) {
+      return `Превышен лимит документа: не более ${MAX_POLKI_RETURN_QTY} шт на склад за раз (сейчас ${polkiTotalReturnQtySum}). Уменьшите количество или оформите несколько возвратов.`;
+    }
+    if (hasPolkiQtyOverMax) {
+      return "В строке введено больше, чем разрешено («макс. всего» к возврату).";
+    }
+    if (hasPolkiBonusCashOverMax) {
+      return "Сумма компенсации бонуса превышает допустимое значение для строки.";
+    }
+    if (!stockReadyForLines) return "Данные ещё не готовы…";
+    return null;
+  }, [
+    isPolkiSheet,
+    mutation.isPending,
+    hasClient,
+    isPolkiByOrder,
+    polkiOrderIds.length,
+    hasWarehouse,
+    polkiContextQ.isLoading,
+    polkiContextQ.isError,
+    polkiContextQ.isSuccess,
+    polkiSelectedLinesCount,
+    polkiTotalReturnQtySum,
+    polkiTotalBonusCashSum,
+    hasPolkiQtyOverMax,
+    hasPolkiBonusCashOverMax,
+    stockReadyForLines
+  ]);
 
   useEffect(() => {
     if (!hasClient) {
@@ -1314,7 +2074,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     polkiHeaderDate,
     polkiTradeDirection,
     polkiSkidkaType,
-    refusalReasonRefPolki
+    refusalReasonRefPolki,
+    polkiOrderIdsSortedKey
   ]);
 
   if (!tenantSlug) {
@@ -1341,7 +2102,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         }
         description={
           isPolkiSheet
-            ? "Дата, клиент, тип цены, склад возврата, категории и таблица состава — как в эталонной форме."
+            ? isPolkiByOrder
+              ? "Параметры и состав; по заказу — только доставленные заказы, можно выбрать несколько."
+              : "Компактные параметры и таблица состава возврата за период."
             : "Klient, ombor va mahsulot miqdorlari — to‘liq sahifa."
         }
         actions={
@@ -1362,19 +2125,21 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               title={
                 isPolkiSheet
                   ? !hasClient
-                    ? "Avval klientni tanlang"
-                    : isPolkiByOrder && !polkiOrderId
-                      ? "Zakazni tanlang"
+                    ? "Сначала выберите клиента"
+                    : isPolkiByOrder && polkiOrderIds.length === 0
+                      ? "Отметьте хотя бы один доставленный заказ"
                       : !hasWarehouse
-                        ? "Qaytarish omborini tanlang"
-                        : polkiTotalReturnQtySum <= 0
-                          ? "Kamida bitta mahsulot miqdorini kiriting"
+                        ? "Выберите склад возврата"
+                        : polkiTotalReturnQtySum <= 0 && polkiTotalBonusCashSum <= 0
+                          ? "Укажите количество к возврату или компенсацию бонуса"
                           : polkiTotalReturnQtySum > MAX_POLKI_RETURN_QTY
-                            ? `Jami qaytarish ${MAX_POLKI_RETURN_QTY} donadan oshmasin`
-                            : hasPolkiQtyOverMax
-                              ? "Miqdor sotilganidan oshmasin"
+                            ? `Не более ${MAX_POLKI_RETURN_QTY} шт на склад в одном документе`
+                            : hasPolkiBonusCashOverMax
+                              ? "Сумма компенсации вместо бонуса превышает допустимое"
+                              : hasPolkiQtyOverMax
+                              ? "Количество не больше проданного"
                               : !stockReadyForLines
-                                ? "Ma’lumotlar yuklanmoqda…"
+                                ? "Загрузка данных…"
                                 : undefined
                   : !hasClient
                     ? "Avval klientni tanlang"
@@ -1392,7 +2157,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               }
             >
               {mutation.isPending
-                ? "Saqlanmoqda…"
+                ? isPolkiSheet
+                  ? "Оформление…"
+                  : "Saqlanmoqda…"
                 : isPolkiSheet
                   ? "Возврат"
                   : "Yaratish"}
@@ -1401,7 +2168,12 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         }
       />
 
-      <div className="flex w-full min-w-0 flex-col gap-6 pb-32">
+      <div
+        className={cn(
+          "flex w-full min-w-0 flex-col",
+          isPolkiSheet ? "gap-4 pb-24" : "gap-6 pb-32"
+        )}
+      >
         {localError ? (
           <p className="text-sm text-destructive" role="alert">
             {localError}
@@ -1467,8 +2239,11 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             role="note"
           >
             <span className="font-medium text-foreground">Возврат с полки: </span>
-            список из продаж клиента; после проведения приход на{" "}
+            учитываются только продажи со статусом «{orderStatusLabelRu("delivered")}» (товар у клиента, возврат — на
+            склад); после проведения — приход на{" "}
             <span className="font-medium text-foreground">склад возврата</span>, суммы и бонусы считает сервер.
+            Повторный возврат по тому же заказу возможен, пока в строках остаётся количество к возврату (учтены
+            уже проведённые возвраты).
           </div>
         )}
 
@@ -1499,7 +2274,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 value={clientId}
                 onChange={(e) => {
                   setClientId(e.target.value);
-                  if (isPolkiByOrder) setPolkiOrderId("");
+                  if (isPolkiByOrder) setPolkiOrderIds([]);
                 }}
                 disabled={mutation.isPending || loadingLists}
               >
@@ -1556,52 +2331,29 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 ) : null}
               </div>
               {isPolkiFree ? (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Davr: dan</Label>
-                    <Input
-                      type="date"
-                      className={fieldClass}
-                      value={polkiDateFrom}
-                      onChange={(e) => setPolkiDateFrom(e.target.value)}
-                      disabled={mutation.isPending || !canPickWarehouse}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">gacha</Label>
-                    <Input
-                      type="date"
-                      className={fieldClass}
-                      value={polkiDateTo}
-                      onChange={(e) => setPolkiDateTo(e.target.value)}
-                      disabled={mutation.isPending || !canPickWarehouse}
-                    />
-                  </div>
-                </div>
-              ) : null}
-              {isPolkiByOrder ? (
-                <div className="space-y-2">
-                  <Label htmlFor="oc-polki-order">Zakaz (po zakazu)</Label>
-                  <FilterSelect
-                    id="oc-polki-order"
-                    className={fieldClass}
-                    emptyLabel="Zakazni tanlang"
-                    aria-label="Zakaz"
-                    value={polkiOrderId}
-                    onChange={(e) => setPolkiOrderId(e.target.value)}
-                    disabled={
-                      mutation.isPending || !canPickWarehouse || polkiOrdersPickQ.isLoading
-                    }
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Davr</Label>
+                  <button
+                    type="button"
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                      fieldClass,
+                      "h-10 justify-start gap-2 font-normal",
+                      polkiRangeOpen && "border-primary/60 bg-primary/5"
+                    )}
+                    aria-expanded={polkiRangeOpen}
+                    aria-haspopup="dialog"
+                    disabled={mutation.isPending || !canPickWarehouse}
+                    onClick={(e) => {
+                      polkiRangeAnchorRef.current = e.currentTarget;
+                      setPolkiRangeOpen((o) => !o);
+                    }}
                   >
-                    {(polkiOrdersPickQ.data ?? []).map((o) => (
-                      <option key={o.id} value={String(o.id)}>
-                        {o.number} · {o.status} · {new Date(o.created_at).toLocaleDateString()}
-                      </option>
-                    ))}
-                  </FilterSelect>
-                  {canPickWarehouse && !polkiOrdersPickQ.isLoading && (polkiOrdersPickQ.data?.length ?? 0) === 0 ? (
-                    <p className="text-[11px] text-muted-foreground">Bu mijoz uchun zakaz yo‘q.</p>
-                  ) : null}
+                    <CalendarDays className="h-4 w-4 shrink-0" />
+                    <span className="truncate text-sm">
+                      {formatDateRangeButton(polkiDateFrom, polkiDateTo)}
+                    </span>
+                  </button>
                 </div>
               ) : null}
               <div className="space-y-2">
@@ -1789,8 +2541,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           </>
           ) : (
           <>
-            <div className="mb-5 rounded-lg border border-teal-800/25 bg-gradient-to-br from-teal-50/90 via-card to-card p-4 dark:from-teal-950/35 dark:via-card">
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_minmax(0,18rem)] lg:items-end">
+            <div className="mb-3 rounded-lg border border-teal-800/25 bg-gradient-to-br from-teal-50/90 via-card to-card p-3 dark:from-teal-950/35 dark:via-card">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_minmax(0,16rem)] lg:items-end">
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="oc-polki-doc-date"
@@ -1814,26 +2566,19 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   >
                     Клиент
                   </Label>
-                  <FilterSelect
+                  <PolkiClientSearchSelect
                     id="oc-client-polki"
                     data-testid="order-create-client"
-                    className={fieldClass}
-                    emptyLabel="Выберите клиента"
-                    aria-label="Клиент"
+                    tenantSlug={tenantSlug}
                     value={clientId}
-                    onChange={(e) => {
-                      setClientId(e.target.value);
-                      if (isPolkiByOrder) setPolkiOrderId("");
-                    }}
+                    selectedLabel={polkiSelectedClientLabel}
+                    placeholder="Выберите клиента"
                     disabled={mutation.isPending || loadingLists}
-                  >
-                    {clients.map((c) => (
-                      <option key={c.id} value={String(c.id)}>
-                        {c.name}
-                        {c.phone ? ` · ${c.phone}` : ""}
-                      </option>
-                    ))}
-                  </FilterSelect>
+                    onValueChange={(id) => {
+                      setClientId(id);
+                      if (isPolkiByOrder) setPolkiOrderIds([]);
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1858,7 +2603,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                           onChange={() => setPriceType(t)}
                           disabled={mutation.isPending || priceTypesQ.isLoading}
                         />
-                        <span className="capitalize">{t}</span>
+                        <span>{POLKI_PRICE_TYPE_LABEL_RU[t] ?? t}</span>
                       </label>
                     ))}
                   </div>
@@ -1866,203 +2611,300 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     <input type="checkbox" disabled className="size-3.5 rounded border-input" />
                     Старые цены (скоро)
                   </label>
-                  <p className="text-[10px] leading-snug text-muted-foreground">
-                    Цены в таблице — из продажи; итог на сервере (бонусы).
-                  </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:gap-6">
-              <div className="space-y-3 xl:col-span-4">
-                <div className="rounded-lg border border-border bg-muted/20 p-4 shadow-sm">
-                  <h3 className="mb-3 border-b border-border pb-2.5 text-sm font-semibold tracking-tight text-foreground">
-                    Данные заявки
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="oc-warehouse-p">Склад для возврата</Label>
-                      <FilterSelect
-                        id="oc-warehouse-p"
-                        data-testid="order-create-warehouse"
-                        className={fieldClass}
-                        emptyLabel="Склад…"
-                        aria-label="Склад возврата"
-                        value={warehouseId}
-                        onChange={(e) => setWarehouseId(e.target.value)}
-                        disabled={mutation.isPending || loadingLists || !canPickWarehouse}
-                      >
-                        {warehouses.map((w) => (
-                          <option key={w.id} value={String(w.id)}>
-                            {w.name}
-                            {w.stock_purpose === "return" ? " · return" : ""}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                      {!canPickWarehouse ? (
-                        <p className="text-[11px] text-muted-foreground">Сначала выберите клиента.</p>
-                      ) : null}
-                    </div>
-                    {isPolkiFree ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Период с</Label>
-                          <Input
-                            type="date"
-                            className={fieldClass}
-                            value={polkiDateFrom}
-                            onChange={(e) => setPolkiDateFrom(e.target.value)}
-                            disabled={mutation.isPending || !canPickWarehouse}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">по</Label>
-                          <Input
-                            type="date"
-                            className={fieldClass}
-                            value={polkiDateTo}
-                            onChange={(e) => setPolkiDateTo(e.target.value)}
-                            disabled={mutation.isPending || !canPickWarehouse}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-                    {isPolkiByOrder ? (
-                      <div className="space-y-2">
-                        <Label htmlFor="oc-polki-order-p">Заказ</Label>
-                        <FilterSelect
-                          id="oc-polki-order-p"
-                          className={fieldClass}
-                          emptyLabel="Заказ…"
-                          aria-label="Заказ"
-                          value={polkiOrderId}
-                          onChange={(e) => setPolkiOrderId(e.target.value)}
-                          disabled={
-                            mutation.isPending || !canPickWarehouse || polkiOrdersPickQ.isLoading
-                          }
-                        >
-                          {(polkiOrdersPickQ.data ?? []).map((o) => (
-                            <option key={o.id} value={String(o.id)}>
-                              {o.number} · {o.status} · {new Date(o.created_at).toLocaleDateString()}
-                            </option>
-                          ))}
-                        </FilterSelect>
-                        {canPickWarehouse &&
-                        !polkiOrdersPickQ.isLoading &&
-                        (polkiOrdersPickQ.data?.length ?? 0) === 0 ? (
-                          <p className="text-[11px] text-muted-foreground">Нет заказов у клиента.</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="space-y-2">
-                      <Label htmlFor="oc-agent-p">Агент</Label>
-                      <FilterSelect
-                        id="oc-agent-p"
-                        className={fieldClass}
-                        emptyLabel="Не выбран"
-                        aria-label="Агент"
-                        value={agentId}
-                        onChange={(e) => setAgentId(e.target.value)}
-                        disabled={mutation.isPending || loadingLists || !canPickWarehouse}
-                      >
-                        {agentUsers.map((u) => (
-                          <option key={u.id} value={String(u.id)}>
-                            {u.login} · {u.name}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="oc-polki-trade">Направление торговли</Label>
-                      <select
-                        id="oc-polki-trade"
-                        className={fieldClass}
-                        value={polkiTradeDirection}
-                        onChange={(e) => setPolkiTradeDirection(e.target.value)}
-                        disabled={mutation.isPending}
-                      >
-                        {POLKI_TRADE_DIRECTION_OPTS.map((o) => (
-                          <option key={o.value || "__empty"} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="oc-polki-skidka">Тип скидки</Label>
-                      <select
-                        id="oc-polki-skidka"
-                        className={fieldClass}
-                        value={polkiSkidkaType}
-                        onChange={(e) => setPolkiSkidkaType(e.target.value)}
-                        disabled={mutation.isPending}
-                      >
-                        {POLKI_SKIDKA_OPTS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+            <div className="rounded-md border border-border bg-muted/15 p-3 shadow-sm">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Параметры возврата
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                <div className="space-y-1 sm:col-span-2 xl:col-span-2">
+                  <Label htmlFor="oc-warehouse-p" className="text-xs">
+                    Склад возврата
+                  </Label>
+                  <FilterSelect
+                    id="oc-warehouse-p"
+                    data-testid="order-create-warehouse"
+                    className={cn(fieldClass, "h-9")}
+                    emptyLabel="Склад…"
+                    aria-label="Склад возврата"
+                    value={warehouseId}
+                    onChange={(e) => setWarehouseId(e.target.value)}
+                    disabled={mutation.isPending || loadingLists || !canPickWarehouse}
+                  >
+                    {warehouses.map((w) => (
+                      <option key={w.id} value={String(w.id)}>
+                        {w.name}
+                        {w.stock_purpose === "return" ? " · возврат" : ""}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                  {!canPickWarehouse ? (
+                    <p className="text-[10px] text-muted-foreground">Сначала клиент.</p>
+                  ) : null}
+                </div>
+                {isPolkiFree ? (
+                  <div className="space-y-1 sm:col-span-2 xl:col-span-2">
+                    <Label className="text-xs text-muted-foreground">Период</Label>
+                    <button
+                      type="button"
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        fieldClass,
+                        "h-9 justify-start gap-2 font-normal",
+                        polkiRangeOpen && "border-primary/60 bg-primary/5"
+                      )}
+                      aria-expanded={polkiRangeOpen}
+                      aria-haspopup="dialog"
+                      disabled={mutation.isPending || !canPickWarehouse}
+                      onClick={(e) => {
+                        polkiRangeAnchorRef.current = e.currentTarget;
+                        setPolkiRangeOpen((o) => !o);
+                      }}
+                    >
+                      <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate text-xs">
+                        {formatDateRangeButton(polkiDateFrom, polkiDateTo)}
+                      </span>
+                    </button>
                   </div>
+                ) : null}
+                <div className="space-y-1">
+                  <Label htmlFor="oc-agent-p" className="text-xs">
+                    Агент
+                  </Label>
+                  <FilterSelect
+                    id="oc-agent-p"
+                    className={cn(fieldClass, "h-9")}
+                    emptyLabel="—"
+                    aria-label="Агент"
+                    value={agentId}
+                    onChange={(e) => setAgentId(e.target.value)}
+                    disabled={mutation.isPending || loadingLists || !canPickWarehouse}
+                  >
+                    {agentUsers.map((u) => (
+                      <option key={u.id} value={String(u.id)}>
+                        {u.login} · {u.name}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="oc-polki-trade" className="text-xs">
+                    Направление
+                  </Label>
+                  <select
+                    id="oc-polki-trade"
+                    className={cn(fieldClass, "h-9 text-sm")}
+                    value={polkiTradeDirection}
+                    onChange={(e) => setPolkiTradeDirection(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    {POLKI_TRADE_DIRECTION_OPTS.map((o) => (
+                      <option key={o.value || "__empty"} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="oc-polki-skidka" className="text-xs">
+                    Скидка
+                  </Label>
+                  <select
+                    id="oc-polki-skidka"
+                    className={cn(fieldClass, "h-9 text-sm")}
+                    value={polkiSkidkaType}
+                    onChange={(e) => setPolkiSkidkaType(e.target.value)}
+                    disabled={mutation.isPending}
+                  >
+                    {POLKI_SKIDKA_OPTS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-              <div className="min-w-0 xl:col-span-8">
-                <h3 className="mb-2 text-sm font-semibold text-foreground">Категории товаров</h3>
-                <div
-                  className={cn(
-                    "max-h-[min(42vh,280px)] overflow-y-auto rounded-lg border border-slate-200/90 bg-slate-50/95 p-3 dark:border-border dark:bg-muted/25",
-                    !canShowPolkiGrid && "pointer-events-none opacity-50"
-                  )}
-                >
-                  {!canShowPolkiGrid ? (
-                    <p className="text-xs text-muted-foreground">
-                      {isPolkiByOrder
-                        ? "Выберите клиента и заказ — затем категории."
-                        : "Выберите клиента — затем категории."}
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCategoryId("")}
-                        disabled={mutation.isPending}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                          selectedCategoryId === ""
-                            ? "border-teal-600 bg-teal-600 text-white shadow-sm"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-border dark:bg-background dark:hover:bg-muted"
-                        )}
-                      >
-                        {selectedCategoryId === "" ? <Check className="size-3.5 shrink-0" /> : null}
-                        Все
-                      </button>
-                      {categories.map((c) => {
-                        const active = selectedCategoryId === String(c.id);
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => setSelectedCategoryId(active ? "" : String(c.id))}
-                            disabled={mutation.isPending}
-                            className={cn(
-                              "inline-flex max-w-full items-center gap-1 truncate rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                              active
-                                ? "border-teal-600 bg-teal-600 text-white shadow-sm"
-                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-border dark:bg-background dark:hover:bg-muted"
-                            )}
-                            title={c.name}
-                          >
-                            {active ? <Check className="size-3.5 shrink-0" /> : null}
-                            {c.name}
-                          </button>
-                        );
-                      })}
+              {isPolkiByOrder ? (
+                <div className="mt-3 border-t border-border/70 pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <Label className="text-xs font-medium">Заказы (можно несколько)</Label>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        Только статус{" "}
+                        <span className="font-medium text-foreground">
+                          «{orderStatusLabelRu("delivered")}»
+                        </span>
+                        ; остальные не показываются.
+                      </p>
                     </div>
-                  )}
+                    {polkiOrdersForPick.length > 0 ? (
+                      <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="rounded border-input"
+                          checked={
+                            polkiOrderIds.length > 0 &&
+                            polkiOrderIds.length === polkiOrdersForPick.length
+                          }
+                          onChange={(e) => togglePolkiOrdersSelectAll(e.target.checked)}
+                        />
+                        Все
+                      </label>
+                    ) : null}
+                  </div>
+                  <div className="mt-1.5 overflow-x-auto rounded border border-border/80 bg-background">
+                    {!canPickWarehouse ? (
+                      <p className="px-2 py-2 text-[11px] text-muted-foreground">Сначала клиент.</p>
+                    ) : polkiOrdersPickQ.isLoading ? (
+                      <p className="px-2 py-2 text-[11px] text-muted-foreground">Загрузка…</p>
+                    ) : polkiOrdersForPick.length === 0 ? (
+                      polkiOrdersPickRawCount > 0 ? (
+                        <p className="px-2 py-2 text-[11px] text-muted-foreground">
+                          Нет заказов со статусом «{orderStatusLabelRu("delivered")}». Возврат с полки по заказу
+                          возможен только после доставки (сейчас у клиента есть заказы в статусах вроде «
+                          {orderStatusLabelRu("new")}», «{orderStatusLabelRu("confirmed")}» и т.д.).
+                        </p>
+                      ) : (
+                        <p className="px-2 py-2 text-[11px] text-destructive/90">Нет заказов у клиента.</p>
+                      )
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        {polkiOrderPickHalfLists
+                          .filter((chunk) => chunk.length > 0)
+                          .map((chunk, colIdx) => (
+                          <div key={colIdx} className="min-w-0 overflow-x-auto">
+                            <div className="max-h-[min(48vh,24rem)] overflow-y-auto rounded border border-border/60 bg-background/80">
+                              <table className="w-full min-w-[280px] border-collapse text-left text-[11px]">
+                                <thead className="sticky top-0 z-[1] border-b border-border/80 bg-muted/40 backdrop-blur-sm">
+                                  <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    <th className="w-8 px-1 py-1 text-center" title="Выбор">
+                                      ✓
+                                    </th>
+                                    <th className="px-1.5 py-1">Номер</th>
+                                    <th className="px-1.5 py-1">Дата</th>
+                                    <th className="min-w-[5rem] px-1.5 py-1">Склад</th>
+                                    <th className="px-1.5 py-1 text-right tabular-nums">Кол-во</th>
+                                    <th className="px-1.5 py-1 text-right tabular-nums">Сумма</th>
+                                    <th className="w-10 px-1 py-1 text-center" title="Бонус">
+                                      Бон.
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {chunk.map((o) => {
+                                    const dateStr = o.created_at
+                                      ? String(o.created_at).slice(0, 10)
+                                      : "—";
+                                    const hasBonus = polkiOrderRowHasBonus(o);
+                                    const rowSelected = polkiOrderIds.includes(o.id);
+                                    const qtyDisp =
+                                      o.qty != null && String(o.qty).trim() !== ""
+                                        ? formatNumberGrouped(parseStockQty(o.qty), {
+                                            maxFractionDigits: 3
+                                          })
+                                        : "—";
+                                    const sumDisp =
+                                      o.total_sum != null && String(o.total_sum).trim() !== ""
+                                        ? formatNumberGrouped(parsePriceAmount(o.total_sum), {
+                                            maxFractionDigits: 0
+                                          })
+                                        : "—";
+                                    return (
+                                      <tr
+                                        key={o.id}
+                                        tabIndex={0}
+                                        aria-selected={rowSelected}
+                                        aria-label={`Заказ ${o.number}, ${rowSelected ? "выбран" : "не выбран"}, нажмите Enter для переключения`}
+                                        data-selected={rowSelected ? "true" : undefined}
+                                        className={cn(
+                                          "border-b border-border/50 last:border-0 bg-transparent outline-none transition-[background-color,box-shadow] duration-150 select-none",
+                                          rowSelected
+                                            ? "cursor-pointer bg-teal-100/85 shadow-[inset_0_0_0_1px_rgba(13,148,136,0.35)] hover:bg-teal-100 dark:bg-teal-950/50 dark:shadow-[inset_0_0_0_1px_rgba(45,212,191,0.28)] dark:hover:bg-teal-950/60"
+                                            : "cursor-pointer hover:bg-muted/50"
+                                        )}
+                                        onClick={() => togglePolkiOrderPick(o.id, !rowSelected)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            togglePolkiOrderPick(o.id, !rowSelected);
+                                          }
+                                        }}
+                                      >
+                                        <td
+                                          className="px-1 py-0.5 align-middle text-center"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="rounded border-input"
+                                            checked={rowSelected}
+                                            onChange={(e) =>
+                                              togglePolkiOrderPick(o.id, e.target.checked)
+                                            }
+                                            onClick={(e) => e.stopPropagation()}
+                                            aria-label={`Заказ ${o.number}`}
+                                          />
+                                        </td>
+                                        <td className="px-1.5 py-0.5 align-middle font-mono font-medium">
+                                          {o.number}
+                                        </td>
+                                        <td className="px-1.5 py-0.5 align-middle tabular-nums text-muted-foreground">
+                                          {dateStr}
+                                        </td>
+                                        <td
+                                          className="max-w-[7rem] truncate px-1.5 py-0.5 align-middle text-muted-foreground"
+                                          title={o.warehouse_name?.trim() ? o.warehouse_name : undefined}
+                                        >
+                                          {o.warehouse_name?.trim() ? o.warehouse_name : "—"}
+                                        </td>
+                                        <td className="px-1.5 py-0.5 align-middle text-right tabular-nums">
+                                          {qtyDisp}
+                                        </td>
+                                        <td className="px-1.5 py-0.5 align-middle text-right tabular-nums">
+                                          {sumDisp}
+                                        </td>
+                                        <td className="px-1 py-0.5 align-middle text-center">
+                                          {hasBonus ? (
+                                            <span
+                                              className="inline-flex items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/15 p-0.5 text-amber-900 dark:text-amber-100"
+                                              title="В заказе есть бонусные позиции"
+                                            >
+                                              <Gift className="size-3.5 shrink-0" aria-hidden />
+                                            </span>
+                                          ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {polkiOrdersForPick.length > 0 && polkiOrderIds.length === 0 ? (
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Клик по строке или по флажку — отметить заказ; в возврат попадут только отмеченные.
+                    </p>
+                  ) : null}
+                  {polkiOrderIds.length > 0 ? (
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Выбрано заказов: {polkiOrderIds.length}. Состав возврата и проведение — только по этим
+                      заказам (можно одну или несколько строк в таблице).
+                    </p>
+                  ) : null}
                 </div>
-              </div>
+              ) : null}
             </div>
+
           </>
           )}
 
@@ -2077,39 +2919,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               <Link href="/settings/reasons/order-notes" className="text-primary underline-offset-2 hover:underline">
                 примечание к заказу
               </Link>
-              {isPolkiSheet ? (
-                <>
-                  ,{" "}
-                  <Link
-                    href="/settings/reasons/refusal-reasons"
-                    className="text-primary underline-offset-2 hover:underline"
-                  >
-                    rad etish sabablari
-                  </Link>
-                </>
-              ) : null}
               .
             </p>
-            {isPolkiSheet && refusalReasonPolkiOptions.length > 0 ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="oc-polki-refusal">Rad etish sababi (spravochnik)</Label>
-                <select
-                  id="oc-polki-refusal"
-                  className={fieldClass}
-                  value={refusalReasonRefPolki}
-                  onChange={(e) => setRefusalReasonRefPolki(e.target.value)}
-                  disabled={mutation.isPending}
-                >
-                  <option value="">—</option>
-                  {refusalReasonPolkiOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-            {!isPolkiSheet && requestTypeOptions.length > 0 ? (
+            {requestTypeOptions.length > 0 ? (
               <div className="space-y-1.5">
                 <Label>Заявка / yetkazib berish turi</Label>
                 <Select
@@ -2163,32 +2975,112 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               )}
               value={orderComment}
               onChange={(e) => setOrderComment(e.target.value)}
-              disabled={
-                mutation.isPending || (!isPolkiSheet && !canPickPricingAndExpeditor)
-              }
-              placeholder={
-                isPolkiSheet ? "Izoh / eslatma (ixtiyoriy)…" : "Buyurtma bo‘yicha eslatma…"
-              }
+              disabled={mutation.isPending || !canPickPricingAndExpeditor}
+              placeholder="Buyurtma bo‘yicha eslatma…"
               maxLength={4000}
             />
           </div>
-          ) : null}
+          ) : (
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
+            {refusalReasonPolkiOptions.length > 0 ? (
+              <div className="space-y-1">
+                <Label htmlFor="oc-polki-refusal-foot" className="text-xs">
+                  Причина отказа
+                </Label>
+                <select
+                  id="oc-polki-refusal-foot"
+                  className={cn(fieldClass, "h-9 text-sm")}
+                  value={refusalReasonRefPolki}
+                  onChange={(e) => setRefusalReasonRefPolki(e.target.value)}
+                  disabled={mutation.isPending}
+                >
+                  <option value="">—</option>
+                  {refusalReasonPolkiOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {orderNoteOptions.length > 0 ? (
+              <div className="space-y-1">
+                <Label className="text-xs">Шаблон примечания</Label>
+                <Select
+                  key={`on-polki-${refSelectKey}`}
+                  value={orderNotePreset || undefined}
+                  onValueChange={(v) => setOrderNotePreset(v === "__none__" ? "" : v)}
+                >
+                  <SelectTrigger id="oc-order-note-polki" className="h-9 text-sm">
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">—</SelectItem>
+                    {orderNoteOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="oc-comment-polki" className="text-xs">
+                Комментарий
+              </Label>
+              <textarea
+                id="oc-comment-polki"
+                rows={2}
+                className={cn(
+                  fieldClass,
+                  "min-h-[4rem] resize-y py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                )}
+                value={orderComment}
+                onChange={(e) => setOrderComment(e.target.value)}
+                disabled={mutation.isPending}
+                placeholder="Дополнительно (необязательно)…"
+                maxLength={4000}
+              />
+            </div>
+          </div>
+          )}
 
           {clientSummaryQ.data ? (
             <div className="mt-4 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Mijoz moliyasi: </span>
-              balans{" "}
-              <span className="font-mono tabular-nums text-foreground">
-                {formatNumberGrouped(clientSummaryQ.data.account_balance, { maxFractionDigits: 2 })}
-              </span>
-              {" · "}kredit limiti{" "}
-              <span className="font-mono tabular-nums text-foreground">
-                {formatNumberGrouped(clientSummaryQ.data.credit_limit, { maxFractionDigits: 2 })}
-              </span>
-              {" · "}ochiq zakazlar{" "}
-              <span className="font-mono tabular-nums text-foreground">
-                {formatNumberGrouped(clientSummaryQ.data.open_orders_total, { maxFractionDigits: 2 })}
-              </span>
+              {isPolkiSheet ? (
+                <>
+                  <span className="font-medium text-foreground">Финансы клиента: </span>
+                  баланс{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.account_balance, { maxFractionDigits: 2 })}
+                  </span>
+                  {" · "}кредитный лимит{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.credit_limit, { maxFractionDigits: 2 })}
+                  </span>
+                  {" · "}открытые заказы{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.open_orders_total, { maxFractionDigits: 2 })}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-foreground">Mijoz moliyasi: </span>
+                  balans{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.account_balance, { maxFractionDigits: 2 })}
+                  </span>
+                  {" · "}kredit limiti{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.credit_limit, { maxFractionDigits: 2 })}
+                  </span>
+                  {" · "}ochiq zakazlar{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatNumberGrouped(clientSummaryQ.data.open_orders_total, { maxFractionDigits: 2 })}
+                  </span>
+                </>
+              )}
             </div>
           ) : null}
           {isPolkiSheet && polkiContextQ.data ? (
@@ -2216,9 +3108,69 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               <h2 className="text-base font-semibold tracking-tight text-foreground">Состав заявки</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 {canShowPolkiGrid
-                  ? "Ассортимент, блок, количество — не больше проданного. Поиск и категории сверху."
+                  ? "Один ввод на строку: общее количество возврата; система делит на оплату и бонус. Можно отметить «бонус не на склад» — тогда бонусная часть идёт суммой на баланс. Заказы выбирайте любые (не обязательно все). Поиск и категории ниже."
                   : "Сначала клиент, склад, период или заказ."}
               </p>
+              <div className="mt-3">
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-foreground">Категории</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {canShowPolkiGrid ? "фильтр таблицы" : "сначала контекст"}
+                  </span>
+                </div>
+                <div
+                  className={cn(
+                    "rounded-md border border-border/60 bg-muted/10 px-2 py-2",
+                    !canShowPolkiGrid && "pointer-events-none opacity-50"
+                  )}
+                >
+                  {!canShowPolkiGrid ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {isPolkiByOrder
+                        ? "Клиент и хотя бы один заказ."
+                        : "Сначала клиент (и период при необходимости)."}
+                    </p>
+                  ) : (
+                    <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategoryId("")}
+                        disabled={mutation.isPending}
+                        className={cn(
+                          "inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                          selectedCategoryId === ""
+                            ? "border-teal-600 bg-teal-600 text-white"
+                            : "border-border bg-background hover:bg-muted"
+                        )}
+                      >
+                        {selectedCategoryId === "" ? <Check className="size-3 shrink-0" /> : null}
+                        Все
+                      </button>
+                      {categories.map((c) => {
+                        const active = selectedCategoryId === String(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setSelectedCategoryId(active ? "" : String(c.id))}
+                            disabled={mutation.isPending}
+                            className={cn(
+                              "inline-flex max-w-[10rem] items-center gap-0.5 truncate rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                              active
+                                ? "border-teal-600 bg-teal-600 text-white"
+                                : "border-border bg-background hover:bg-muted"
+                            )}
+                            title={c.name}
+                          >
+                            {active ? <Check className="size-3 shrink-0" /> : null}
+                            {c.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -2598,126 +3550,20 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               polkiError={polkiContextQ.isError}
               polkiSuccess={polkiContextQ.isSuccess}
               polkiRowsAllLength={polkiRowsAll.length}
-              polkiDisplayRows={polkiDisplayRows}
-              qtyByProductId={qtyByProductId}
-              setQtyByProductId={setQtyByProductId}
-              blockByProductId={blockByProductId}
-              setBlockByProductId={setBlockByProductId}
+              polkiOrderGroups={polkiOrderGroups}
+              polkiTotalQty={polkiTotalQty}
+              setPolkiTotalQty={setPolkiTotalQty}
+              polkiBonusToBalance={polkiBonusToBalance}
+              setPolkiBonusToBalance={setPolkiBonusToBalance}
+              polkiBonusCash={polkiBonusCash}
+              setPolkiBonusCash={setPolkiBonusCash}
               mutationPending={mutation.isPending}
               polkiTotalReturnQtySum={polkiTotalReturnQtySum}
               polkiVolumeM3={polkiVolumeM3}
               polkiEstimatedSum={polkiEstimatedSum}
+              polkiDebtHintSum={polkiDebtHintSum}
             />
           )}
-
-          {isPolkiSheet ? (
-            <>
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-lg border border-emerald-600/25 bg-emerald-600/8 px-3 py-3 text-sm shadow-sm dark:bg-emerald-950/30">
-                  <p className="text-xs font-medium text-emerald-800/90 dark:text-emerald-200/90">
-                    Общий объём
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
-                    {formatNumberGrouped(polkiVolumeM3, { maxFractionDigits: 3 })}{" "}
-                    <span className="text-sm font-normal text-emerald-800/80 dark:text-emerald-300/80">m³</span>
-                  </p>
-                </div>
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm shadow-sm dark:bg-amber-950/35">
-                  <p className="text-xs font-medium text-amber-900/90 dark:text-amber-100/90">
-                    Общее кол-во
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-amber-950 dark:text-amber-50">
-                    {formatNumberGrouped(polkiTotalReturnQtySum, { maxFractionDigits: 3 })}{" "}
-                    <span className="text-sm font-normal text-amber-800/90 dark:text-amber-200/80">шт</span>
-                  </p>
-                </div>
-                <div className="rounded-lg border border-teal-600/25 bg-teal-600/10 px-3 py-3 text-sm shadow-sm dark:bg-teal-950/35">
-                  <p className="text-xs font-medium text-teal-900/90 dark:text-teal-100/90">Общая сумма</p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-teal-900 dark:text-teal-100">
-                    {polkiEstimatedSum > 0
-                      ? formatNumberGrouped(polkiEstimatedSum, { maxFractionDigits: 0 })
-                      : "0"}{" "}
-                    <span className="text-sm font-normal opacity-80">so&apos;m</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-4 border-t border-border/70 pt-5">
-                <p className="text-xs text-muted-foreground">
-                  Справочники:{" "}
-                  <Link
-                    href="/settings/reasons/order-notes"
-                    className="text-primary underline-offset-2 hover:underline"
-                  >
-                    примечание к заказу
-                  </Link>
-                  {", "}
-                  <Link
-                    href="/settings/reasons/refusal-reasons"
-                    className="text-primary underline-offset-2 hover:underline"
-                  >
-                    причины отказа
-                  </Link>
-                  .
-                </p>
-                {refusalReasonPolkiOptions.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="oc-polki-refusal">Примечание / причина отказа</Label>
-                    <select
-                      id="oc-polki-refusal"
-                      className={fieldClass}
-                      value={refusalReasonRefPolki}
-                      onChange={(e) => setRefusalReasonRefPolki(e.target.value)}
-                      disabled={mutation.isPending}
-                    >
-                      <option value="">—</option>
-                      {refusalReasonPolkiOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-                {orderNoteOptions.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <Label>Шаблон примечания</Label>
-                    <Select
-                      key={`on-polki-${refSelectKey}`}
-                      value={orderNotePreset || undefined}
-                      onValueChange={(v) => setOrderNotePreset(v === "__none__" ? "" : v)}
-                    >
-                      <SelectTrigger id="oc-order-note-preset-polki" className="max-w-md">
-                        <SelectValue placeholder="Выберите шаблон" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">—</SelectItem>
-                        {orderNoteOptions.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <Label htmlFor="oc-comment-polki">Комментарий</Label>
-                <textarea
-                  id="oc-comment-polki"
-                  rows={4}
-                  className={cn(
-                    fieldClass,
-                    "min-h-[6rem] resize-y py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
-                  )}
-                  value={orderComment}
-                  onChange={(e) => setOrderComment(e.target.value)}
-                  disabled={mutation.isPending}
-                  placeholder="Текст примечания…"
-                  maxLength={4000}
-                />
-              </div>
-            </>
-          ) : null}
 
           {!isPolkiSheet && hasMissingPriceForSelected ? (
             <p className="mt-3 text-xs text-destructive">
@@ -2733,7 +3579,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               <>
                 <span className="font-medium text-foreground">Возврат: </span>
                 после проведения — приход на выбранный склад возврата; детали списания с продажного склада
-                задаёт сервер. Суммы в таблице и карточках — оценка по ценам продажи.
+                задаёт сервер. Суммы в таблице и карточках — оценка по ценам продажи. В одном документе — не
+                более {MAX_POLKI_RETURN_QTY} шт на склад за раз: в счёт входят и оплата, и бонус, если обе
+                части физически возвращаются на склад (как в строке «Авторасп: … опл … бон»). При большем
+                объёме оформите несколько возвратов.
               </>
             ) : (
               <>
@@ -2748,24 +3597,49 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 pr-1">
-          <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
-            {isPolkiSheet ? "Отмена" : "Bekor"}
-          </Button>
-          <Button
-            type="button"
-            disabled={!canSubmit}
-            onClick={() => mutation.mutate()}
-            className="bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-600 dark:hover:bg-teal-700"
-          >
-            {mutation.isPending
-              ? "Saqlanmoqda…"
-              : isPolkiSheet
-                ? "Возврат"
-                : "Yaratish"}
-          </Button>
+        <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
+          {isPolkiSheet && !canSubmit && polkiSubmitBlockedReason ? (
+            <p
+              role="status"
+              className="min-w-0 flex-1 text-xs leading-snug text-destructive sm:max-w-[min(100%,42rem)] sm:pr-2"
+            >
+              {polkiSubmitBlockedReason}
+            </p>
+          ) : null}
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">
+            <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
+              {isPolkiSheet ? "Отмена" : "Bekor"}
+            </Button>
+            <Button
+              type="button"
+              disabled={!canSubmit}
+              onClick={() => mutation.mutate()}
+              className="bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-600 dark:hover:bg-teal-700"
+            >
+              {mutation.isPending
+                ? isPolkiSheet
+                  ? "Оформление…"
+                  : "Saqlanmoqda…"
+                : isPolkiSheet
+                  ? "Возврат"
+                  : "Yaratish"}
+            </Button>
+          </div>
         </div>
       </div>
+      {isPolkiFree ? (
+        <DateRangePopover
+          open={polkiRangeOpen}
+          onOpenChange={setPolkiRangeOpen}
+          anchorRef={polkiRangeAnchorRef}
+          dateFrom={polkiDateFrom}
+          dateTo={polkiDateTo}
+          onApply={({ dateFrom, dateTo }) => {
+            setPolkiDateFrom(dateFrom);
+            setPolkiDateTo(dateTo);
+          }}
+        />
+      ) : null}
     </PageShell>
   );
 }

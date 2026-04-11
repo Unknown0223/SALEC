@@ -28,6 +28,7 @@ model Tenant {
   client_agent_assignments       ClientAgentAssignment[]
   client_audit_logs              ClientAuditLog[]
   client_balances                ClientBalance[]
+  client_opening_balance_entries ClientOpeningBalanceEntry[]
   payments                       Payment[]
   clients                        Client[]
   goods_receipts                 GoodsReceipt[]
@@ -120,6 +121,8 @@ model User {
   client_audit_logs          ClientAuditLog[]
   balance_movements          ClientBalanceMovement[]
   payments_created           Payment[]               @relation("PaymentCreator")
+  payments_as_expeditor      Payment[]               @relation("PaymentExpeditor")
+  opening_balances_created   ClientOpeningBalanceEntry[] @relation("OpeningBalanceCreator")
   clients_as_agent           Client[]                @relation("UserAgents")
   goods_receipts_created     GoodsReceipt[]          @relation("GoodsReceiptCreator")
   in_app_notifications       InAppNotification[]
@@ -438,9 +441,10 @@ model Client {
   agent_visits          AgentVisit[]
   agent_assignments     ClientAgentAssignment[]
   audit_logs            ClientAuditLog[]
-  client_balances       ClientBalance[]
-  payments              Payment[]
-  agent                 User?                   @relation("UserAgents", fields: [agent_id], references: [id])
+  client_balances                ClientBalance[]
+  client_opening_balance_entries ClientOpeningBalanceEntry[]
+  payments                       Payment[]
+  agent                          User?                   @relation("UserAgents", fields: [agent_id], references: [id])
   merged_into           Client?                 @relation("ClientMerge", fields: [merged_into_client_id], references: [id])
   merged_from           Client[]                @relation("ClientMerge")
   tenant                Tenant                  @relation(fields: [tenant_id], references: [id])
@@ -506,6 +510,31 @@ model ClientBalanceMovement {
 
   @@index([client_balance_id])
   @@map("client_balance_movements")
+}
+
+/// Boshlang‘ich qoldiq (Lalaku: «Начальные балансы клиентов») — yozuv + balansga bir martalik delta.
+model ClientOpeningBalanceEntry {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  client_id          Int
+  /// debt = долг (balansdan ayirish); surplus = излишек (balansga qo‘shish)
+  balance_type       String    @db.VarChar(24)
+  amount             Decimal   @db.Decimal(15, 2)
+  payment_type       String    @db.VarChar(64)
+  cash_desk_id       Int?
+  trade_direction    String?   @db.VarChar(128)
+  note               String?
+  paid_at            DateTime?
+  created_at         DateTime  @default(now())
+  created_by_user_id Int?
+  client             Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  cash_desk          CashDesk? @relation(fields: [cash_desk_id], references: [id], onDelete: SetNull)
+  created_by         User?     @relation("OpeningBalanceCreator", fields: [created_by_user_id], references: [id])
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, client_id])
+  @@map("client_opening_balance_entries")
 }
 
 /// Mijoz bo‘yicha admin/operator harakatlari (PATCH, balans, birlashtirish).
@@ -798,25 +827,42 @@ model OrderChangeLog {
   @@map("order_change_logs")
 }
 
-/// Mijozdan kelgan to‘lov (balansga qo‘shiladi).
+/// Mijozdan kelgan to‘lov (balansga qo‘shiladi) yoki rasxod / qarz (balansdan yechiladi).
 model Payment {
-  id                 Int      @id @default(autoincrement())
+  id                 Int       @id @default(autoincrement())
   tenant_id          Int
   client_id          Int
   order_id           Int?
-  amount             Decimal  @db.Decimal(15, 2)
-  payment_type       String   @db.VarChar(64)
+  amount             Decimal   @db.Decimal(15, 2)
+  payment_type       String    @db.VarChar(64)
   note               String?
   created_by_user_id Int?
-  created_at         DateTime @default(now())
-  client             Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
-  created_by         User?    @relation("PaymentCreator", fields: [created_by_user_id], references: [id])
-  order              Order?   @relation(fields: [order_id], references: [id])
-  tenant             Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_at         DateTime  @default(now())
+  /// Kassa punkti (filtr «Касса»)
+  cash_desk_id       Int?
+  /// pending_confirmation | confirmed (keyinchalik voided)
+  workflow_status    String    @default("confirmed") @db.VarChar(32)
+  paid_at            DateTime?
+  received_at        DateTime?
+  confirmed_at       DateTime?
+  /// payment — kirim; client_expense — «расход клиента» (qarz / balansdan chiqim)
+  entry_kind         String    @default("payment") @db.VarChar(24)
+  /// Zakazsiz rasxod qatorida ekskpeditor (order.expeditor o‘rniga)
+  expeditor_user_id  Int?
+  client             Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  created_by         User?     @relation("PaymentCreator", fields: [created_by_user_id], references: [id])
+  expeditor_user     User?     @relation("PaymentExpeditor", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
+  order              Order?    @relation(fields: [order_id], references: [id])
+  tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  cash_desk          CashDesk? @relation(fields: [cash_desk_id], references: [id], onDelete: SetNull)
 
   @@index([tenant_id, client_id])
   @@index([tenant_id, created_at(sort: Desc)])
   @@index([tenant_id, order_id])
+  @@index([tenant_id, workflow_status])
+  @@index([cash_desk_id])
+  @@index([tenant_id, entry_kind])
+  @@index([expeditor_user_id])
   @@map("client_payments")
 }
 
@@ -1016,6 +1062,8 @@ model BonusRule {
   buy_qty              Int?
   free_qty             Int?
   min_sum              Decimal?             @db.Decimal(15, 2)
+  /// order = faqat joriy zakaz; calendar_month = mijoz uchun to‘liq kalendar oyidagi zakazlar yig‘indisi + joriy zakaz (chegirmadan oldingi pullik summa).
+  sum_threshold_scope  String               @default("order") @db.VarChar(32)
   discount_pct         Decimal?             @db.Decimal(5, 2)
   priority             Int                  @default(0)
   is_active            Boolean              @default(true)
@@ -1042,6 +1090,12 @@ model BonusRule {
   one_plus_one_gift    Boolean              @default(false)
   /// Shu qoida qo‘llanishidan oldin zakazda bajarilgan bo‘lishi kerak bo‘lgan boshqa avto-qoidalar (ID lar tartibsiz).
   prerequisite_rule_ids Int[]              @default([])
+  /// Bo‘sh = filial cheklovi yo‘q. `User.branch` bilan mos (trim, case-insensitive).
+  scope_branch_codes         String[] @default([])
+  /// Bo‘sh = aniq agent tanlovi yo‘q. Zakaz `agent_id` shu ro‘yxatda bo‘lishi kerak (filial bilan birga — OR).
+  scope_agent_user_ids       Int[]    @default([])
+  /// Bo‘sh = yo‘nalish cheklovi yo‘q. Agent `trade_direction_id` shu ID lardan biri bo‘lishi kerak.
+  scope_trade_direction_ids  Int[]    @default([])
   conditions           BonusRuleCondition[]
   tenant               Tenant               @relation(fields: [tenant_id], references: [id])
 
@@ -1080,9 +1134,11 @@ model CashDesk {
   is_closed  Boolean            @default(false)
   created_at DateTime           @default(now())
   updated_at DateTime           @updatedAt
-  shifts     CashDeskShift[]
-  links      CashDeskUserLink[]
-  tenant     Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  shifts                      CashDeskShift[]
+  links                       CashDeskUserLink[]
+  payments                    Payment[]
+  opening_balance_entries     ClientOpeningBalanceEntry[]
+  tenant                      Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, is_active])
   @@map("cash_desks")

@@ -33,7 +33,7 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
                 : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
-            Faol
+            Активные
           </Link>
           <Link
             href={`${BR}/inactive`}
@@ -44,7 +44,7 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
                 : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
-            Nofaol
+            Неактивные
           </Link>
           <Link
             href={`${BR}/strategy`}
@@ -55,7 +55,7 @@ export default function BonusRulesLayout({ children }: { children: ReactNode }) 
                 : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
-            Strategiya
+            Стратегия
           </Link>
         </div>
       ) : null}

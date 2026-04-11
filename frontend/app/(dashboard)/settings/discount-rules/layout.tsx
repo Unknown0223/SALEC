@@ -11,10 +11,14 @@ export default function DiscountRulesLayout({ children }: { children: ReactNode 
   const pathname = usePathname();
 
   const showTabs =
-    pathname === DR || pathname === `${DR}/active` || pathname === `${DR}/inactive`;
+    pathname === DR ||
+    pathname === `${DR}/active` ||
+    pathname === `${DR}/inactive` ||
+    pathname === `${DR}/strategy`;
 
   const isActiveList = pathname === `${DR}/active` || pathname === DR;
   const isInactiveList = pathname === `${DR}/inactive`;
+  const isStrategy = pathname === `${DR}/strategy`;
 
   return (
     <div className="w-full">
@@ -29,7 +33,7 @@ export default function DiscountRulesLayout({ children }: { children: ReactNode 
                 : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
-            Faol
+            Активные
           </Link>
           <Link
             href={`${DR}/inactive`}
@@ -40,16 +44,19 @@ export default function DiscountRulesLayout({ children }: { children: ReactNode 
                 : "border-transparent text-foreground/65 hover:text-foreground"
             )}
           >
-            Nofaol
+            Неактивные
           </Link>
           <Link
-            href="/settings/bonus-rules/strategy"
+            href={`${DR}/strategy`}
             className={cn(
-              "-mb-px ml-auto inline-flex border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-foreground/65 transition-colors hover:text-foreground"
+              "-mb-px ml-auto inline-flex border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              isStrategy
+                ? "border-teal-600 text-teal-800 dark:border-teal-500 dark:text-teal-400"
+                : "border-transparent text-foreground/65 hover:text-foreground"
             )}
-            title="Birlashtirish (stack) — bonus va chegirmalar uchun umumiy strategiya"
+            title="Объединение (stack) — общая стратегия для бонусов и скидок"
           >
-            Strategiya →
+            Стратегия
           </Link>
         </div>
       ) : null}

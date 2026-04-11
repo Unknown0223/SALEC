@@ -10,7 +10,8 @@ import {
   getPaymentDetail,
   listPayments,
   listPaymentsForClient,
-  listPaymentsForOrder
+  listPaymentsForOrder,
+  type PaymentListQuery
 } from "./payments.service";
 import { allocatePayment, getPaymentAllocations } from "./payment-allocations.service";
 
@@ -21,8 +22,114 @@ const createBody = z.object({
   order_id: z.number().int().positive().nullable().optional(),
   amount: z.number().positive(),
   payment_type: z.string().min(1).max(64),
-  note: z.string().max(2000).optional().nullable()
+  note: z.string().max(2000).optional().nullable(),
+  cash_desk_id: z.number().int().positive().nullable().optional(),
+  paid_at: z.string().max(40).optional().nullable(),
+  entry_kind: z.enum(["payment", "client_expense"]).optional(),
+  expeditor_user_id: z.number().int().positive().nullable().optional()
 });
+
+function parseOptPositiveInt(raw: string | undefined): number | undefined {
+  if (raw == null || raw.trim() === "") return undefined;
+  const n = Number.parseInt(raw.trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function parseOptAmount(raw: string | undefined): number | undefined {
+  if (raw == null || raw.trim() === "") return undefined;
+  const n = Number.parseFloat(raw.trim().replace(/\s/g, "").replace(/,/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseCashDeskIds(raw: string | undefined): number[] | undefined {
+  if (raw == null || raw.trim() === "") return undefined;
+  const ids = raw
+    .split(/[,]+/)
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return ids.length > 0 ? ids : undefined;
+}
+
+function parsePaymentListQuery(q: Record<string, string | undefined>): PaymentListQuery {
+  const page = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
+  const limit = Math.min(200, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
+
+  const client_id = parseOptPositiveInt(q.client_id);
+  const order_id = parseOptPositiveInt(q.order_id);
+  const agent_id = parseOptPositiveInt(q.agent_id);
+  const expeditor_user_id = parseOptPositiveInt(q.expeditor_user_id);
+
+  const date_from = q.date_from?.trim() || undefined;
+  const date_to = q.date_to?.trim() || undefined;
+  const search = q.search?.trim() || undefined;
+
+  const amount_min = parseOptAmount(q.amount_min);
+  const amount_max = parseOptAmount(q.amount_max);
+
+  const payment_typeRaw = q.payment_type?.trim();
+  const payment_type =
+    payment_typeRaw && payment_typeRaw !== "" && payment_typeRaw !== "__all__" ? payment_typeRaw : undefined;
+
+  const trade_directionRaw = q.trade_direction?.trim();
+  const trade_direction =
+    trade_directionRaw && trade_directionRaw !== "" && trade_directionRaw !== "__all__"
+      ? trade_directionRaw
+      : undefined;
+
+  const territory_region = q.territory_region?.trim() || undefined;
+  const territory_city = q.territory_city?.trim() || undefined;
+  const territory_district = q.territory_district?.trim() || undefined;
+
+  const dt = q.deal_type?.trim();
+  let deal_type: PaymentListQuery["deal_type"] | undefined;
+  if (dt === "regular" || dt === "consignment" || dt === "both") {
+    deal_type = dt;
+  }
+
+  const ps = q.payment_status?.trim();
+  let payment_status: PaymentListQuery["payment_status"] | undefined;
+  if (ps === "pending_confirmation" || ps === "confirmed" || ps === "deleted") {
+    payment_status = ps;
+  }
+
+  const cash_desk_ids = parseCashDeskIds(q.cash_desk_ids);
+
+  const ekRaw = q.entry_kind?.trim();
+  let entry_kind: PaymentListQuery["entry_kind"] | undefined;
+  if (ekRaw === "client_expense" || ekRaw === "payment") {
+    entry_kind = ekRaw;
+  }
+
+  const dfRaw = q.date_field?.trim();
+  let date_field: PaymentListQuery["date_field"] | undefined;
+  if (dfRaw === "created_at" || dfRaw === "paid_at" || dfRaw === "confirmed_at") {
+    date_field = dfRaw;
+  }
+
+  return {
+    page,
+    limit,
+    ...(client_id !== undefined ? { client_id } : {}),
+    ...(order_id !== undefined ? { order_id } : {}),
+    ...(date_from ? { date_from } : {}),
+    ...(date_to ? { date_to } : {}),
+    ...(search ? { search } : {}),
+    ...(amount_min !== undefined ? { amount_min } : {}),
+    ...(amount_max !== undefined ? { amount_max } : {}),
+    ...(agent_id !== undefined ? { agent_id } : {}),
+    ...(expeditor_user_id !== undefined ? { expeditor_user_id } : {}),
+    ...(payment_type ? { payment_type } : {}),
+    ...(trade_direction ? { trade_direction } : {}),
+    ...(territory_region ? { territory_region } : {}),
+    ...(territory_city ? { territory_city } : {}),
+    ...(territory_district ? { territory_district } : {}),
+    ...(deal_type !== undefined && deal_type !== "both" ? { deal_type } : {}),
+    ...(payment_status !== undefined ? { payment_status } : {}),
+    ...(cash_desk_ids !== undefined ? { cash_desk_ids } : {}),
+    ...(entry_kind !== undefined ? { entry_kind } : {}),
+    ...(date_field !== undefined ? { date_field } : {})
+  };
+}
 
 export async function registerPaymentRoutes(app: FastifyInstance) {
   app.get(
@@ -31,16 +138,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
-      const page = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
-      const limit = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
-      const client_id = q.client_id ? Number.parseInt(q.client_id, 10) : undefined;
-      const order_id = q.order_id ? Number.parseInt(q.order_id, 10) : undefined;
-      const result = await listPayments(request.tenant!.id, {
-        page,
-        limit,
-        client_id: client_id != null && client_id > 0 ? client_id : undefined,
-        order_id: order_id != null && order_id > 0 ? order_id : undefined
-      });
+      const result = await listPayments(request.tenant!.id, parsePaymentListQuery(q));
       return reply.send(result);
     }
   );
@@ -91,6 +189,8 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         if (msg === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
         if (msg === "BAD_AMOUNT") return reply.status(400).send({ error: "BadAmount" });
         if (msg === "BAD_PAYMENT_TYPE") return reply.status(400).send({ error: "BadPaymentType" });
+        if (msg === "BAD_CASH_DESK") return reply.status(400).send({ error: "BadCashDesk" });
+        if (msg === "BAD_EXPEDITOR") return reply.status(400).send({ error: "BadExpeditor" });
         throw e;
       }
     }

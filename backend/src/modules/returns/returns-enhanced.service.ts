@@ -1,13 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { emitOrderUpdated } from "../../lib/order-event-bus";
+import { invalidateDashboard } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
-import {
-  computeQtyBonusForRuleRow,
-  mapBonusRuleFull,
-  bonusRuleInclude,
-  type BonusRuleRow
-} from "../bonus-rules/bonus-rules.service";
 import { getProductPrice } from "../products/product-prices.service";
 import { canTransitionOrderStatus, normalizeOrderType } from "../orders/order-status";
 
@@ -47,7 +43,20 @@ export type ClientReturnsData = {
   client_debt: string;
 };
 
-export const MAX_RETURN_ITEMS = 12;
+/** Jami fizik dona (paid_qty + bonus_qty na sklad) bitta dokumentda; frontend: `return-limits.ts`. */
+export const MAX_RETURN_ITEMS = 24;
+
+export type CreatePeriodReturnLine = {
+  product_id: number;
+  /** Legacy: bitta miqdor, server bonus/paid bo‘lishini hisoblaydi */
+  qty?: number;
+  /** Aniq: pullik qaytarish dona (ombor) */
+  paid_qty?: number;
+  /** Aniq: bonus mahsulot dona (ombor) */
+  bonus_qty?: number;
+  /** Bonus o‘rniga naqd kompensatsiya (balans/kassa, omborga bonus dona qo‘shilmaydi) */
+  bonus_cash?: number;
+};
 
 export type CreatePeriodReturnInput = {
   warehouse_id?: number;
@@ -55,9 +64,31 @@ export type CreatePeriodReturnInput = {
   order_id?: number;
   date_from?: string;
   date_to?: string;
-  lines: { product_id: number; qty: number }[];
+  lines: CreatePeriodReturnLine[];
   note?: string | null;
   refusal_reason_ref?: string | null;
+};
+
+/** Bir nechta zakazdan bir vaqtda polki qaytarish (har zakaz uchun alohida sales_return). */
+export type CreatePeriodReturnBatchLine = {
+  order_id: number;
+  product_id: number;
+  qty?: number;
+  paid_qty?: number;
+  bonus_qty?: number;
+  bonus_cash?: number;
+};
+
+export type CreatePeriodReturnBatchInput = {
+  warehouse_id?: number;
+  client_id: number;
+  lines: CreatePeriodReturnBatchLine[];
+  note?: string | null;
+  refusal_reason_ref?: string | null;
+};
+
+export type PeriodReturnBatchResult = {
+  returns: PeriodReturnResult[];
 };
 
 export type PeriodReturnResult = {
@@ -103,6 +134,119 @@ function R(v: string | number | Prisma.Decimal): Prisma.Decimal {
   return d.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
 
+/** 3 o‘rinli qty uchun qisqa satr (0 → "0"). */
+function formatAdjustedQtyString(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  const rounded = Math.round(n * 1000) / 1000;
+  if (rounded <= 0) return "0";
+  const s = rounded.toFixed(3).replace(/\.?0+$/, "");
+  return s === "" ? "0" : s;
+}
+
+type ReturnLineQty = {
+  product_id: number;
+  qty: Prisma.Decimal | string | number;
+  paid_qty?: Prisma.Decimal | string | number | null;
+  bonus_qty?: Prisma.Decimal | string | number | null;
+};
+
+/** Qaytarish qatoridan pullik / bonus miqdorini ajratish (legacy: faqat `qty`). */
+function splitReturnLinePaidBonus(ln: ReturnLineQty): { paid: number; bonus: number } {
+  const t = Number(ln.qty);
+  if (!Number.isFinite(t) || t <= 0) return { paid: 0, bonus: 0 };
+  const pRaw = ln.paid_qty != null ? Number(ln.paid_qty) : NaN;
+  const bRaw = ln.bonus_qty != null ? Number(ln.bonus_qty) : NaN;
+  if (Number.isFinite(pRaw) && Number.isFinite(bRaw)) {
+    return { paid: Math.max(0, pRaw), bonus: Math.max(0, bRaw) };
+  }
+  if (Number.isFinite(pRaw)) {
+    const paid = Math.max(0, pRaw);
+    return { paid, bonus: Math.max(0, t - paid) };
+  }
+  if (Number.isFinite(bRaw)) {
+    const bonus = Math.max(0, bRaw);
+    return { paid: Math.max(0, t - bonus), bonus };
+  }
+  return { paid: t, bonus: 0 };
+}
+
+/**
+ * Oldingi posted qaytarishlar: pullik va bonus qatorlari alohida «pool»da.
+ * Aks holda bitta mahsulot bo‘yicha bonus qaytarilganda pullik qatorlari ham
+ * noto‘g‘ri qisqaradi yoki qoldiq Math.round bilan 0 bo‘lib, jadval bo‘shab qoladi.
+ */
+function adjustOrderItemsQtyAfterPriorReturns(
+  items: OrderItemSummary[],
+  returns: Array<{
+    order_id: number | null;
+    lines: ReturnLineQty[];
+  }>
+): OrderItemSummary[] {
+  const alreadyPaid = new Map<string, number>();
+  const alreadyBonus = new Map<string, number>();
+  for (const ret of returns) {
+    const oid = ret.order_id;
+    if (oid == null || oid < 1) continue;
+    for (const ln of ret.lines) {
+      const k = `${oid}:${ln.product_id}`;
+      const { paid, bonus } = splitReturnLinePaidBonus(ln);
+      alreadyPaid.set(k, (alreadyPaid.get(k) ?? 0) + paid);
+      alreadyBonus.set(k, (alreadyBonus.get(k) ?? 0) + bonus);
+    }
+  }
+
+  /** Guruh: zakaz + mahsulot + bonus|pullik (order line turi) */
+  const byPool = new Map<string, number[]>();
+  items.forEach((it, idx) => {
+    const pool = it.is_bonus ? "b" : "p";
+    const k = `${it.order_id}:${it.product_id}:${pool}`;
+    const arr = byPool.get(k) ?? [];
+    arr.push(idx);
+    byPool.set(k, arr);
+  });
+
+  const next = items.map((it) => ({ ...it }));
+  for (const indices of byPool.values()) {
+    if (indices.length === 0) continue;
+    const i0 = indices[0]!;
+    const oid = next[i0]!.order_id;
+    const pid = next[i0]!.product_id;
+    const isBonus = next[i0]!.is_bonus;
+    const poolKey = `${oid}:${pid}`;
+    const already = isBonus
+      ? (alreadyBonus.get(poolKey) ?? 0)
+      : (alreadyPaid.get(poolKey) ?? 0);
+
+    let sumOrdered = 0;
+    for (const i of indices) sumOrdered += Number(next[i]!.qty);
+
+    const alreadyCapped = Math.min(already, sumOrdered);
+    const remaining = Math.max(0, sumOrdered - alreadyCapped);
+
+    if (remaining <= 0 || sumOrdered <= 0) {
+      for (const i of indices) next[i] = { ...next[i]!, qty: "0" };
+      continue;
+    }
+
+    let allocated = 0;
+    for (let j = 0; j < indices.length; j++) {
+      const i = indices[j]!;
+      const q = Number(next[i]!.qty);
+      if (j === indices.length - 1) {
+        const last = Math.max(0, remaining - allocated);
+        next[i] = { ...next[i]!, qty: formatAdjustedQtyString(last) };
+      } else {
+        const part = (remaining * q) / sumOrdered;
+        const rounded = Math.floor(part * 1000) / 1000;
+        allocated += rounded;
+        next[i] = { ...next[i]!, qty: formatAdjustedQtyString(rounded) };
+      }
+    }
+  }
+
+  return next.filter((it) => Number(it.qty) > 0);
+}
+
 // ─── Find return warehouse ───────────────────────────────────────────────────
 
 export async function findReturnWarehouse(tenantId: number): Promise<number> {
@@ -123,28 +267,264 @@ export async function findReturnWarehouse(tenantId: number): Promise<number> {
   return any.id;
 }
 
+type Tx = Omit<
+  PrismaClient,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends" | "$use"
+>;
+
+/**
+ * «Заявки» ro‘yxati `orders` dan — polki faqat `sales_return` bo‘lgani uchun
+ * shu yerga ko‘zgu yozuv: bir xil raqam (VR-…), `order_type` + filtrlash.
+ * `status: returned` — kredit yig‘indisiga kirmaydi (ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE).
+ */
+async function createPolkiMirrorZayavka(
+  tx: Tx,
+  params: {
+    tenantId: number;
+    number: string;
+    clientId: number;
+    warehouseId: number;
+    orderType: "return" | "return_by_order";
+    retLines: Array<{
+      product_id: number;
+      qty: number;
+      paid_qty: number;
+      bonus_qty: number;
+      price: number;
+    }>;
+    refundAmount: Prisma.Decimal;
+    note: string | null;
+    refusalReasonRef: string | null;
+    /** Po zakaz — manba zakaz raqami (izoh) */
+    sourceOrderNumber?: string | null;
+  }
+): Promise<number> {
+  const creates: Prisma.OrderItemCreateWithoutOrderInput[] = [];
+
+  for (const rl of params.retLines) {
+    const priceDec = R(rl.price);
+    if (rl.paid_qty > 0) {
+      const q = new Prisma.Decimal(rl.paid_qty);
+      creates.push({
+        product: { connect: { id: rl.product_id } },
+        qty: q,
+        price: priceDec,
+        total: R(priceDec.mul(rl.paid_qty)),
+        is_bonus: false
+      });
+    }
+    if (rl.bonus_qty > 0) {
+      const q = new Prisma.Decimal(rl.bonus_qty);
+      creates.push({
+        product: { connect: { id: rl.product_id } },
+        qty: q,
+        price: priceDec,
+        total: R(priceDec.mul(rl.bonus_qty)),
+        is_bonus: true
+      });
+    }
+    if (rl.paid_qty <= 0 && rl.bonus_qty <= 0 && rl.qty > 0) {
+      const q = new Prisma.Decimal(rl.qty);
+      creates.push({
+        product: { connect: { id: rl.product_id } },
+        qty: q,
+        price: priceDec,
+        total: R(priceDec.mul(rl.qty)),
+        is_bonus: false
+      });
+    }
+  }
+
+  const bonusSum = params.retLines.reduce(
+    (a, l) => a.add(R(l.price).mul(l.bonus_qty)),
+    new Prisma.Decimal(0)
+  );
+
+  let comment = params.note?.trim() || null;
+  if (params.refusalReasonRef?.trim()) {
+    const r = params.refusalReasonRef.trim().slice(0, 200);
+    comment = comment ? `${comment}\n[Отказ: ${r}]` : `[Отказ: ${r}]`;
+  }
+  if (params.sourceOrderNumber?.trim()) {
+    const tag = `По заказу ${params.sourceOrderNumber.trim()}`;
+    comment = comment ? `${comment}\n${tag}` : tag;
+  }
+
+  const created = await tx.order.create({
+    data: {
+      tenant_id: params.tenantId,
+      number: params.number,
+      client_id: params.clientId,
+      warehouse_id: params.warehouseId,
+      order_type: params.orderType,
+      status: "returned",
+      total_sum: params.refundAmount,
+      bonus_sum: bonusSum,
+      discount_sum: new Prisma.Decimal(0),
+      comment,
+      ...(creates.length > 0 ? { items: { create: creates } } : {})
+    }
+  });
+  return created.id;
+}
+
+/** Polki: faqat yetkazib berilgan sotuv zakazi — tovar klientda, qaytarish klient → ombor. */
+const POLKI_SOURCE_ORDER_STATUS = "delivered" as const;
+
+/** Bir nechta zakaz uchun qaytarish konteksti (har qator `order_id` bilan). */
+async function getClientReturnsDataMultipleOrders(
+  tenantId: number,
+  clientId: number,
+  orderIds: number[]
+): Promise<ClientReturnsData> {
+  const uniqueSorted = [...new Set(orderIds)].sort((a, b) => a - b);
+  const orders = await prisma.order.findMany({
+    where: {
+      id: { in: uniqueSorted },
+      tenant_id: tenantId,
+      client_id: clientId,
+      status: POLKI_SOURCE_ORDER_STATUS
+    },
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      number: true,
+      status: true,
+      total_sum: true,
+      bonus_sum: true,
+      created_at: true,
+      items: {
+        select: {
+          product_id: true,
+          qty: true,
+          price: true,
+          total: true,
+          is_bonus: true,
+          product: { select: { sku: true, name: true, unit: true } }
+        }
+      }
+    }
+  });
+  if (orders.length === 0) throw new Error("BAD_ORDER");
+  if (orders.length !== uniqueSorted.length) throw new Error("ORDER_NOT_DELIVERED");
+
+  const loadedOrderIds = orders.map((o) => o.id);
+
+  const returns = await prisma.salesReturn.findMany({
+    where: {
+      tenant_id: tenantId,
+      client_id: clientId,
+      order_id: { in: loadedOrderIds },
+      status: "posted"
+    },
+    select: {
+      order_id: true,
+      refund_amount: true,
+      lines: { select: { product_id: true, qty: true, paid_qty: true, bonus_qty: true } }
+    }
+  });
+
+  const totalReturnedQty = returns.reduce(
+    (a, ret) => a + ret.lines.reduce((b, l) => b + Number(l.qty), 0),
+    0
+  );
+  const alreadyReturned = returns.reduce(
+    (a, r) => a.add(r.refund_amount ?? new Prisma.Decimal(0)),
+    new Prisma.Decimal(0)
+  );
+
+  let totalPaidValue = new Prisma.Decimal(0);
+  const items: OrderItemSummary[] = [];
+  for (const order of orders) {
+    for (const item of order.items) {
+      items.push({
+        product_id: item.product_id,
+        sku: item.product.sku,
+        name: item.product.name,
+        unit: item.product.unit,
+        qty: item.qty.toString(),
+        price: item.price.toString(),
+        total: item.total.toString(),
+        is_bonus: item.is_bonus,
+        order_id: order.id,
+        order_number: order.number
+      });
+      if (!item.is_bonus) totalPaidValue = totalPaidValue.add(item.total);
+    }
+  }
+
+  const itemsAdjusted = adjustOrderItemsQtyAfterPriorReturns(items, returns);
+
+  const bal = await prisma.clientBalance.findUnique({
+    where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
+    select: { balance: true }
+  });
+  const balance = bal?.balance ?? new Prisma.Decimal(0);
+  const maxReturnable = totalPaidValue.sub(alreadyReturned);
+
+  return {
+    polki_scope: "order",
+    orders: orders.map((o) => ({
+      id: o.id,
+      number: o.number,
+      status: o.status,
+      total_sum: o.total_sum.toString(),
+      bonus_sum: o.bonus_sum.toString(),
+      created_at: o.created_at.toISOString()
+    })),
+    items: itemsAdjusted,
+    total_orders: orders.length,
+    total_returned_qty: String(totalReturnedQty),
+    total_paid_value: totalPaidValue.toString(),
+    already_returned_value: alreadyReturned.toString(),
+    max_returnable_value: maxReturnable.gt(0) ? maxReturnable.toString() : "0",
+    client_balance: balance.toString(),
+    client_debt: balance.lt(0) ? balance.abs().toString() : "0"
+  };
+}
+
 // ─── Get client returns data ────────────────────────────────────────────────
+//
+// Qayta «vozvrat s polki» shu zakazga: oldingi posted `sales_return` qatorlari
+// `adjustOrderItemsQtyAfterPriorReturns` orqali qoldiqni kamaytiradi — qoldiq
+// bo‘lsa, yana xuddi shu zakazdan qaytarish mumkin (backend tekshiruvi).
 
 export async function getClientReturnsData(
   tenantId: number,
   clientId: number,
   dateFrom?: string,
   dateTo?: string,
-  orderId?: number | null
+  orderId?: number | null,
+  orderIds?: number[] | null,
+  opts?: { shrinkLineQtyAfterReturns?: boolean }
 ): Promise<ClientReturnsData> {
+  const shrinkLineQtyAfterReturns = opts?.shrinkLineQtyAfterReturns !== false;
+
   const client = await prisma.client.findFirst({
     where: { id: clientId, tenant_id: tenantId, merged_into_client_id: null }
   });
   if (!client) throw new Error("BAD_CLIENT");
 
+  const resolvedOrderIds =
+    orderIds != null && orderIds.length > 0
+      ? [...new Set(orderIds.map(Number).filter((x) => Number.isFinite(x) && x > 0))]
+      : orderId != null && orderId > 0
+        ? [orderId]
+        : [];
+
+  if (resolvedOrderIds.length > 1) {
+    return getClientReturnsDataMultipleOrders(tenantId, clientId, resolvedOrderIds);
+  }
+
   // ─── Bitta zakaz (polki po zakaz) ─────────────────────────────────────
-  if (orderId != null && orderId > 0) {
+  const singleOrderId = resolvedOrderIds.length === 1 ? resolvedOrderIds[0]! : null;
+  if (singleOrderId != null) {
     const order = await prisma.order.findFirst({
       where: {
-        id: orderId,
+        id: singleOrderId,
         tenant_id: tenantId,
         client_id: clientId,
-        status: { notIn: ["cancelled"] }
+        status: POLKI_SOURCE_ORDER_STATUS
       },
       select: {
         id: true,
@@ -171,10 +551,14 @@ export async function getClientReturnsData(
       where: {
         tenant_id: tenantId,
         client_id: clientId,
-        order_id: orderId,
+        order_id: singleOrderId,
         status: "posted"
       },
-      select: { refund_amount: true, lines: { select: { product_id: true, qty: true } } }
+      select: {
+        order_id: true,
+        refund_amount: true,
+        lines: { select: { product_id: true, qty: true, paid_qty: true, bonus_qty: true } }
+      }
     });
 
     const totalReturnedQty = returns.reduce(
@@ -204,6 +588,10 @@ export async function getClientReturnsData(
       if (!item.is_bonus) totalPaidValue = totalPaidValue.add(item.total);
     }
 
+    const itemsOut = shrinkLineQtyAfterReturns
+      ? adjustOrderItemsQtyAfterPriorReturns(items, returns)
+      : items;
+
     const bal = await prisma.clientBalance.findUnique({
       where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
       select: { balance: true }
@@ -223,7 +611,7 @@ export async function getClientReturnsData(
           created_at: order.created_at.toISOString()
         }
       ],
-      items,
+      items: itemsOut,
       total_orders: 1,
       total_returned_qty: String(totalReturnedQty),
       total_paid_value: totalPaidValue.toString(),
@@ -234,11 +622,11 @@ export async function getClientReturnsData(
     };
   }
 
-  // Orders in period
+  // Orders in period — faqat yetkazilgan sotuvlar (polki «с полки»)
   const orderWhere: Prisma.OrderWhereInput = {
     tenant_id: tenantId,
     client_id: clientId,
-    status: { notIn: ["cancelled"] }
+    status: POLKI_SOURCE_ORDER_STATUS
   };
   if (dateFrom) orderWhere.created_at = { gte: localDayStart(dateFrom) };
   if (dateTo) orderWhere.created_at = { ...(orderWhere.created_at as object) ?? {}, lte: localDayEnd(dateTo) };
@@ -319,51 +707,17 @@ export async function getClientReturnsData(
   };
 }
 
-// ─── Bonus recalculation for returns ────────────────────────────────────────
-
-function matchRule(rule: BonusRuleRow, pid: number, catId: number | null): boolean {
-  if (rule.product_ids.length > 0 && !rule.product_ids.includes(pid)) return false;
-  if (rule.product_category_ids.length > 0) {
-    if (catId == null || !rule.product_category_ids.includes(catId)) return false;
-  }
-  return true;
-}
-
-function calcQtyBonus(
-  rules: BonusRuleRow[],
-  qtyMap: Record<number, number>,
-  catById: Map<number, number | null>
-): number {
-  let total = 0;
-  for (const [pidStr, qty] of Object.entries(qtyMap)) {
-    const pid = Number(pidStr);
-    for (const rule of rules) {
-      if (matchRule(rule, pid, catById.get(pid) ?? null)) {
-        total += computeQtyBonusForRuleRow(rule, qty);
-        break;
-      }
-    }
-  }
-  return total;
-}
+// ─── Legacy return: bonus vs paid from order line snapshot (`is_bonus`) ───────
 
 /**
- * Core logic: compute how many of returned items are bonus (0 sum) vs paid.
- *
- * 1. Total qty of all items in period
- * 2. Remaining qty = total - returned
- * 3. original_bonus = bonus(total) using active qty rules
- * 4. remaining_bonus = bonus(remaining)
- * 5. excess_bonus = original_bonus - remaining_bonus
- * 6. From returned items: excess_bonus count are "bonus" (0 so'm), rest are paid
+ * Pullik/bonus ajratish faqat zakaz qatorlaridagi qoldiq (`itemsAdjusted`) bo‘yicha:
+ * avval bonus «pool»dan, keyin pullikdan. Aktiv bonusRule kerak emas.
  */
-async function computeReturnBonusRecalc(
-  tenantId: number,
-  clientId: number,
-  allItems: { product_id: number; qty: number; price: number; is_bonus: boolean }[],
+export function computeReturnSplitFromOrderSnapshot(
+  itemsAdjusted: OrderItemSummary[],
   returnedLines: { product_id: number; qty: number }[]
-): Promise<{
-  lines: { product_id: number; qty: number; paid_qty: number; bonus_qty: number; price: number }[];
+): {
+  lines: Array<{ product_id: number; qty: number; paid_qty: number; bonus_qty: number; price: number }>;
   recalc: {
     original_bonus_qty: number;
     remaining_bonus_qty: number;
@@ -373,92 +727,82 @@ async function computeReturnBonusRecalc(
     bonus_return_qty: number;
     refund_amount: Prisma.Decimal;
   };
-}> {
-  // Aggregated total qty by product
-  const totalQtyMap: Record<number, number> = {};
-  for (const it of allItems) {
-    totalQtyMap[it.product_id] = (totalQtyMap[it.product_id] ?? 0) + it.qty;
+} {
+  type Pool = { bonus: number; paid: number; paidValue: number };
+  const pools = new Map<number, Pool>();
+
+  for (const it of itemsAdjusted) {
+    const q = Number(it.qty);
+    if (!Number.isFinite(q) || q <= 0) continue;
+    const pid = it.product_id;
+    const row = pools.get(pid) ?? { bonus: 0, paid: 0, paidValue: 0 };
+    if (it.is_bonus) {
+      row.bonus += q;
+    } else {
+      const unit = Number(it.price);
+      const p = Number.isFinite(unit) ? unit : 0;
+      row.paid += q;
+      row.paidValue += q * p;
+    }
+    pools.set(pid, row);
   }
 
-  // Returned qty by product
-  const retMap = new Map<number, number>();
-  for (const rl of returnedLines) retMap.set(rl.product_id, rl.qty);
+  const originalBonusQty = [...pools.values()].reduce((a, x) => a + x.bonus, 0);
 
-  // Remaining qty by product
-  const remainMap: Record<number, number> = {};
-  for (const [pidStr, tQty] of Object.entries(totalQtyMap)) {
-    const pid = Number(pidStr);
-    const r = retMap.get(pid) ?? 0;
-    if (tQty - r > 0) remainMap[pid] = tQty - r;
+  const remBonus = new Map<number, number>();
+  const remPaid = new Map<number, number>();
+  const paidUnitPrice = new Map<number, number>();
+  for (const [pid, pl] of pools) {
+    remBonus.set(pid, pl.bonus);
+    remPaid.set(pid, pl.paid);
+    const avg = pl.paid > 0 ? pl.paidValue / pl.paid : 0;
+    paidUnitPrice.set(pid, avg);
   }
 
-  // Product categories
-  const pids = [...new Set([...Object.keys(totalQtyMap).map(Number)])];
-  const prods = await prisma.product.findMany({
-    where: { tenant_id: tenantId, id: { in: pids } },
-    select: { id: true, category_id: true }
-  });
-  const catById = new Map(prods.map(p => [p.id, p.category_id]));
+  for (const it of itemsAdjusted) {
+    const pid = it.product_id;
+    if ((paidUnitPrice.get(pid) ?? 0) > 0) continue;
+    const q = Number(it.qty);
+    if (!Number.isFinite(q) || q <= 0) continue;
+    if (!it.is_bonus) {
+      const unit = Number(it.price);
+      if (Number.isFinite(unit) && unit > 0) paidUnitPrice.set(pid, unit);
+    }
+  }
 
-  // Price by product
-  const priceMap = new Map<number, number>();
-  for (const it of allItems) priceMap.set(it.product_id, it.price);
-
-  // Active bonus rules
-  const client = await prisma.client.findFirst({
-    where: { id: clientId, tenant_id: tenantId },
-    select: { id: true, category: true }
-  });
-  const now = new Date();
-  const rawRules = await prisma.bonusRule.findMany({
-    where: {
-      tenant_id: tenantId, type: "qty", is_active: true,
-      AND: [
-        { OR: [{ valid_from: null }, { valid_from: { lte: now } }] },
-        { OR: [{ valid_to: null }, { valid_to: { gte: now } }] }
-      ]
-    },
-    include: bonusRuleInclude,
-    orderBy: { priority: "desc" }
-  });
-
-  const rules = rawRules
-    .map(mapBonusRuleFull)
-    .filter(r => {
-      if (!r.target_all_clients && !r.selected_client_ids.includes(clientId)) return false;
-      if (r.client_category && String(r.client_category).trim() !== String(client?.category ?? "").trim()) return false;
-      return true;
-    });
-
-  const origBonus = calcQtyBonus(rules, totalQtyMap, catById);
-  const remainBonus = calcQtyBonus(rules, remainMap, catById);
-  const excessBonus = Math.max(0, origBonus - remainBonus);
-  const totalRetQty = returnedLines.reduce((a, l) => a + l.qty, 0);
-  const bonusRetQty = Math.min(excessBonus, totalRetQty);
-  const paidRetQty = totalRetQty - bonusRetQty;
-
-  // Distribute bonus return qty across lines
-  let bonusLeft = bonusRetQty;
   let refund = new Prisma.Decimal(0);
+  let bonusReturnQty = 0;
+  let paidReturnQty = 0;
 
-  const resultLines = returnedLines.map(rl => {
-    const price = priceMap.get(rl.product_id) ?? 0;
-    const bQty = Math.min(bonusLeft, rl.qty);
+  const resultLines = returnedLines.map((rl) => {
+    const pid = rl.product_id;
+    const bAvail = remBonus.get(pid) ?? 0;
+    const pAvail = remPaid.get(pid) ?? 0;
+    const bQty = Math.min(rl.qty, bAvail);
     const pQty = rl.qty - bQty;
-    bonusLeft -= bQty;
+    remBonus.set(pid, bAvail - bQty);
+    remPaid.set(pid, pAvail - pQty);
+    const price = paidUnitPrice.get(pid) ?? 0;
     refund = refund.add(R(price).mul(pQty));
-    return { product_id: rl.product_id, qty: rl.qty, paid_qty: pQty, bonus_qty: bQty, price };
+    bonusReturnQty += bQty;
+    paidReturnQty += pQty;
+    return { product_id: pid, qty: rl.qty, paid_qty: pQty, bonus_qty: bQty, price };
   });
 
-  return { lines: resultLines, recalc: {
-    original_bonus_qty: origBonus,
-    remaining_bonus_qty: remainBonus,
-    excess_bonus: excessBonus,
-    total_return_qty: totalRetQty,
-    paid_return_qty: paidRetQty,
-    bonus_return_qty: bonusRetQty,
-    refund_amount: refund
-  }};
+  const totalRetQty = returnedLines.reduce((a, l) => a + l.qty, 0);
+
+  return {
+    lines: resultLines,
+    recalc: {
+      original_bonus_qty: originalBonusQty,
+      remaining_bonus_qty: Math.max(0, originalBonusQty - bonusReturnQty),
+      excess_bonus: bonusReturnQty,
+      total_return_qty: totalRetQty,
+      paid_return_qty: paidReturnQty,
+      bonus_return_qty: bonusReturnQty,
+      refund_amount: refund
+    }
+  };
 }
 
 // ─── Validate return qty doesn't exceed available ────────────────────────────
@@ -503,6 +847,10 @@ function scaleReturnLinesToMaxRefund(
   if (!refund.gt(maxRefund)) {
     return { lines, refund };
   }
+  /** `maxRefund.div(0)` → ∞ / NaN → Prisma xato yoki 500 */
+  if (!refund.gt(0)) {
+    return { lines, refund: new Prisma.Decimal(0) };
+  }
   const ratio = maxRefund.div(refund);
   const adjusted = lines.map((l) => {
     const oldPaid = new Prisma.Decimal(l.paid_qty);
@@ -527,6 +875,99 @@ function scaleReturnLinesToMaxRefund(
   return { lines: adjusted, refund };
 }
 
+function physicalQtyFromPeriodLine(l: CreatePeriodReturnLine | CreatePeriodReturnBatchLine): number {
+  if (l.qty != null && l.qty > 0) return l.qty;
+  return (l.paid_qty ?? 0) + (l.bonus_qty ?? 0);
+}
+
+function assertPeriodLineModes(lines: CreatePeriodReturnLine[]): void {
+  let legacy = 0;
+  let explicit = 0;
+  for (const l of lines) {
+    const isLeg = l.qty != null && l.qty > 0;
+    const isExp =
+      (l.paid_qty ?? 0) > 0 ||
+      (l.bonus_qty ?? 0) > 0 ||
+      (l.bonus_cash ?? 0) > 0;
+    if (isLeg && isExp) throw new Error("MIXED_LINE_FIELDS");
+    if (!isLeg && !isExp) throw new Error("EMPTY_LINE");
+    if (isLeg) legacy++;
+    else explicit++;
+  }
+  if (legacy > 0 && explicit > 0) throw new Error("MIXED_LINE_MODES");
+}
+
+function assertBatchLineModes(lines: CreatePeriodReturnBatchLine[]): void {
+  let legacy = 0;
+  let explicit = 0;
+  for (const l of lines) {
+    const isLeg = l.qty != null && l.qty > 0;
+    const isExp =
+      (l.paid_qty ?? 0) > 0 ||
+      (l.bonus_qty ?? 0) > 0 ||
+      (l.bonus_cash ?? 0) > 0;
+    if (isLeg && isExp) throw new Error("MIXED_LINE_FIELDS");
+    if (!isLeg && !isExp) throw new Error("EMPTY_LINE");
+    if (isLeg) legacy++;
+    else explicit++;
+  }
+  if (legacy > 0 && explicit > 0) throw new Error("MIXED_LINE_MODES");
+}
+
+function priceByProductFromItems(allItems: { product_id: number; price: string }[]): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const it of allItems) {
+    const p = Number(it.price);
+    if (Number.isFinite(p) && p >= 0) m.set(it.product_id, p);
+  }
+  return m;
+}
+
+function buildPaidBonusAvailability(
+  allItems: { product_id: number; qty: string; is_bonus: boolean }[]
+): { paid: Map<number, number>; bonus: Map<number, number> } {
+  const paid = new Map<number, number>();
+  const bonus = new Map<number, number>();
+  for (const it of allItems) {
+    const q = Number(it.qty);
+    if (!(q > 0)) continue;
+    const t = it.is_bonus ? bonus : paid;
+    t.set(it.product_id, (t.get(it.product_id) ?? 0) + q);
+  }
+  return { paid, bonus };
+}
+
+function validateExplicitReturnAgainstItems(
+  allItems: { product_id: number; qty: string; is_bonus: boolean }[],
+  lines: { product_id: number; paid_qty: number; bonus_qty: number; bonus_cash: number }[],
+  priceByProduct: Map<number, number>
+): void {
+  const { paid: paidAvail, bonus: bonusAvail } = buildPaidBonusAvailability(allItems);
+  const sumPaid = new Map<number, number>();
+  const sumBonus = new Map<number, number>();
+  const sumCash = new Map<number, number>();
+  for (const ln of lines) {
+    sumPaid.set(ln.product_id, (sumPaid.get(ln.product_id) ?? 0) + ln.paid_qty);
+    sumBonus.set(ln.product_id, (sumBonus.get(ln.product_id) ?? 0) + ln.bonus_qty);
+    if (ln.bonus_cash > 0) {
+      sumCash.set(ln.product_id, (sumCash.get(ln.product_id) ?? 0) + ln.bonus_cash);
+    }
+  }
+  for (const [pid, sp] of sumPaid) {
+    if (sp > (paidAvail.get(pid) ?? 0)) throw new Error("RETURN_QTY_EXCEEDS_ORDERED");
+  }
+  for (const [pid, sb] of sumBonus) {
+    if (sb > (bonusAvail.get(pid) ?? 0)) throw new Error("RETURN_QTY_EXCEEDS_ORDERED");
+  }
+  for (const [pid, cash] of sumCash) {
+    if (!(cash > 0)) continue;
+    const bonusLeft = (bonusAvail.get(pid) ?? 0) - (sumBonus.get(pid) ?? 0);
+    const price = priceByProduct.get(pid) ?? 0;
+    const maxCash = R(bonusLeft * price);
+    if (R(cash).gt(maxCash)) throw new Error("BONUS_CASH_EXCEEDS");
+  }
+}
+
 // ─── Create period return ────────────────────────────────────────────────────
 
 export async function createPeriodReturn(
@@ -536,8 +977,9 @@ export async function createPeriodReturn(
 ): Promise<PeriodReturnResult> {
   if (!input.lines.length) throw new Error("EMPTY_LINES");
 
-  const totalQty = input.lines.reduce((a, l) => a + l.qty, 0);
-  if (totalQty > MAX_RETURN_ITEMS) throw new Error("TOO_MANY_ITEMS");
+  assertPeriodLineModes(input.lines);
+  const totalPhys = input.lines.reduce((a, l) => a + physicalQtyFromPeriodLine(l), 0);
+  if (totalPhys > MAX_RETURN_ITEMS) throw new Error("TOO_MANY_ITEMS");
 
   const client = await prisma.client.findFirst({
     where: { id: input.client_id, tenant_id: tenantId, merged_into_client_id: null }
@@ -561,7 +1003,7 @@ export async function createPeriodReturn(
         id: input.order_id,
         tenant_id: tenantId,
         client_id: input.client_id,
-        status: { notIn: ["cancelled"] }
+        status: POLKI_SOURCE_ORDER_STATUS
       },
       select: { id: true }
     });
@@ -569,8 +1011,12 @@ export async function createPeriodReturn(
   }
 
   const cdata = orderScoped
-    ? await getClientReturnsData(tenantId, input.client_id, undefined, undefined, input.order_id)
-    : await getClientReturnsData(tenantId, input.client_id, input.date_from, input.date_to);
+    ? await getClientReturnsData(tenantId, input.client_id, undefined, undefined, input.order_id, undefined, {
+        shrinkLineQtyAfterReturns: false
+      })
+    : await getClientReturnsData(tenantId, input.client_id, input.date_from, input.date_to, undefined, undefined, {
+        shrinkLineQtyAfterReturns: false
+      });
 
   const allItems = cdata.items.map(i => ({
     product_id: i.product_id, qty: Number(i.qty), price: Number(i.price), is_bonus: i.is_bonus
@@ -594,7 +1040,10 @@ export async function createPeriodReturn(
   const alreadyRetMap = new Map<number, number>();
   const prevReturns = await prisma.salesReturn.findMany({
     where: returnWhere,
-    select: { lines: { select: { product_id: true, qty: true } } }
+    select: {
+      order_id: true,
+      lines: { select: { product_id: true, qty: true, paid_qty: true, bonus_qty: true } }
+    }
   });
   for (const ret of prevReturns) {
     for (const ln of ret.lines) {
@@ -602,28 +1051,118 @@ export async function createPeriodReturn(
     }
   }
 
-  validateReturnQty(allItems, alreadyRetMap, input.lines);
-
-  // Check max returnable value
-  const maxRet = new Prisma.Decimal(cdata.max_returnable_value);
-  if (maxRet.lte(0)) throw new Error("NOTHING_TO_RETURN");
-
-  // Bonus recalc + refund cap (qatorlar va balans mos bo‘lishi uchun)
-  const { lines: rawRetLines, recalc: rawRecalc } = await computeReturnBonusRecalc(
-    tenantId, input.client_id, allItems, input.lines
+  const itemsAdjusted = adjustOrderItemsQtyAfterPriorReturns(
+    cdata.items,
+    prevReturns.map((r) => ({ order_id: r.order_id, lines: r.lines }))
   );
-  const { lines: retLines, refund: cappedRefund } = scaleReturnLinesToMaxRefund(rawRetLines, maxRet);
-  const recalc = {
-    ...rawRecalc,
-    refund_amount: cappedRefund,
-    paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
-    bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0)
+
+  const useExplicit = input.lines.every((l) => !(l.qty != null && l.qty > 0));
+
+  if (!useExplicit) {
+    validateReturnQty(allItems, alreadyRetMap, input.lines as { product_id: number; qty: number }[]);
+  }
+
+  const maxRet = new Prisma.Decimal(cdata.max_returnable_value);
+
+  let retLines: Array<{ product_id: number; qty: number; paid_qty: number; bonus_qty: number; price: number }>;
+  let recalc: {
+    original_bonus_qty: number;
+    remaining_bonus_qty: number;
+    excess_bonus: number;
+    total_return_qty: number;
+    paid_return_qty: number;
+    bonus_return_qty: number;
+    refund_amount: Prisma.Decimal;
+    bonus_cash_applied?: string;
   };
+
+  if (useExplicit) {
+    const explicitRows = input.lines.map((l) => ({
+      product_id: l.product_id,
+      paid_qty: l.paid_qty ?? 0,
+      bonus_qty: l.bonus_qty ?? 0,
+      bonus_cash: l.bonus_cash ?? 0
+    }));
+    const priceMap = priceByProductFromItems(cdata.items);
+    validateExplicitReturnAgainstItems(itemsAdjusted, explicitRows, priceMap);
+
+    const physical: Array<{
+      product_id: number;
+      qty: number;
+      paid_qty: number;
+      bonus_qty: number;
+      price: number;
+    }> = [];
+    let cashReqTotal = new Prisma.Decimal(0);
+    for (const er of explicitRows) {
+      const price = priceMap.get(er.product_id) ?? 0;
+      if (er.paid_qty + er.bonus_qty > 0) {
+        physical.push({
+          product_id: er.product_id,
+          qty: er.paid_qty + er.bonus_qty,
+          paid_qty: er.paid_qty,
+          bonus_qty: er.bonus_qty,
+          price
+        });
+      }
+      if (er.bonus_cash > 0) cashReqTotal = cashReqTotal.add(R(er.bonus_cash));
+    }
+
+    if (physical.length === 0 && !cashReqTotal.gt(0)) throw new Error("EMPTY_LINES");
+    if (physical.length === 0 && cashReqTotal.gt(0) && maxRet.lte(0)) {
+      throw new Error("NOTHING_TO_RETURN");
+    }
+
+    const scaled =
+      physical.length > 0
+        ? scaleReturnLinesToMaxRefund(physical, maxRet)
+        : { lines: [] as typeof physical, refund: new Prisma.Decimal(0) };
+
+    const room = maxRet.sub(scaled.refund);
+    const cashApplied = cashReqTotal.lte(0)
+      ? new Prisma.Decimal(0)
+      : room.gte(cashReqTotal)
+        ? cashReqTotal
+        : room.gt(0)
+          ? room
+          : new Prisma.Decimal(0);
+    const totalRefund = scaled.refund.add(cashApplied);
+
+    retLines = scaled.lines;
+    recalc = {
+      original_bonus_qty: 0,
+      remaining_bonus_qty: 0,
+      excess_bonus: 0,
+      total_return_qty: retLines.reduce((a, l) => a + l.qty, 0),
+      paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
+      bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0),
+      refund_amount: totalRefund,
+      bonus_cash_applied: cashApplied.toString()
+    };
+  } else {
+    if (maxRet.lte(0)) throw new Error("NOTHING_TO_RETURN");
+
+    const { lines: rawRetLines, recalc: rawRecalc } = computeReturnSplitFromOrderSnapshot(
+      itemsAdjusted,
+      input.lines as { product_id: number; qty: number }[]
+    );
+    const { lines: r2, refund: cappedRefund } = scaleReturnLinesToMaxRefund(rawRetLines, maxRet);
+    retLines = r2;
+    recalc = {
+      ...rawRecalc,
+      refund_amount: cappedRefund,
+      paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
+      bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0)
+    };
+  }
 
   const number = `VR-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
   const uid = actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+  const mirrorOrderType: "return" | "return_by_order" = orderScoped ? "return_by_order" : "return";
+  const sourceOrderNumber =
+    orderScoped && cdata.orders[0]?.number ? String(cdata.orders[0].number) : null;
 
-  const result = await prisma.$transaction(async (tx) => {
+  const { ret: result, mirrorOrderId } = await prisma.$transaction(async (tx) => {
     const ret = await tx.salesReturn.create({
       data: {
         tenant_id: tenantId, number,
@@ -642,14 +1181,18 @@ export async function createPeriodReturn(
             ? String(input.refusal_reason_ref).trim().slice(0, 128)
             : null,
         created_by_user_id: uid,
-        lines: {
-          create: retLines.map(rl => ({
-            product_id: rl.product_id,
-            qty: new Prisma.Decimal(rl.qty),
-            paid_qty: new Prisma.Decimal(rl.paid_qty),
-            bonus_qty: new Prisma.Decimal(rl.bonus_qty)
-          }))
-        }
+        ...(retLines.length > 0
+          ? {
+              lines: {
+                create: retLines.map((rl) => ({
+                  product_id: rl.product_id,
+                  qty: new Prisma.Decimal(rl.qty),
+                  paid_qty: new Prisma.Decimal(rl.paid_qty),
+                  bonus_qty: new Prisma.Decimal(rl.bonus_qty)
+                }))
+              }
+            }
+          : {})
       },
       include: {
         client: { select: { name: true } },
@@ -658,8 +1201,22 @@ export async function createPeriodReturn(
       }
     });
 
+    const mirrorOrderId = await createPolkiMirrorZayavka(tx, {
+      tenantId,
+      number,
+      clientId: input.client_id,
+      warehouseId,
+      orderType: mirrorOrderType,
+      retLines,
+      refundAmount: recalc.refund_amount,
+      note: input.note?.trim() || null,
+      refusalReasonRef: input.refusal_reason_ref ?? null,
+      sourceOrderNumber
+    });
+
     // Stock: add to return warehouse
     for (const rl of retLines) {
+      if (!(rl.qty > 0)) continue;
       const delta = new Prisma.Decimal(rl.qty);
       await tx.stock.upsert({
         where: {
@@ -684,8 +1241,11 @@ export async function createPeriodReturn(
       });
     }
 
-    return ret;
+    return { ret, mirrorOrderId };
   });
+
+  emitOrderUpdated(tenantId, mirrorOrderId);
+  void invalidateDashboard(tenantId);
 
   await autoMarkReturnedOrders(
     tenantId,
@@ -696,9 +1256,26 @@ export async function createPeriodReturn(
   );
 
   await appendTenantAuditEvent({
-    tenantId, actorUserId, entityType: AuditEntityType.stock,
-    entityId: String(input.client_id), action: "period_return",
-    payload: { return_id: result.id, number: result.number, bonus_recalc: recalc }
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.stock,
+    entityId: String(input.client_id),
+    action: "period_return",
+    payload: {
+      return_id: result.id,
+      number: result.number,
+      bonus_recalc: {
+        original_bonus_qty: recalc.original_bonus_qty,
+        remaining_bonus_qty: recalc.remaining_bonus_qty,
+        excess_bonus: recalc.excess_bonus,
+        total_return_qty: recalc.total_return_qty,
+        paid_return_qty: recalc.paid_return_qty,
+        bonus_return_qty: recalc.bonus_return_qty,
+        refund_amount: recalc.refund_amount.toString(),
+        ...(recalc.bonus_cash_applied != null ? { bonus_cash_applied: recalc.bonus_cash_applied } : {})
+      },
+      mirror_order_id: mirrorOrderId
+    }
   });
 
   return {
@@ -715,6 +1292,407 @@ export async function createPeriodReturn(
     })),
     bonus_recalc: { ...recalc, refund_amount: recalc.refund_amount.toString() }
   };
+}
+
+/** Bir nechta zakazdan bitta operatsiya: har zakaz uchun alohida `sales_return`, bitta DB tranzaksiyasi. */
+export async function createPeriodReturnBatch(
+  tenantId: number,
+  input: CreatePeriodReturnBatchInput,
+  actorUserId: number | null
+): Promise<PeriodReturnBatchResult> {
+  if (!input.lines.length) throw new Error("EMPTY_LINES");
+
+  assertBatchLineModes(input.lines);
+  const totalPhys = input.lines.reduce((a, l) => a + physicalQtyFromPeriodLine(l), 0);
+  if (totalPhys > MAX_RETURN_ITEMS) throw new Error("TOO_MANY_ITEMS");
+
+  const client = await prisma.client.findFirst({
+    where: { id: input.client_id, tenant_id: tenantId, merged_into_client_id: null }
+  });
+  if (!client) throw new Error("BAD_CLIENT");
+
+  const productIds = [...new Set(input.lines.map((l) => l.product_id))];
+  const products = await prisma.product.findMany({
+    where: { tenant_id: tenantId, id: { in: productIds }, is_active: true },
+    select: { id: true, sku: true, name: true }
+  });
+  if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
+  const pMap = new Map(products.map((p) => [p.id, p]));
+
+  const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
+
+  const batchExplicit = input.lines.every((l) => !(l.qty != null && l.qty > 0));
+
+  const byOrder = new Map<
+    number,
+    | { mode: "legacy"; lines: { product_id: number; qty: number }[] }
+    | { mode: "explicit"; lines: CreatePeriodReturnLine[] }
+  >();
+
+  if (batchExplicit) {
+    const acc = new Map<number, Map<number, { paid: number; bonus: number; cash: number }>>();
+    for (const ln of input.lines) {
+      const oid = ln.order_id;
+      if (!Number.isFinite(oid) || oid < 1) throw new Error("BAD_ORDER");
+      const pmap = acc.get(oid) ?? new Map<number, { paid: number; bonus: number; cash: number }>();
+      const cur = pmap.get(ln.product_id) ?? { paid: 0, bonus: 0, cash: 0 };
+      cur.paid += ln.paid_qty ?? 0;
+      cur.bonus += ln.bonus_qty ?? 0;
+      cur.cash += ln.bonus_cash ?? 0;
+      pmap.set(ln.product_id, cur);
+      acc.set(oid, pmap);
+    }
+    for (const [oid, pmap] of acc) {
+      byOrder.set(oid, {
+        mode: "explicit",
+        lines: Array.from(pmap.entries()).map(([product_id, v]) => ({
+          product_id,
+          paid_qty: v.paid,
+          bonus_qty: v.bonus,
+          bonus_cash: v.cash
+        }))
+      });
+    }
+  } else {
+    const byOrderQty = new Map<number, Map<number, number>>();
+    for (const ln of input.lines) {
+      const oid = ln.order_id;
+      if (!Number.isFinite(oid) || oid < 1) throw new Error("BAD_ORDER");
+      const q = ln.qty ?? 0;
+      if (!(q > 0)) throw new Error("EMPTY_LINE");
+      const pmap = byOrderQty.get(oid) ?? new Map<number, number>();
+      pmap.set(ln.product_id, (pmap.get(ln.product_id) ?? 0) + q);
+      byOrderQty.set(oid, pmap);
+    }
+    for (const [oid, pmap] of byOrderQty) {
+      byOrder.set(oid, {
+        mode: "legacy",
+        lines: Array.from(pmap.entries()).map(([product_id, qty]) => ({ product_id, qty }))
+      });
+    }
+  }
+
+  for (const oid of byOrder.keys()) {
+    const ordOk = await prisma.order.findFirst({
+      where: {
+        id: oid,
+        tenant_id: tenantId,
+        client_id: input.client_id,
+        status: POLKI_SOURCE_ORDER_STATUS
+      },
+      select: { id: true }
+    });
+    if (!ordOk) throw new Error("BAD_ORDER");
+  }
+
+  type PreparedSlice = {
+    orderId: number;
+    sourceOrderNumber: string;
+    retLines: Array<{
+      product_id: number;
+      qty: number;
+      paid_qty: number;
+      bonus_qty: number;
+      price: number;
+    }>;
+    recalc: {
+      original_bonus_qty: number;
+      remaining_bonus_qty: number;
+      excess_bonus: number;
+      total_return_qty: number;
+      paid_return_qty: number;
+      bonus_return_qty: number;
+      refund_amount: Prisma.Decimal;
+    };
+    number: string;
+  };
+
+  const prepared: PreparedSlice[] = [];
+  const orderEntries = Array.from(byOrder.entries()).sort((a, b) => a[0] - b[0]);
+
+  for (const [orderId, slice] of orderEntries) {
+    const cdata = await getClientReturnsData(
+      tenantId,
+      input.client_id,
+      undefined,
+      undefined,
+      orderId,
+      undefined,
+      { shrinkLineQtyAfterReturns: false }
+    );
+    const allItems = cdata.items.map((i) => ({
+      product_id: i.product_id,
+      qty: Number(i.qty),
+      price: Number(i.price),
+      is_bonus: i.is_bonus
+    }));
+
+    const returnWhere: Prisma.SalesReturnWhereInput = {
+      tenant_id: tenantId,
+      client_id: input.client_id,
+      status: "posted",
+      order_id: orderId
+    };
+
+    const alreadyRetMap = new Map<number, number>();
+    const prevReturns = await prisma.salesReturn.findMany({
+      where: returnWhere,
+      select: {
+        order_id: true,
+        lines: { select: { product_id: true, qty: true, paid_qty: true, bonus_qty: true } }
+      }
+    });
+    for (const ret of prevReturns) {
+      for (const ln of ret.lines) {
+        alreadyRetMap.set(ln.product_id, (alreadyRetMap.get(ln.product_id) ?? 0) + Number(ln.qty));
+      }
+    }
+
+    const itemsAdjusted = adjustOrderItemsQtyAfterPriorReturns(
+      cdata.items,
+      prevReturns.map((r) => ({ order_id: r.order_id, lines: r.lines }))
+    );
+
+    const maxRet = new Prisma.Decimal(cdata.max_returnable_value);
+
+    let retLines: PreparedSlice["retLines"];
+    let recalc: PreparedSlice["recalc"];
+
+    if (slice.mode === "legacy") {
+      validateReturnQty(allItems, alreadyRetMap, slice.lines);
+      if (maxRet.lte(0)) throw new Error("NOTHING_TO_RETURN");
+
+      const { lines: rawRetLines, recalc: rawRecalc } = computeReturnSplitFromOrderSnapshot(
+        itemsAdjusted,
+        slice.lines
+      );
+      const { lines: r2, refund: cappedRefund } = scaleReturnLinesToMaxRefund(rawRetLines, maxRet);
+      retLines = r2;
+      recalc = {
+        ...rawRecalc,
+        refund_amount: cappedRefund,
+        paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
+        bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0)
+      };
+    } else {
+      const explicitRows = slice.lines.map((l) => ({
+        product_id: l.product_id,
+        paid_qty: l.paid_qty ?? 0,
+        bonus_qty: l.bonus_qty ?? 0,
+        bonus_cash: l.bonus_cash ?? 0
+      }));
+      const priceMap = priceByProductFromItems(cdata.items);
+      validateExplicitReturnAgainstItems(itemsAdjusted, explicitRows, priceMap);
+
+      const physical: PreparedSlice["retLines"] = [];
+      let cashReqTotal = new Prisma.Decimal(0);
+      for (const er of explicitRows) {
+        const price = priceMap.get(er.product_id) ?? 0;
+        if (er.paid_qty + er.bonus_qty > 0) {
+          physical.push({
+            product_id: er.product_id,
+            qty: er.paid_qty + er.bonus_qty,
+            paid_qty: er.paid_qty,
+            bonus_qty: er.bonus_qty,
+            price
+          });
+        }
+        if (er.bonus_cash > 0) cashReqTotal = cashReqTotal.add(R(er.bonus_cash));
+      }
+
+      if (physical.length === 0 && !cashReqTotal.gt(0)) throw new Error("EMPTY_LINES");
+      if (physical.length === 0 && cashReqTotal.gt(0) && maxRet.lte(0)) {
+        throw new Error("NOTHING_TO_RETURN");
+      }
+
+      const scaled =
+        physical.length > 0
+          ? scaleReturnLinesToMaxRefund(physical, maxRet)
+          : { lines: [] as PreparedSlice["retLines"], refund: new Prisma.Decimal(0) };
+
+      const room = maxRet.sub(scaled.refund);
+      const cashApplied = cashReqTotal.lte(0)
+        ? new Prisma.Decimal(0)
+        : room.gte(cashReqTotal)
+          ? cashReqTotal
+          : room.gt(0)
+            ? room
+            : new Prisma.Decimal(0);
+      const totalRefund = scaled.refund.add(cashApplied);
+
+      retLines = scaled.lines;
+      recalc = {
+        original_bonus_qty: 0,
+        remaining_bonus_qty: 0,
+        excess_bonus: 0,
+        total_return_qty: retLines.reduce((a, l) => a + l.qty, 0),
+        paid_return_qty: retLines.reduce((a, l) => a + l.paid_qty, 0),
+        bonus_return_qty: retLines.reduce((a, l) => a + l.bonus_qty, 0),
+        refund_amount: totalRefund
+      };
+    }
+
+    const number = `VR-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+    const sourceOrderNumber = cdata.orders[0]?.number?.trim() || String(orderId);
+    prepared.push({ orderId, sourceOrderNumber, retLines, recalc, number });
+  }
+
+  const uid = actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+
+  const { rows: created, mirrorOrderIds } = await prisma.$transaction(async (tx) => {
+    const rows: Awaited<ReturnType<typeof tx.salesReturn.create>>[] = [];
+    const mirrorOrderIds: number[] = [];
+    for (const p of prepared) {
+      const ret = await tx.salesReturn.create({
+        data: {
+          tenant_id: tenantId,
+          number: p.number,
+          client_id: input.client_id,
+          order_id: p.orderId,
+          warehouse_id: warehouseId,
+          status: "posted",
+          refund_amount: p.recalc.refund_amount,
+          return_type: "partial",
+          date_from: null,
+          date_to: null,
+          note: input.note?.trim() || null,
+          refusal_reason_ref:
+            input.refusal_reason_ref != null && String(input.refusal_reason_ref).trim()
+              ? String(input.refusal_reason_ref).trim().slice(0, 128)
+              : null,
+          created_by_user_id: uid,
+          ...(p.retLines.length > 0
+            ? {
+                lines: {
+                  create: p.retLines.map((rl) => ({
+                    product_id: rl.product_id,
+                    qty: new Prisma.Decimal(rl.qty),
+                    paid_qty: new Prisma.Decimal(rl.paid_qty),
+                    bonus_qty: new Prisma.Decimal(rl.bonus_qty)
+                  }))
+                }
+              }
+            : {})
+        },
+        include: {
+          client: { select: { name: true } },
+          order: { select: { number: true } },
+          warehouse: { select: { name: true } }
+        }
+      });
+
+      const mid = await createPolkiMirrorZayavka(tx, {
+        tenantId,
+        number: p.number,
+        clientId: input.client_id,
+        warehouseId,
+        orderType: "return_by_order",
+        retLines: p.retLines,
+        refundAmount: p.recalc.refund_amount,
+        note: input.note?.trim() || null,
+        refusalReasonRef: input.refusal_reason_ref ?? null,
+        sourceOrderNumber: p.sourceOrderNumber
+      });
+      mirrorOrderIds.push(mid);
+
+      for (const rl of p.retLines) {
+        if (!(rl.qty > 0)) continue;
+        const delta = new Prisma.Decimal(rl.qty);
+        await tx.stock.upsert({
+          where: {
+            tenant_id_warehouse_id_product_id: {
+              tenant_id: tenantId,
+              warehouse_id: warehouseId,
+              product_id: rl.product_id
+            }
+          },
+          create: {
+            tenant_id: tenantId,
+            warehouse_id: warehouseId,
+            product_id: rl.product_id,
+            qty: delta
+          },
+          update: { qty: { increment: delta } }
+        });
+      }
+
+      if (p.recalc.refund_amount.gt(0)) {
+        const bal = await tx.clientBalance.upsert({
+          where: { tenant_id_client_id: { tenant_id: tenantId, client_id: input.client_id } },
+          create: {
+            tenant_id: tenantId,
+            client_id: input.client_id,
+            balance: p.recalc.refund_amount
+          },
+          update: { balance: { increment: p.recalc.refund_amount } }
+        });
+        await tx.clientBalanceMovement.create({
+          data: {
+            client_balance_id: bal.id,
+            delta: p.recalc.refund_amount,
+            note: `Vazvrat: ${p.number}`,
+            user_id: uid
+          }
+        });
+      }
+
+      rows.push(ret);
+    }
+    return { rows, mirrorOrderIds };
+  });
+
+  for (const mid of mirrorOrderIds) {
+    emitOrderUpdated(tenantId, mid);
+  }
+  void invalidateDashboard(tenantId);
+
+  await autoMarkReturnedOrders(tenantId, input.client_id, undefined, undefined, uid);
+
+  const returns: PeriodReturnResult[] = [];
+  for (let i = 0; i < prepared.length; i++) {
+    const p = prepared[i]!;
+    const result = created[i]!;
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.stock,
+      entityId: String(input.client_id),
+      action: "period_return",
+      payload: {
+        return_id: result.id,
+        number: result.number,
+        order_id: p.orderId,
+        bonus_recalc: {
+          original_bonus_qty: p.recalc.original_bonus_qty,
+          remaining_bonus_qty: p.recalc.remaining_bonus_qty,
+          excess_bonus: p.recalc.excess_bonus,
+          total_return_qty: p.recalc.total_return_qty,
+          paid_return_qty: p.recalc.paid_return_qty,
+          bonus_return_qty: p.recalc.bonus_return_qty,
+          refund_amount: p.recalc.refund_amount.toString()
+        },
+        batch: true
+      }
+    });
+
+    returns.push({
+      id: result.id,
+      number: result.number,
+      refund_amount: result.refund_amount?.toString() ?? null,
+      lines: p.retLines.map((rl) => ({
+        product_id: rl.product_id,
+        sku: pMap.get(rl.product_id)?.sku ?? "",
+        name: pMap.get(rl.product_id)?.name ?? "",
+        qty: String(rl.qty),
+        paid_qty: String(rl.paid_qty),
+        bonus_qty: String(rl.bonus_qty),
+        paid_amount: R(rl.price).mul(rl.paid_qty).toString()
+      })),
+      bonus_recalc: { ...p.recalc, refund_amount: p.recalc.refund_amount.toString() }
+    });
+  }
+
+  return { returns };
 }
 
 // ─── Auto-mark orders as "returned" ─────────────────────────────────────────

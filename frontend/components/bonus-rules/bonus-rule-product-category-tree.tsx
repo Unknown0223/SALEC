@@ -164,7 +164,7 @@ function CategoryProductsPanel({
 
   if (q.isLoading) {
     return (
-      <div className={cn("py-2 text-sm text-muted-foreground", depth > 0 && "pl-6")}>Yuklanmoqda…</div>
+      <div className={cn("py-2 text-sm text-muted-foreground", depth > 0 && "pl-6")}>Загрузка…</div>
     );
   }
   if (q.isError) {

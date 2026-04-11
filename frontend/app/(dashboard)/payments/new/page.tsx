@@ -72,25 +72,25 @@ export default function NewPaymentPage() {
     },
     onError: (e: Error) => {
       if (e.message === "client") {
-        setErr("Mijozni tanlang.");
+        setErr("Выберите клиента.");
         return;
       }
       if (e.message === "amount") {
-        setErr("Summa musbat bo‘lsin.");
+        setErr("Сумма должна быть больше нуля.");
         return;
       }
-      setErr("Saqlab bo‘lmadi.");
+      setErr("Не удалось сохранить.");
     }
   });
 
   return (
     <PageShell>
       <PageHeader
-        title="Yangi to‘lov"
-        description="Mijoz balansiga qo‘shiladi (kirim)."
+        title="Новый платёж"
+        description="Зачисление на баланс клиента."
         actions={
           <Link href="/payments" className="text-sm text-muted-foreground underline-offset-2 hover:underline">
-            ← Ro‘yxat
+            ← К списку
           </Link>
         }
       />
@@ -105,11 +105,11 @@ export default function NewPaymentPage() {
             </p>
           ) : null}
           <div className="space-y-2">
-            <Label>Mijoz</Label>
+            <Label>Клиент</Label>
             <FilterSelect
               data-testid="new-payment-client"
               className="flex h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
-              emptyLabel="Tanlang"
+              emptyLabel="Выберите"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               disabled={mut.isPending || clientsQ.isLoading}
@@ -123,18 +123,18 @@ export default function NewPaymentPage() {
             </FilterSelect>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="pay-ord">Zakaz ID (ixtiyoriy)</Label>
+            <Label htmlFor="pay-ord">Заказ (необязательно)</Label>
             <Input
               id="pay-ord"
               inputMode="numeric"
-              placeholder="Masalan 42"
+              placeholder="Например 42"
               value={orderId}
               onChange={(e) => setOrderId(e.target.value)}
               disabled={mut.isPending}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="pay-amt">Summa</Label>
+            <Label htmlFor="pay-amt">Сумма</Label>
             <Input
               id="pay-amt"
               data-testid="new-payment-amount"
@@ -145,10 +145,10 @@ export default function NewPaymentPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label>To‘lov turi</Label>
+            <Label>Способ оплаты</Label>
             <FilterSelect
               className="flex h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
-              emptyLabel="Tur"
+              emptyLabel="Тип"
               value={paymentType}
               onChange={(e) => setPaymentType(e.target.value)}
               disabled={mut.isPending}
@@ -161,7 +161,7 @@ export default function NewPaymentPage() {
             </FilterSelect>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="pay-note">Izoh</Label>
+            <Label htmlFor="pay-note">Комментарий</Label>
             <Input
               id="pay-note"
               value={note}
@@ -178,7 +178,7 @@ export default function NewPaymentPage() {
               mut.mutate();
             }}
           >
-            {mut.isPending ? "Saqlanmoqda…" : "Saqlash"}
+            {mut.isPending ? "Сохранение…" : "Сохранить"}
           </Button>
         </div>
       )}

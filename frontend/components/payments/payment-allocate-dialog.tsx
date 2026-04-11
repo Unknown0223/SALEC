@@ -85,44 +85,44 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
   });
 
   const errorMsg = allocQ.isError
-    ? getUserFacingError(allocQ.error, "Taqsimotlar yuklanmadi")
+    ? getUserFacingError(allocQ.error, "Не удалось загрузить распределения")
     : allocateMut.isError
-      ? getUserFacingError(allocateMut.error, "Taqsimlash muvaffaqiyatsiz")
+      ? getUserFacingError(allocateMut.error, "Распределение не выполнено")
       : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg" data-testid="payment-allocate-dialog">
         <DialogHeader>
-          <DialogTitle>To‘lovni zakazlarga taqsimlash</DialogTitle>
+          <DialogTitle>Распределение платежа по заказам</DialogTitle>
           <DialogDescription>
-            Mijozning eng eski ochiq zakazlariga navbat bilan (FIFO) qoldiq summani yopadi. Balansdagi pul o‘zgarmaydi —
-            faqat qaysi zakaz qoplanganini hisobga oladi.
+            Сумма закрывает самые старые неоплаченные заказы клиента по очереди (FIFO). Баланс клиента не меняется — только
+            привязка к заказам.
           </DialogDescription>
         </DialogHeader>
 
         {payment ? (
           <div className="space-y-3 text-sm">
             <p>
-              <span className="text-muted-foreground">Mijoz:</span>{" "}
+              <span className="text-muted-foreground">Клиент:</span>{" "}
               <Link className="text-primary underline" href={`/clients/${payment.client_id}`}>
                 {payment.client_name}
               </Link>
             </p>
             <p>
-              <span className="text-muted-foreground">To‘lov summasi:</span>{" "}
+              <span className="text-muted-foreground">Сумма платежа:</span>{" "}
               <span className="font-medium tabular-nums">
                 {formatNumberGrouped(payment.amount, { maxFractionDigits: 2 })}
               </span>
             </p>
             <p>
-              <span className="text-muted-foreground">Allaqachon taqsimlangan:</span>{" "}
+              <span className="text-muted-foreground">Уже распределено:</span>{" "}
               <span className="font-medium tabular-nums">
                 {formatNumberGrouped(allocatedSum, { minFractionDigits: 2, maxFractionDigits: 2 })}
               </span>
             </p>
             <p>
-              <span className="text-muted-foreground">Taqsimlash uchun qoldiq:</span>{" "}
+              <span className="text-muted-foreground">Остаток к распределению:</span>{" "}
               <span className="font-medium tabular-nums">
                 {formatNumberGrouped(unallocated, { minFractionDigits: 2, maxFractionDigits: 2 })}
               </span>
@@ -135,15 +135,15 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
                 <table className="w-full text-xs">
                   <thead className="app-table-thead">
                     <tr>
-                      <th className="px-2 py-1.5 text-left">Zakaz</th>
-                      <th className="px-2 py-1.5 text-right">Summa</th>
+                      <th className="px-2 py-1.5 text-left">Заказ</th>
+                      <th className="px-2 py-1.5 text-right">Сумма</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(allocQ.data ?? []).length === 0 ? (
                       <tr>
                         <td colSpan={2} className="px-2 py-3 text-center text-muted-foreground">
-                          Hali taqsimot yo‘q
+                          Распределений пока нет
                         </td>
                       </tr>
                     ) : (
@@ -167,14 +167,14 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
 
             {errorMsg ? <p className="text-sm text-destructive">{errorMsg}</p> : null}
             {allocateOk && !errorMsg ? (
-              <p className="text-sm text-emerald-700 dark:text-emerald-400">Taqsimlash bajarildi.</p>
+              <p className="text-sm text-emerald-700 dark:text-emerald-400">Распределение выполнено.</p>
             ) : null}
           </div>
         ) : null}
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Yopish
+            Закрыть
           </Button>
           <Button
             type="button"
@@ -182,7 +182,7 @@ export function PaymentAllocateDialog({ open, onOpenChange, tenantSlug, payment,
             disabled={!payment || unallocated <= 0 || allocateMut.isPending || allocQ.isLoading}
             onClick={() => void allocateMut.mutate()}
           >
-            {allocateMut.isPending ? "Taqsimlanmoqda…" : "FIFO bo‘yicha taqsimlash"}
+            {allocateMut.isPending ? "Распределение…" : "Распределить (FIFO)"}
           </Button>
         </DialogFooter>
       </DialogContent>

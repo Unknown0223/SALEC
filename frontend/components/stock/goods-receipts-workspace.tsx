@@ -6,6 +6,7 @@ import { TableColumnSettingsDialog } from "@/components/data-table/table-column-
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
+import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
@@ -15,10 +16,10 @@ import { api } from "@/lib/api";
 import { STALE } from "@/lib/query-stale";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { useQuery } from "@tanstack/react-query";
-import { Download, LayoutGrid, ListFilter, RefreshCw, Search } from "lucide-react";
+import { CalendarDays, Download, LayoutGrid, ListFilter, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 const TABLE_ID = "goods_receipts.list.v1";
 const COLS = [
@@ -146,6 +147,8 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
   const [draftStatus, setDraftStatus] = useState("");
   const [draftFrom, setDraftFrom] = useState("");
   const [draftTo, setDraftTo] = useState("");
+  const [draftRangeOpen, setDraftRangeOpen] = useState(false);
+  const draftRangeAnchorRef = useRef<HTMLButtonElement>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [applied, setApplied] = useState({
     warehouseId: "",
@@ -358,23 +361,23 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
                 <option value="cancelled">Отменён</option>
               </select>
             </div>
-            <div className="grid min-w-[9rem] gap-1.5">
-              <Label className="text-xs">С даты</Label>
-              <Input
-                type="date"
-                className="h-9"
-                value={draftFrom}
-                onChange={(e) => setDraftFrom(e.target.value)}
-              />
-            </div>
-            <div className="grid min-w-[9rem] gap-1.5">
-              <Label className="text-xs">По дату</Label>
-              <Input
-                type="date"
-                className="h-9"
-                value={draftTo}
-                onChange={(e) => setDraftTo(e.target.value)}
-              />
+            <div className="grid min-w-[11rem] max-w-[16rem] gap-1.5">
+              <Label className="text-xs">Период</Label>
+              <button
+                ref={draftRangeAnchorRef}
+                type="button"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                  "h-9 w-full justify-start gap-2 font-normal",
+                  draftRangeOpen && "border-primary/60 bg-primary/5"
+                )}
+                aria-expanded={draftRangeOpen}
+                aria-haspopup="dialog"
+                onClick={() => setDraftRangeOpen((o) => !o)}
+              >
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <span className="truncate text-sm">{formatDateRangeButton(draftFrom, draftTo)}</span>
+              </button>
             </div>
             <Button
               type="button"
@@ -553,6 +556,17 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
           </Button>
         </div>
       </div>
+      <DateRangePopover
+        open={draftRangeOpen}
+        onOpenChange={setDraftRangeOpen}
+        anchorRef={draftRangeAnchorRef}
+        dateFrom={draftFrom}
+        dateTo={draftTo}
+        onApply={({ dateFrom, dateTo }) => {
+          setDraftFrom(dateFrom);
+          setDraftTo(dateTo);
+        }}
+      />
     </PageShell>
   );
 }

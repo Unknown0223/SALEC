@@ -23,7 +23,7 @@ export function BonusRuleCategoryHoverField({ checked, onCheckedChange, disabled
         disabled={disabled}
         onChange={(e) => onCheckedChange(e.target.checked)}
       />
-      Kategoriya
+      Категория
     </label>
   );
 }

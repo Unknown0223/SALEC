@@ -112,28 +112,28 @@ export default function PaymentDetailPage() {
           "mb-2 h-8 w-fit -ml-2 text-muted-foreground"
         )}
       >
-        ← To‘lovlar ro‘yxati
+        ← К списку платежей
       </Link>
 
       {!hydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya…</p>
+        <p className="text-sm text-muted-foreground">Сессия…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Kirish
+            Войти
           </Link>
         </p>
       ) : invalid ? (
-        <p className="text-sm text-destructive">Noto‘g‘ri identifikator.</p>
+        <p className="text-sm text-destructive">Неверный идентификатор.</p>
       ) : detailQ.isLoading ? (
-        <p className="text-sm text-muted-foreground">Yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : detailQ.isError ? (
-        <p className="text-sm text-destructive">To‘lov topilmadi yoki yuklanmadi.</p>
+        <p className="text-sm text-destructive">Платёж не найден или не загрузился.</p>
       ) : p && data ? (
         <>
           <PageHeader
-            title={`To‘lov #${p.id}`}
-            description={`${p.payment_type} · ${new Date(p.created_at).toLocaleString()}`}
+            title={`Платёж #${p.id}`}
+            description={`${p.payment_type} · ${new Date(p.created_at).toLocaleString("ru-RU")}`}
             actions={
               <div className="flex flex-wrap gap-2">
                 <button
@@ -141,7 +141,7 @@ export default function PaymentDetailPage() {
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                   onClick={() => setAllocateOpen(true)}
                 >
-                  Zakazlarga taqsimlash
+                  Распределить по заказам
                 </button>
                 {canDelete ? (
                   <>
@@ -151,9 +151,9 @@ export default function PaymentDetailPage() {
                         value={cancelReasonRef}
                         onChange={(e) => setCancelReasonRef(e.target.value)}
                         title="Bekor qilish sababi (audit)"
-                        aria-label="To‘lovni bekor qilish sababi"
+                        aria-label="Причина отмены платежа"
                       >
-                        <option value="">Sabab (ixtiyoriy)</option>
+                        <option value="">Причина (необязательно)</option>
                         {cancelReasonOptions.map((o) => (
                           <option key={o.value} value={o.value}>
                             {o.label}
@@ -168,14 +168,14 @@ export default function PaymentDetailPage() {
                       onClick={() => {
                         if (
                           confirm(
-                            `To‘lov #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}) o‘chirish? Balans va taqsimotlar qaytariladi.`
+                            `Удалить платёж #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })})? Баланс и распределения будут скорректированы.`
                           )
                         ) {
                           deleteMut.mutate();
                         }
                       }}
                     >
-                      O‘chirish
+                      Удалить
                     </button>
                   </>
                 ) : null}
@@ -184,12 +184,12 @@ export default function PaymentDetailPage() {
           />
 
           {deleteMut.isError ? (
-            <p className="mb-4 text-sm text-destructive">O‘chirib bo‘lmadi.</p>
+            <p className="mb-4 text-sm text-destructive">Не удалось удалить.</p>
           ) : null}
 
           <div className="mb-6 grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
             <div>
-              <p className="text-xs text-muted-foreground">Mijoz</p>
+              <p className="text-xs text-muted-foreground">Клиент</p>
               <Link
                 className="font-medium text-primary underline-offset-2 hover:underline"
                 href={`/clients/${p.client_id}`}
@@ -198,7 +198,7 @@ export default function PaymentDetailPage() {
               </Link>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Bog‘langan zakaz</p>
+              <p className="text-xs text-muted-foreground">Связанный заказ</p>
               {p.order_id != null && p.order_number ? (
                 <Link
                   className="font-mono text-sm text-primary underline-offset-2 hover:underline"
@@ -211,22 +211,22 @@ export default function PaymentDetailPage() {
               )}
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Summa</p>
+              <p className="text-xs text-muted-foreground">Сумма</p>
               <p className="text-lg font-semibold tabular-nums">{formatNumberGrouped(p.amount, { maxFractionDigits: 2 })}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Taqsimlangan / qoldiq</p>
+              <p className="text-xs text-muted-foreground">Распределено / остаток</p>
               <p className="text-sm tabular-nums">
                 {formatNumberGrouped(data.allocated_total, { maxFractionDigits: 2 })} /{" "}
                 <span className="font-medium">{formatNumberGrouped(data.unallocated, { maxFractionDigits: 2 })}</span>
               </p>
             </div>
             <div className="sm:col-span-2">
-              <p className="text-xs text-muted-foreground">Izoh</p>
+              <p className="text-xs text-muted-foreground">Комментарий</p>
               <p className="text-sm">{p.note?.trim() ? p.note : "—"}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Yaratgan</p>
+              <p className="text-xs text-muted-foreground">Создал</p>
               <p className="text-sm">{p.created_by_name ?? "—"}</p>
             </div>
           </div>

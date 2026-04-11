@@ -22,6 +22,8 @@ export type BonusRuleRow = {
   buy_qty: number | null;
   free_qty: number | null;
   min_sum: number | null;
+  /** `order` | `calendar_month` — `sum` (min sum) va `qty` (shartdagi miqdor) uchun */
+  sum_threshold_scope: string;
   discount_pct: number | null;
   priority: number;
   is_active: boolean;
@@ -44,6 +46,14 @@ export type BonusRuleRow = {
   once_per_client: boolean;
   one_plus_one_gift: boolean;
   prerequisite_rule_ids: number[];
+  /** Bo‘sh = cheklov yo‘q. `User.branch` bilan mos (case-insensitive). */
+  scope_branch_codes: string[];
+  /** Bo‘sh = cheklov yo‘q. Zakaz agenti ID; filial bilan birga — OR. */
+  scope_agent_user_ids: number[];
+  /** Bo‘sh = cheklov yo‘q. `User.trade_direction_id`. */
+  scope_trade_direction_ids: number[];
+  /** Ro‘yxat API: bog‘langan qoidalar shartining qisqa matni (nomisiz), `prerequisite_rule_ids` tartibi bilan. */
+  prerequisite_summaries?: string[];
   conditions: BonusConditionRow[];
 };
 
@@ -62,6 +72,7 @@ export type CreateBonusRuleInput = {
   buy_qty?: number | null;
   free_qty?: number | null;
   min_sum?: number | null;
+  sum_threshold_scope?: "order" | "calendar_month";
   discount_pct?: number | null;
   priority?: number;
   is_active?: boolean;
@@ -82,6 +93,9 @@ export type CreateBonusRuleInput = {
   once_per_client?: boolean;
   one_plus_one_gift?: boolean;
   prerequisite_rule_ids?: number[];
+  scope_branch_codes?: string[];
+  scope_agent_user_ids?: number[];
+  scope_trade_direction_ids?: number[];
   conditions?: BonusConditionInput[];
 };
 
@@ -92,6 +106,19 @@ export const bonusRuleInclude = {
     orderBy: { sort_order: "asc" as const }
   }
 } as const;
+
+function normalizeScopeBranchCodes(codes: readonly string[] | undefined): string[] {
+  const out = new Set<string>();
+  for (const c of codes ?? []) {
+    const t = String(c).trim();
+    if (t) out.add(t);
+  }
+  return [...out].sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+function normalizeScopePositiveIds(ids: readonly number[] | undefined): number[] {
+  return [...new Set((ids ?? []).filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => a - b);
+}
 
 function mapCondition(c: BonusRuleCondition): BonusConditionRow {
   return {
@@ -105,6 +132,41 @@ function mapCondition(c: BonusRuleCondition): BonusConditionRow {
   };
 }
 
+/** Jadval / hover uchun: bonus nomisiz, faqat shart (miqdor qadam, min summa, %). */
+export function bonusRuleConditionSummary(r: RuleWithConditions): string {
+  const type = r.type;
+  if (type === "qty" && r.conditions?.length) {
+    const scopeHint = (r.sum_threshold_scope ?? "order") === "calendar_month" ? " (мес.)" : "";
+    return (
+      r.conditions
+        .map((c) => {
+          const minQty = c.min_qty != null ? Number(c.min_qty) : null;
+          const maxQty = c.max_qty != null ? Number(c.max_qty) : null;
+          const range =
+            minQty != null || maxQty != null ? `${minQty ?? "—"}…${maxQty ?? "—"}: ` : "";
+          const step = Number(c.step_qty);
+          const bonus = Number(c.bonus_qty);
+          const maxB = c.max_bonus_qty != null ? Number(c.max_bonus_qty) : null;
+          return `${range}кажд. ${step}→+${bonus}${maxB != null ? ` (≤${maxB})` : ""}`;
+        })
+        .join("; ") + scopeHint
+    );
+  }
+  if (type === "qty") {
+    const scopeHint = (r.sum_threshold_scope ?? "order") === "calendar_month" ? " (мес.)" : "";
+    return `${r.buy_qty ?? "—"} + ${r.free_qty ?? "—"} бонус${scopeHint}`;
+  }
+  if (type === "sum") {
+    const scope = r.sum_threshold_scope ?? "order";
+    const scopeHint = scope === "calendar_month" ? " (мес.)" : "";
+    return `мин. ${r.min_sum != null ? Number(r.min_sum) : "—"}${scopeHint}`;
+  }
+  if (type === "discount") {
+    return `${r.discount_pct != null ? Number(r.discount_pct) : "—"}%`;
+  }
+  return type;
+}
+
 export function mapBonusRuleFull(r: RuleWithConditions): BonusRuleRow {
   return {
     id: r.id,
@@ -114,6 +176,7 @@ export function mapBonusRuleFull(r: RuleWithConditions): BonusRuleRow {
     buy_qty: r.buy_qty,
     free_qty: r.free_qty,
     min_sum: r.min_sum != null ? Number(r.min_sum) : null,
+    sum_threshold_scope: r.sum_threshold_scope === "calendar_month" ? "calendar_month" : "order",
     discount_pct: r.discount_pct != null ? Number(r.discount_pct) : null,
     priority: r.priority,
     is_active: r.is_active,
@@ -136,6 +199,9 @@ export function mapBonusRuleFull(r: RuleWithConditions): BonusRuleRow {
     once_per_client: r.once_per_client,
     one_plus_one_gift: r.one_plus_one_gift,
     prerequisite_rule_ids: [...(r.prerequisite_rule_ids ?? [])],
+    scope_branch_codes: normalizeScopeBranchCodes(r.scope_branch_codes ?? []),
+    scope_agent_user_ids: normalizeScopePositiveIds(r.scope_agent_user_ids ?? []),
+    scope_trade_direction_ids: normalizeScopePositiveIds(r.scope_trade_direction_ids ?? []),
     conditions: r.conditions.map(mapCondition)
   };
 }
@@ -334,6 +400,12 @@ function ruleScalarsFromInput(
     buy_qty: buyQty,
     free_qty: freeQty,
     min_sum: input.min_sum ?? null,
+    sum_threshold_scope:
+      input.type === "sum" || input.type === "qty"
+        ? input.sum_threshold_scope === "calendar_month"
+          ? "calendar_month"
+          : "order"
+        : "order",
     discount_pct: input.discount_pct ?? null,
     priority: input.priority ?? 0,
     is_active: input.is_active ?? true,
@@ -353,7 +425,10 @@ function ruleScalarsFromInput(
     in_blocks: input.in_blocks ?? true,
     once_per_client: input.once_per_client ?? false,
     one_plus_one_gift: input.one_plus_one_gift ?? false,
-    prerequisite_rule_ids: [...new Set((input.prerequisite_rule_ids ?? []).filter((n) => n > 0))].slice(0, 200)
+    prerequisite_rule_ids: [...new Set((input.prerequisite_rule_ids ?? []).filter((n) => n > 0))].slice(0, 200),
+    scope_branch_codes: normalizeScopeBranchCodes(input.scope_branch_codes ?? []),
+    scope_agent_user_ids: normalizeScopePositiveIds(input.scope_agent_user_ids ?? []),
+    scope_trade_direction_ids: normalizeScopePositiveIds(input.scope_trade_direction_ids ?? [])
   };
 }
 
@@ -476,7 +551,29 @@ export async function updateBonusRule(
     prerequisite_rule_ids:
       input.prerequisite_rule_ids !== undefined
         ? input.prerequisite_rule_ids
-        : [...existing.prerequisite_rule_ids]
+        : [...existing.prerequisite_rule_ids],
+    scope_branch_codes:
+      input.scope_branch_codes !== undefined
+        ? normalizeScopeBranchCodes(input.scope_branch_codes)
+        : normalizeScopeBranchCodes(existing.scope_branch_codes ?? []),
+    scope_agent_user_ids:
+      input.scope_agent_user_ids !== undefined
+        ? normalizeScopePositiveIds(input.scope_agent_user_ids)
+        : normalizeScopePositiveIds(existing.scope_agent_user_ids ?? []),
+    scope_trade_direction_ids:
+      input.scope_trade_direction_ids !== undefined
+        ? normalizeScopePositiveIds(input.scope_trade_direction_ids)
+        : normalizeScopePositiveIds(existing.scope_trade_direction_ids ?? []),
+    sum_threshold_scope:
+      type !== "sum" && type !== "qty"
+        ? "order"
+        : input.sum_threshold_scope !== undefined
+          ? input.sum_threshold_scope === "calendar_month"
+            ? "calendar_month"
+            : "order"
+          : existing.sum_threshold_scope === "calendar_month"
+            ? "calendar_month"
+            : "order"
   };
 
   let nextConditions: BonusConditionInput[] | undefined;
@@ -512,12 +609,18 @@ export async function updateBonusRule(
     Boolean(merged.one_plus_one_gift)
   );
 
-  validateAutoBonusProductScope(
-    type,
-    merged.is_manual ?? false,
-    merged.product_ids ?? [],
-    merged.product_category_ids ?? []
-  );
+  /** Jadvaldan faqat bog‘langan qoidalarni saqlash — assortimentni o‘zgartirmaydi; qoidani to‘ldirish shart emas. */
+  const inputKeys = Object.keys(input) as (keyof UpdateBonusRuleInput)[];
+  const onlyPrerequisiteRuleIdsUpdate =
+    inputKeys.length > 0 && inputKeys.every((k) => k === "prerequisite_rule_ids");
+  if (!onlyPrerequisiteRuleIdsUpdate) {
+    validateAutoBonusProductScope(
+      type,
+      merged.is_manual ?? false,
+      merged.product_ids ?? [],
+      merged.product_category_ids ?? []
+    );
+  }
 
   if (input.prerequisite_rule_ids !== undefined) {
     await validatePrerequisiteRuleIds(tenantId, id, merged.prerequisite_rule_ids);
@@ -567,6 +670,14 @@ export async function updateBonusRule(
   if (input.one_plus_one_gift !== undefined) data.one_plus_one_gift = merged.one_plus_one_gift;
   if (input.prerequisite_rule_ids !== undefined) {
     data.prerequisite_rule_ids = [...new Set((merged.prerequisite_rule_ids ?? []).filter((n) => n > 0))].slice(0, 200);
+  }
+  if (input.sum_threshold_scope !== undefined || input.type !== undefined) {
+    data.sum_threshold_scope = merged.sum_threshold_scope;
+  }
+  if (input.scope_branch_codes !== undefined) data.scope_branch_codes = merged.scope_branch_codes;
+  if (input.scope_agent_user_ids !== undefined) data.scope_agent_user_ids = merged.scope_agent_user_ids;
+  if (input.scope_trade_direction_ids !== undefined) {
+    data.scope_trade_direction_ids = merged.scope_trade_direction_ids;
   }
 
   await prisma.$transaction(async (tx) => {

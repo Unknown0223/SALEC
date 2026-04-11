@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { BonusRuleRow } from "../src/modules/bonus-rules/bonus-rules.service";
+import { Prisma as PrismaClient } from "@prisma/client";
 import {
+  effectivePurchasedQtyForQtyRule,
+  effectiveSubtotalForSumMinRule,
   QTY_AGGREGATE_PURCHASED_PID,
   resolveQtyGiftProductId,
   ruleHasPurchaseScope,
   ruleMatchesClient,
+  ruleMatchesOrderAgentScope,
   ruleMatchesOrderProductScope
 } from "../src/modules/orders/order-bonus-apply";
 
@@ -17,6 +21,7 @@ function rule(over: Partial<BonusRuleRow>): BonusRuleRow {
     buy_qty: null,
     free_qty: null,
     min_sum: null,
+    sum_threshold_scope: "order",
     discount_pct: null,
     priority: 1,
     is_active: true,
@@ -38,10 +43,104 @@ function rule(over: Partial<BonusRuleRow>): BonusRuleRow {
     in_blocks: false,
     once_per_client: false,
     one_plus_one_gift: false,
+    prerequisite_rule_ids: [],
+    scope_branch_codes: [],
+    scope_agent_user_ids: [],
+    scope_trade_direction_ids: [],
     conditions: [],
     ...over
   };
 }
+
+describe("effectivePurchasedQtyForQtyRule", () => {
+  it("order — faqat joriy miqdor", () => {
+    const r = rule({ type: "qty", sum_threshold_scope: "order" });
+    expect(
+      effectivePurchasedQtyForQtyRule(r, {
+        orderQty: 10,
+        productIdForMonthLookup: null,
+        monthAggregateExclOrder: 50,
+        monthByProductExclOrder: new Map()
+      })
+    ).toBe(10);
+  });
+
+  it("calendar_month — agregat: oy + zakaz", () => {
+    const r = rule({ type: "qty", sum_threshold_scope: "calendar_month" });
+    expect(
+      effectivePurchasedQtyForQtyRule(r, {
+        orderQty: 10,
+        productIdForMonthLookup: null,
+        monthAggregateExclOrder: 50,
+        monthByProductExclOrder: new Map()
+      })
+    ).toBe(60);
+  });
+
+  it("calendar_month — SKU bo‘yicha", () => {
+    const r = rule({ type: "qty", sum_threshold_scope: "calendar_month" });
+    const m = new Map([[5, 20]]);
+    expect(
+      effectivePurchasedQtyForQtyRule(r, {
+        orderQty: 3,
+        productIdForMonthLookup: 5,
+        monthAggregateExclOrder: 999,
+        monthByProductExclOrder: m
+      })
+    ).toBe(23);
+  });
+});
+
+describe("effectiveSubtotalForSumMinRule", () => {
+  it("order — faqat bazaviy summa", () => {
+    const r = rule({ type: "sum", sum_threshold_scope: "order" });
+    const base = new PrismaClient.Decimal(100);
+    const month = new PrismaClient.Decimal(500);
+    expect(effectiveSubtotalForSumMinRule(r, base, month).toString()).toBe("100");
+  });
+
+  it("calendar_month — oy + joriy zakaz", () => {
+    const r = rule({ type: "sum", sum_threshold_scope: "calendar_month" });
+    const base = new PrismaClient.Decimal(100);
+    const month = new PrismaClient.Decimal(500);
+    expect(effectiveSubtotalForSumMinRule(r, base, month).toString()).toBe("600");
+  });
+});
+
+describe("ruleMatchesOrderAgentScope", () => {
+  const agent = (over: Partial<{ userId: number; branch: string | null; trade_direction_id: number | null }>) => ({
+    userId: 1,
+    branch: "Tash" as string | null,
+    trade_direction_id: 10 as number | null,
+    ...over
+  });
+
+  it("hammasi bo‘sh — true", () => {
+    const r = rule({});
+    expect(ruleMatchesOrderAgentScope(r, null)).toBe(true);
+    expect(ruleMatchesOrderAgentScope(r, agent({}))).toBe(true);
+  });
+
+  it("filial mos — true", () => {
+    const r = rule({ scope_branch_codes: ["Tash"] });
+    expect(ruleMatchesOrderAgentScope(r, agent({ branch: "tash" }))).toBe(true);
+  });
+
+  it("filial mos emas, agent ro‘yxatda — OR", () => {
+    const r = rule({ scope_branch_codes: ["Other"], scope_agent_user_ids: [1] });
+    expect(ruleMatchesOrderAgentScope(r, agent({ userId: 1, branch: "X" }))).toBe(true);
+  });
+
+  it("agent yo‘q, cheklov bor — false", () => {
+    const r = rule({ scope_agent_user_ids: [1] });
+    expect(ruleMatchesOrderAgentScope(r, null)).toBe(false);
+  });
+
+  it("yo‘nalish ID mos emas — false", () => {
+    const r = rule({ scope_trade_direction_ids: [99] });
+    expect(ruleMatchesOrderAgentScope(r, agent({ trade_direction_id: 10 }))).toBe(false);
+  });
+});
 
 describe("ruleMatchesClient", () => {
   it("rad etadi — target_all_clients false va mijoz ro‘yxatda yo‘q", () => {

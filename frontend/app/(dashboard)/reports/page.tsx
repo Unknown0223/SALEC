@@ -14,7 +14,11 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
+import { CalendarDays } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { cn } from "@/lib/utils";
+import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 
 const chartLoading = () => (
   <div className="h-[280px] animate-pulse rounded-lg bg-muted/30" aria-hidden />
@@ -284,19 +288,6 @@ function statusLabel(status: string): string {
   return map[status] ?? status;
 }
 
-/* ─── Date Range ────────────────────────────────────────── */
-
-function dateRangePresets() {
-  const today = new Date();
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return [
-    { label: "Bugun", from: fmt(today), to: fmt(today) },
-    { label: "Bu hafta", from: fmt(new Date(Date.now() - 6 * 86400000)), to: fmt(today) },
-    { label: "Bu oy", from: fmt(new Date(Date.now() - 29 * 86400000)), to: fmt(today) },
-    { label: "90 kun", from: fmt(new Date(Date.now() - 89 * 86400000)), to: fmt(today) }
-  ];
-}
-
 /* ─── Page ──────────────────────────────────────────────── */
 
 function useDateRange() {
@@ -314,6 +305,8 @@ function ReportsContent() {
   const searchParams = useSearchParams();
   const activeTab = searchParams.get("tab") ?? "summary";
   const { from, to } = useDateRange();
+  const [davrOpen, setDavrOpen] = useState(false);
+  const davrRef = useRef<HTMLButtonElement>(null);
   const churnMonths = Math.min(24, Math.max(1, Number(searchParams.get("churn_months") ?? "3") || 3));
 
   const recLimit = 50;
@@ -580,34 +573,30 @@ function ReportsContent() {
       {/* Date range bar */}
       <Card className="shadow-panel">
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
-          <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Davr:</span>
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setDateRange(e.target.value, to)}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Davr:</span>
+          <button
+            ref={davrRef}
+            type="button"
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "h-9 gap-2 font-normal",
+              davrOpen && "border-primary/60 bg-primary/5"
+            )}
+            aria-expanded={davrOpen}
+            aria-haspopup="dialog"
+            onClick={() => setDavrOpen((o) => !o)}
+          >
+            <CalendarDays className="h-4 w-4 shrink-0" />
+            <span className="text-sm">{formatDateRangeButton(from, to)}</span>
+          </button>
+          <DateRangePopover
+            open={davrOpen}
+            onOpenChange={setDavrOpen}
+            anchorRef={davrRef}
+            dateFrom={from}
+            dateTo={to}
+            onApply={({ dateFrom, dateTo }) => setDateRange(dateFrom, dateTo)}
           />
-          <span className="text-xs text-muted-foreground">—</span>
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setDateRange(from, e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-          />
-          {dateRangePresets().map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              onClick={() => setDateRange(p.from, p.to)}
-              className={`h-8 rounded-md px-3 text-xs font-medium transition-colors ${
-                from === p.from && to === p.to
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
         </CardContent>
       </Card>
 

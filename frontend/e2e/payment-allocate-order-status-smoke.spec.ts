@@ -35,8 +35,8 @@ test.describe("Payment allocate + order status filter (FAZA 10)", () => {
     await openBtn.click();
     const dialog = page.getByTestId("payment-allocate-dialog");
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "To‘lovni zakazlarga taqsimlash" })).toBeVisible();
-    await dialog.getByRole("button", { name: "Yopish" }).click();
+    await expect(page.getByRole("heading", { name: /Распределение платежа|To‘lovni zakazlarga/i })).toBeVisible();
+    await dialog.getByRole("button", { name: /Закрыть|Yopish/ }).click();
     await expect(dialog).toBeHidden({ timeout: 10_000 });
   });
 });

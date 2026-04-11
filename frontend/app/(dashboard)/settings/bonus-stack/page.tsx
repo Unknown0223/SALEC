@@ -35,7 +35,7 @@ export default function BonusStackHubPage() {
   if (!hydrated) {
     return (
       <PageShell>
-        <p className="text-sm text-muted-foreground">Sessiya…</p>
+        <p className="text-sm text-muted-foreground">Сессия…</p>
       </PageShell>
     );
   }
@@ -45,7 +45,7 @@ export default function BonusStackHubPage() {
       <PageShell>
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Kirish
+            Войти
           </Link>
         </p>
       </PageShell>
@@ -57,32 +57,32 @@ export default function BonusStackHubPage() {
   const cards = [
     {
       href: "/settings/bonus-rules",
-      title: "Bonus qoidalari",
-      desc: "Miqdor va summa bo‘yicha bonuslar — ro‘yxat va tahrirlash.",
+      title: "Правила бонусов",
+      desc: "Бонусы по количеству и сумме — список и редактирование.",
       icon: Gift
     },
     {
       href: "/settings/discount-rules/active",
-      title: "Chegirmalar (skidka)",
-      desc: "Foizli chegirma qoidalari — alohida bo‘lim.",
+      title: "Скидки",
+      desc: "Процентные скидки — отдельный раздел.",
       icon: Percent
     },
     {
       href: "/settings/bonus-rules/strategy",
-      title: "Bonus strategiyasi",
-      desc: "Birlashtirish tartibi (stack policy).",
+      title: "Стратегия бонусов",
+      desc: "Порядок объединения (stack).",
       icon: Layers
     },
     {
       href: "/settings/bonus-rules/active",
-      title: "Faol qoidalar",
-      desc: "Faqat yoqilgan qoidalar.",
+      title: "Активные правила",
+      desc: "Только включённые правила.",
       icon: ListChecks
     },
     {
       href: "/settings/bonus-rules/inactive",
-      title: "Nofaol qoidalar",
-      desc: "O‘chirilgan yoki vaqtinchalik to‘xtatilgan.",
+      title: "Неактивные правила",
+      desc: "Выключенные или приостановленные.",
       icon: ListX
     }
   ];
@@ -90,11 +90,11 @@ export default function BonusStackHubPage() {
   return (
     <PageShell className="max-w-4xl">
       <PageHeader
-        title="Bonuslar va chegirmalar"
-        description="Bonus stack sozlamasi va qoidalar bo‘limlari."
+        title="Бонусы и скидки"
+        description="Настройка bonus stack и разделы правил."
         actions={
           <Link href="/settings" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-            Katalog
+            Каталог
           </Link>
         }
       />
@@ -104,31 +104,31 @@ export default function BonusStackHubPage() {
           <div className="flex items-start gap-3">
             <Settings className="mt-0.5 size-5 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-medium">Tenant bonus stack</h3>
+              <h3 className="text-sm font-medium">Bonus stack тенанта</h3>
               {stackQ.isLoading ? (
                 <p className="mt-1 text-sm text-muted-foreground">Загрузка…</p>
               ) : stackQ.isError ? (
-                <p className="mt-1 text-sm text-destructive">O‘qib bo‘lmadi.</p>
+                <p className="mt-1 text-sm text-destructive">Не удалось прочитать.</p>
               ) : (
                 <dl className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
                   <div>
-                    <dt className="inline text-xs uppercase tracking-wide">Rejim</dt>
+                    <dt className="inline text-xs uppercase tracking-wide">Режим</dt>
                     <dd className="text-foreground">{bs?.mode ?? "—"}</dd>
                   </div>
                   <div>
-                    <dt className="inline text-xs uppercase tracking-wide">Max. birlik</dt>
+                    <dt className="inline text-xs uppercase tracking-wide">Макс. единиц</dt>
                     <dd className="text-foreground">{bs?.max_units ?? "—"}</dd>
                   </div>
                   <div className="sm:col-span-2">
-                    <dt className="inline text-xs uppercase tracking-wide">Barcha moslarni taqiqlash</dt>
-                    <dd className="text-foreground">{bs?.forbid_apply_all_eligible === true ? "Ha" : "Yo‘q"}</dd>
+                    <dt className="inline text-xs uppercase tracking-wide">Запрет выдать все слоты</dt>
+                    <dd className="text-foreground">{bs?.forbid_apply_all_eligible === true ? "Да" : "Нет"}</dd>
                   </div>
                 </dl>
               )}
               <p className="mt-3 text-xs text-muted-foreground">
-                Stack qiymatini o‘zgartirish uchun API{" "}
-                <code className="rounded bg-muted px-1">PATCH /settings/bonus-stack</code> yoki keyingi tahrirda shu sahifaga
-                forma qo‘shiladi.
+                Изменить stack можно через API{" "}
+                <code className="rounded bg-muted px-1">PATCH /settings/bonus-stack</code> или форму на странице
+                стратегии.
               </p>
             </div>
           </div>

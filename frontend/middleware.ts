@@ -37,6 +37,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/clients") ||
     pathname.startsWith("/orders") ||
     pathname.startsWith("/payments") ||
+    pathname.startsWith("/client-expenses") ||
+    pathname.startsWith("/initial-client-balances") ||
+    pathname.startsWith("/client-balances") ||
     pathname.startsWith("/returns") ||
     pathname.startsWith("/reports") ||
     pathname.startsWith("/stock") ||
@@ -74,6 +77,12 @@ export const config = {
     "/orders/:path*",
     "/payments",
     "/payments/:path*",
+    "/client-expenses",
+    "/client-expenses/:path*",
+    "/initial-client-balances",
+    "/initial-client-balances/:path*",
+    "/client-balances",
+    "/client-balances/:path*",
     "/returns",
     "/returns/:path*",
     "/reports",

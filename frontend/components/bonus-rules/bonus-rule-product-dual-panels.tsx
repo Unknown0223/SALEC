@@ -44,17 +44,17 @@ function ProductTreeColumn({
       <div className="space-y-2 border-b border-border/80 p-3">
         <Input
           className="h-9"
-          placeholder="Qidirish… (nom yoki SKU)"
+          placeholder="Поиск… (название или SKU)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={formDisabled}
-          aria-label={`${title} qidiruv`}
+          aria-label={`Поиск: ${title}`}
         />
         {selectionHint ? (
           <p className="text-xs leading-snug text-amber-800 dark:text-amber-200/95">{selectionHint}</p>
         ) : null}
         <p className="text-[11px] text-muted-foreground">
-          Kategoriyani bosing — ochiladi; mahsulot yonidagi belgi bilan tanlang.
+          Нажмите категорию — раскроется; товар отмечайте флажком.
         </p>
       </div>
       <div className="min-h-[12rem] max-h-[min(22rem,42vh)] min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
@@ -69,9 +69,9 @@ function ProductTreeColumn({
         />
       </div>
       <div className="border-t border-border/80 px-3 py-1.5 text-[11px] text-muted-foreground">
-        Tanlangan: {selectedIds.length} ta
+        Выбрано: {selectedIds.length}
         {selectionDisabled ? (
-          <span className="ml-1 text-amber-800/90 dark:text-amber-200/80">(saqlashda qo‘llanmaydi)</span>
+          <span className="ml-1 text-amber-800/90 dark:text-amber-200/80">(не сохраняется)</span>
         ) : null}
       </div>
     </div>
@@ -120,7 +120,7 @@ export function BonusRuleProductDualPanels({
     >
       {showTriggerColumn ? (
         <ProductTreeColumn
-          title="Mahsulot (trigger)"
+          title="Товар (триггер)"
           tenantSlug={tenantSlug}
           selectedIds={triggerProductIds}
           onSelectedIdsChange={onTriggerChange}
@@ -128,9 +128,9 @@ export function BonusRuleProductDualPanels({
           selectionDisabled={!triggerPickEnabled}
           selectionHint={
             onlyByCategory
-              ? "Kategoriya + tanlangan SKU: yuqoridagi kategoriyalar va chapdagi belgilar birgalikda — zakazda faqat shu mahsulotlar shartga kiradi."
+              ? "Категория + выбранные SKU: вместе задают, какие товары в заказе участвуют в условии."
               : !onlyByAssortment
-                ? "Ikkala cheklov ham o‘chiq — barcha mahsulotlar trigger. SKU yoki kategoriya bilan cheklash uchun «Faqat assortiment» yoki «Kategoriya»ni yoqing."
+                ? "Оба ограничения выключены — триггером считаются все товары. Включите «Только ассортимент» или «Категория», чтобы ограничить по SKU/категории."
                 : undefined
           }
           querySuffix="dual-trigger"
@@ -138,7 +138,7 @@ export function BonusRuleProductDualPanels({
       ) : null}
       {showBonusColumn ? (
         <ProductTreeColumn
-          title="Bonus mahsulotlari"
+          title="Бонус-товары"
           tenantSlug={tenantSlug}
           selectedIds={bonusProductIds}
           onSelectedIdsChange={onBonusChange}

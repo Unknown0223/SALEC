@@ -81,6 +81,9 @@ export async function allocatePayment(
       where: { id: paymentId, tenant_id: tenantId }
     });
     if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+    if (String(payment.entry_kind ?? "payment") === "client_expense") {
+      throw new Error("NOT_ALLOCATABLE");
+    }
 
     // Remaining payment amount after any previous allocations
     const alreadyAllocated = await getAllocatedForPayment(tx, tenantId, paymentId);

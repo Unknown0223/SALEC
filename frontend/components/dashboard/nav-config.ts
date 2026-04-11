@@ -1,4 +1,4 @@
-export type NavItem = { href: string; label: string; roles?: string[] };
+export type NavItem = { href: string; label: string; roles?: string[]; disabled?: boolean };
 
 export type NavGroup = { title: string; items: NavItem[] };
 
@@ -49,6 +49,53 @@ export function dashboardOrdersNavFlatItems(): NavItem[] {
   return dashboardOrdersNav.groups.flatMap((g) => g.items);
 }
 
+/**
+ * Касса — rasm (Lalaku): guruhlar + ichki havolalar.
+ * `disabled: true` — sahifa keyinroq qo‘shiladi (`href` hozircha `#`).
+ */
+export const dashboardKassaNav: {
+  sectionTitle: string;
+  groups: { title: string; items: NavItem[] }[];
+} = {
+  sectionTitle: "Касса",
+  groups: [
+    {
+      title: "РАСЧЕТЫ С КЛИЕНТАМИ",
+      items: [
+        { href: "/payments", label: "Оплаты клиентов" },
+        { href: "/client-expenses", label: "Расходы клиента" },
+        { href: "/initial-client-balances", label: "Начальные балансы клиентов" },
+        { href: "/client-balances", label: "Балансы клиентов (оплата и долги)" },
+        { href: "#", label: "Балансы клиентов по консигнации", disabled: true }
+      ]
+    },
+    {
+      title: "ОТЧЁТЫ",
+      items: [
+        { href: "/reports", label: "Отчёт по приходам" },
+        { href: "#", label: "Движение денежных средств", disabled: true },
+        { href: "#", label: "Акт сверки", disabled: true },
+        { href: "#", label: "Долги по заказам", disabled: true }
+      ]
+    },
+    {
+      title: "ПРОЧИЕ",
+      items: [
+        { href: "/settings/cash-desks", label: "Касса" },
+        { href: "#", label: "Курс валют", disabled: true },
+        { href: "#", label: "Приходы", disabled: true },
+        { href: "/expenses", label: "Расходы" },
+        { href: "#", label: "Заявки на оплату", disabled: true },
+        { href: "#", label: "Долги экспедитора", disabled: true }
+      ]
+    }
+  ]
+};
+
+export function dashboardKassaNavFlatItems(): NavItem[] {
+  return dashboardKassaNav.groups.flatMap((g) => g.items).filter((i) => !i.disabled && i.href !== "#");
+}
+
 /** Foydalanuvchilar / spravochnik */
 export const dashboardUsersNav: { sectionTitle: string; items: NavItem[] } = {
   sectionTitle: "Пользователи",
@@ -65,6 +112,7 @@ export type SidebarLayoutEntry =
   | { kind: "link"; item: NavItem }
   | { kind: "orders" }
   | { kind: "stock" }
+  | { kind: "kassa" }
   | { kind: "users" };
 
 export const dashboardSidebarLayout: SidebarLayoutEntry[] = [
@@ -77,10 +125,7 @@ export const dashboardSidebarLayout: SidebarLayoutEntry[] = [
   { kind: "link", item: { href: "/tasks", label: "Задачи" } },
   { kind: "link", item: { href: "/routes", label: "Маршрут" } },
   { kind: "link", item: { href: "/routes/track", label: "GPS трек" } },
-  { kind: "link", item: { href: "/settings/cash-desks", label: "Касса" } },
-  { kind: "link", item: { href: "/payments", label: "Платежи" } },
-  { kind: "link", item: { href: "/expenses", label: "Расходы" } },
-  { kind: "link", item: { href: "/reports", label: "Отчёты" } },
+  { kind: "kassa" },
   { kind: "users" },
   { kind: "link", item: { href: "/settings", label: "Настройки" } }
 ];
@@ -95,6 +140,8 @@ export function flattenMobileNavItems(): NavItem[] {
       out.push(...dashboardOrdersNavFlatItems());
     } else if (e.kind === "stock") {
       out.push(...dashboardStockNav.items);
+    } else if (e.kind === "kassa") {
+      out.push(...dashboardKassaNavFlatItems());
     } else if (e.kind === "users") {
       out.push(...dashboardUsersNav.items);
     }

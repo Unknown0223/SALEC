@@ -10,7 +10,8 @@ import { parseBonusStackPolicy } from "./bonus-stack-policy";
 import {
   fetchClientUsedAutoBonusRuleIds,
   fetchClientUsedAutoBonusRuleIdsExcludingOrder,
-  resolveOrderBonusesForCreate
+  resolveOrderBonusesForCreate,
+  type OrderAgentBonusContext
 } from "./order-bonus-apply";
 import {
   ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE,
@@ -495,13 +496,20 @@ export async function createOrder(
     throw new Error("BAD_WAREHOUSE");
   }
 
+  let orderAgentForBonus: OrderAgentBonusContext | null = null;
   if (input.agent_id != null) {
     const u = await prisma.user.findFirst({
-      where: { id: input.agent_id, tenant_id: tenantId, is_active: true }
+      where: { id: input.agent_id, tenant_id: tenantId, is_active: true },
+      select: { id: true, branch: true, trade_direction_id: true }
     });
     if (!u) {
       throw new Error("BAD_AGENT");
     }
+    orderAgentForBonus = {
+      userId: u.id,
+      branch: u.branch,
+      trade_direction_id: u.trade_direction_id
+    };
   }
 
   const priceType = (input.price_type ?? "").trim() || "retail";
@@ -557,6 +565,10 @@ export async function createOrder(
   /** Vaqtincha noyob raqam; tranzaksiya ichida `String(id)` ga almashtiriladi (qisqa, № bilan mos). */
   const tempOrderNumber = `__${tenantId}_${Date.now()}_${randomBytes(5).toString("hex")}`;
 
+  const orderType = normalizeOrderType(input.order_type);
+  /** Vozvrat s polki (yoki qo‘lda «возврат») — sotuv emas: klientdan omborga, logistika zanjiri «new…delivered» shart emas. */
+  const isInboundShelfReturn = orderType === "return" || orderType === "return_by_order";
+
   const tenantRow = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { settings: true }
@@ -569,7 +581,7 @@ export async function createOrder(
     : new Map<number, number>();
 
   const order = await prisma.$transaction(async (tx) => {
-    const applyBonus = input.apply_bonus ?? true;
+    const applyBonus = isInboundShelfReturn ? false : (input.apply_bonus ?? true);
     let paidAfterDisc = lineData;
     let paidTotal = totalSum;
     let bonusDrafts: Array<{
@@ -594,7 +606,9 @@ export async function createOrder(
         stackPolicy,
         usedRuleIds,
         validatedGiftOverrides,
-        input.warehouse_id
+        input.warehouse_id,
+        { referenceAt: new Date() },
+        orderAgentForBonus
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;
@@ -619,7 +633,7 @@ export async function createOrder(
       applyBonus && rawDisc.gt(0) ? roundOrderMoney(rawDisc) : new Prisma.Decimal(0);
 
     const creditLimit = client.credit_limit;
-    if (creditLimit.gt(0)) {
+    if (!isInboundShelfReturn && creditLimit.gt(0)) {
       const balRow = await tx.clientBalance.findUnique({
         where: { tenant_id_client_id: { tenant_id: tenantId, client_id: client.id } },
         select: { balance: true }
@@ -655,58 +669,60 @@ export async function createOrder(
       const cur = needByProduct.get(productId) ?? new Prisma.Decimal(0);
       needByProduct.set(productId, cur.add(q));
     };
-    for (const l of paidAfterDisc) {
-      addNeed(l.product_id, l.qty);
-    }
-    for (const b of bonusCreates) {
-      addNeed(b.product_id, b.qty);
-    }
-    // ✅ BATCH: bitta so'rov bilan barcha stocklarni olish (N+1 fix)
-    const stockProductIds = [...needByProduct.keys()];
-    const stockRows = await tx.stock.findMany({
-      where: { tenant_id: tenantId, warehouse_id: whId, product_id: { in: stockProductIds } },
-      select: { product_id: true, qty: true, reserved_qty: true }
-    });
-    const stockMap = new Map(stockRows.map(s => [s.product_id, s]));
-
-    for (const [productId, needQty] of needByProduct) {
-      const row = stockMap.get(productId);
-      const qty = row?.qty ?? new Prisma.Decimal(0);
-      const reserved = row?.reserved_qty ?? new Prisma.Decimal(0);
-      const available = qty.sub(reserved);
-      if (available.lt(needQty)) {
-        const err = new Error("INSUFFICIENT_STOCK") as Error & {
-          product_id: number;
-          available: string;
-          requested: string;
-        };
-        err.product_id = productId;
-        err.available = available.toString();
-        err.requested = needQty.toString();
-        throw err;
+    if (!isInboundShelfReturn) {
+      for (const l of paidAfterDisc) {
+        addNeed(l.product_id, l.qty);
       }
-    }
+      for (const b of bonusCreates) {
+        addNeed(b.product_id, b.qty);
+      }
+      // ✅ BATCH: bitta so'rov bilan barcha stocklarni olish (N+1 fix)
+      const stockProductIds = [...needByProduct.keys()];
+      const stockRows = await tx.stock.findMany({
+        where: { tenant_id: tenantId, warehouse_id: whId, product_id: { in: stockProductIds } },
+        select: { product_id: true, qty: true, reserved_qty: true }
+      });
+      const stockMap = new Map(stockRows.map(s => [s.product_id, s]));
 
-    // ✅ Rezervatsiya: zakaz yaratilganda reserved_qty oshirish
-    for (const [productId, reserveQty] of needByProduct) {
-      await tx.stock.upsert({
-        where: {
-          tenant_id_warehouse_id_product_id: {
+      for (const [productId, needQty] of needByProduct) {
+        const row = stockMap.get(productId);
+        const qty = row?.qty ?? new Prisma.Decimal(0);
+        const reserved = row?.reserved_qty ?? new Prisma.Decimal(0);
+        const available = qty.sub(reserved);
+        if (available.lt(needQty)) {
+          const err = new Error("INSUFFICIENT_STOCK") as Error & {
+            product_id: number;
+            available: string;
+            requested: string;
+          };
+          err.product_id = productId;
+          err.available = available.toString();
+          err.requested = needQty.toString();
+          throw err;
+        }
+      }
+
+      // ✅ Rezervatsiya: zakaz yaratilganda reserved_qty oshirish
+      for (const [productId, reserveQty] of needByProduct) {
+        await tx.stock.upsert({
+          where: {
+            tenant_id_warehouse_id_product_id: {
+              tenant_id: tenantId,
+              warehouse_id: whId,
+              product_id: productId
+            }
+          },
+          create: {
             tenant_id: tenantId,
             warehouse_id: whId,
-            product_id: productId
+            product_id: productId,
+            reserved_qty: reserveQty
+          },
+          update: {
+            reserved_qty: { increment: reserveQty }
           }
-        },
-        create: {
-          tenant_id: tenantId,
-          warehouse_id: whId,
-          product_id: productId,
-          reserved_qty: reserveQty
-        },
-        update: {
-          reserved_qty: { increment: reserveQty }
-        }
-      });
+        });
+      }
     }
 
     let expeditorUserId: number | null;
@@ -756,8 +772,12 @@ export async function createOrder(
         ? null
         : input.request_type_ref.trim().slice(0, 128) || null;
 
-    const orderType = normalizeOrderType(input.order_type);
-    const statusForType = orderType === "order" ? "new" : "new";
+    const statusForType =
+      orderType === "order"
+        ? "new"
+        : orderType === "return" || orderType === "return_by_order"
+          ? "returned"
+          : "new";
 
     const created = await tx.order.create({
       data: {
@@ -791,6 +811,40 @@ export async function createOrder(
       },
       include: orderDetailInclude
     });
+
+    if (isInboundShelfReturn) {
+      const inboundByProduct = new Map<number, Prisma.Decimal>();
+      const addIn = (productId: number, q: Prisma.Decimal) => {
+        const cur = inboundByProduct.get(productId) ?? new Prisma.Decimal(0);
+        inboundByProduct.set(productId, cur.add(q));
+      };
+      for (const l of paidAfterDisc) {
+        addIn(l.product_id, l.qty);
+      }
+      for (const b of bonusCreates) {
+        addIn(b.product_id, b.qty);
+      }
+      for (const [productId, dq] of inboundByProduct) {
+        if (!dq.gt(0)) continue;
+        await tx.stock.upsert({
+          where: {
+            tenant_id_warehouse_id_product_id: {
+              tenant_id: tenantId,
+              warehouse_id: whId,
+              product_id: productId
+            }
+          },
+          create: {
+            tenant_id: tenantId,
+            warehouse_id: whId,
+            product_id: productId,
+            qty: dq
+          },
+          update: { qty: { increment: dq } }
+        });
+      }
+    }
+
     return tx.order.update({
       where: { id: created.id },
       data: { number: String(created.id) },
@@ -906,13 +960,20 @@ export async function updateOrderLines(
     }
   }
 
+  let orderAgentForBonus: OrderAgentBonusContext | null = null;
   if (agentId != null) {
     const u = await prisma.user.findFirst({
-      where: { id: agentId, tenant_id: tenantId, is_active: true }
+      where: { id: agentId, tenant_id: tenantId, is_active: true },
+      select: { id: true, branch: true, trade_direction_id: true }
     });
     if (!u) {
       throw new Error("BAD_AGENT");
     }
+    orderAgentForBonus = {
+      userId: u.id,
+      branch: u.branch,
+      trade_direction_id: u.trade_direction_id
+    };
   }
 
   const lineData: Array<{
@@ -1000,7 +1061,9 @@ export async function updateOrderLines(
         stackPolicy,
         usedRuleIds,
         giftSelectionMap,
-        warehouseId
+        warehouseId,
+        { referenceAt: existing.created_at, excludeOrderId: orderId },
+        orderAgentForBonus
       );
       paidAfterDisc = resolved.lines;
       paidTotal = resolved.total;

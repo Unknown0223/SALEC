@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
-import { Prisma as PrismaClient } from "@prisma/client";
+import { Prisma, Prisma as PrismaClient } from "@prisma/client";
+import { utcRangeForCalendarMonthContaining } from "../../lib/calendar-month-range";
 import {
   bonusRuleInclude,
   computeQtyBonusForRuleRow,
@@ -8,6 +8,7 @@ import {
 } from "../bonus-rules/bonus-rules.service";
 import { getProductPrice } from "../products/product-prices.service";
 import { resolveBonusSlotTakeCount, type BonusStackPolicy } from "./bonus-stack-policy";
+import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "./order-status";
 
 type ProductLite = { id: number; category_id: number | null };
 
@@ -30,6 +31,151 @@ function roundMoney(d: PrismaClient.Decimal): PrismaClient.Decimal {
   return d.toDecimalPlaces(2, PrismaClient.Decimal.ROUND_HALF_UP);
 }
 
+/** Summa-porog uchun kalendar oyi chegaralari (mijoz bo‘yicha yig‘indi). */
+export const BONUS_SUM_THRESHOLD_TIMEZONE = "Asia/Tashkent";
+
+async function fetchClientMonthMerchandiseSubtotalExclOrder(
+  tx: Prisma.TransactionClient,
+  opts: {
+    tenantId: number;
+    clientId: number;
+    referenceAt: Date;
+    excludeOrderId?: number;
+    timeZone?: string;
+  }
+): Promise<PrismaClient.Decimal> {
+  const tz = opts.timeZone ?? BONUS_SUM_THRESHOLD_TIMEZONE;
+  const { startUtc, endUtcExclusive } = utcRangeForCalendarMonthContaining(opts.referenceAt, tz);
+  const excluded = Prisma.join(
+    ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE.map((s) => Prisma.sql`${s}`)
+  );
+  const excl =
+    opts.excludeOrderId != null ? Prisma.sql`AND o.id <> ${opts.excludeOrderId}` : Prisma.empty;
+  const rows = await tx.$queryRaw<[{ total: unknown }]>(Prisma.sql`
+    SELECT COALESCE(SUM(o.total_sum + o.discount_sum), 0) AS total
+    FROM orders o
+    WHERE o.tenant_id = ${opts.tenantId}
+      AND o.client_id = ${opts.clientId}
+      AND o.order_type = 'order'
+      AND o.status NOT IN (${excluded})
+      AND o.created_at >= ${startUtc}
+      AND o.created_at < ${endUtcExclusive}
+      ${excl}
+  `);
+  const v = rows[0]?.total;
+  return v != null ? new PrismaClient.Decimal(String(v)) : new PrismaClient.Decimal(0);
+}
+
+/** Kalendar oy: boshqa zakazlardan pullik qatorlar `qty` yig‘indisi (bonus qatorlarsiz), joriy zakaz chiqarilgan. */
+async function fetchClientMonthPaidQtyAggregateExclOrder(
+  tx: Prisma.TransactionClient,
+  opts: {
+    tenantId: number;
+    clientId: number;
+    referenceAt: Date;
+    excludeOrderId?: number;
+    timeZone?: string;
+  }
+): Promise<number> {
+  const tz = opts.timeZone ?? BONUS_SUM_THRESHOLD_TIMEZONE;
+  const { startUtc, endUtcExclusive } = utcRangeForCalendarMonthContaining(opts.referenceAt, tz);
+  const excluded = Prisma.join(
+    ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE.map((s) => Prisma.sql`${s}`)
+  );
+  const excl =
+    opts.excludeOrderId != null ? Prisma.sql`AND o.id <> ${opts.excludeOrderId}` : Prisma.empty;
+  const rows = await tx.$queryRaw<[{ total: unknown }]>(Prisma.sql`
+    SELECT COALESCE(SUM(oi.qty), 0) AS total
+    FROM order_items oi
+    INNER JOIN orders o ON o.id = oi.order_id
+    WHERE o.tenant_id = ${opts.tenantId}
+      AND o.client_id = ${opts.clientId}
+      AND o.order_type = 'order'
+      AND o.status NOT IN (${excluded})
+      AND o.created_at >= ${startUtc}
+      AND o.created_at < ${endUtcExclusive}
+      AND oi.is_bonus = false
+      ${excl}
+  `);
+  const v = rows[0]?.total;
+  return v != null ? Number(String(v)) : 0;
+}
+
+/** SKU bo‘yicha shu oy (boshqa zakazlar), joriy zakaz chiqarilgan. */
+async function fetchClientMonthPaidQtyByProductExclOrder(
+  tx: Prisma.TransactionClient,
+  opts: {
+    tenantId: number;
+    clientId: number;
+    referenceAt: Date;
+    excludeOrderId?: number;
+    timeZone?: string;
+  }
+): Promise<Map<number, number>> {
+  const tz = opts.timeZone ?? BONUS_SUM_THRESHOLD_TIMEZONE;
+  const { startUtc, endUtcExclusive } = utcRangeForCalendarMonthContaining(opts.referenceAt, tz);
+  const excluded = Prisma.join(
+    ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE.map((s) => Prisma.sql`${s}`)
+  );
+  const excl =
+    opts.excludeOrderId != null ? Prisma.sql`AND o.id <> ${opts.excludeOrderId}` : Prisma.empty;
+  const rows = await tx.$queryRaw<{ product_id: number; total: unknown }[]>(Prisma.sql`
+    SELECT oi.product_id, COALESCE(SUM(oi.qty), 0) AS total
+    FROM order_items oi
+    INNER JOIN orders o ON o.id = oi.order_id
+    WHERE o.tenant_id = ${opts.tenantId}
+      AND o.client_id = ${opts.clientId}
+      AND o.order_type = 'order'
+      AND o.status NOT IN (${excluded})
+      AND o.created_at >= ${startUtc}
+      AND o.created_at < ${endUtcExclusive}
+      AND oi.is_bonus = false
+      ${excl}
+    GROUP BY oi.product_id
+  `);
+  const m = new Map<number, number>();
+  for (const r of rows) {
+    m.set(r.product_id, Number(String(r.total)));
+  }
+  return m;
+}
+
+/**
+ * `qty` qoidasi: shartdagi sotib olingan miqdor bilan solishtiriladi.
+ * `calendar_month` — boshqa zakazlardagi yig‘indi + joriy zakazdagi tegishli miqdor (SKU yoki zakaz bo‘yicha).
+ */
+export function effectivePurchasedQtyForQtyRule(
+  rule: BonusRuleRow,
+  opts: {
+    orderQty: number;
+    /** `null` — asortimentsiz (zakaz bo‘yicha jami dona) */
+    productIdForMonthLookup: number | null;
+    monthAggregateExclOrder: number;
+    monthByProductExclOrder: ReadonlyMap<number, number>;
+  }
+): number {
+  if (rule.type !== "qty") return opts.orderQty;
+  if ((rule.sum_threshold_scope ?? "order") !== "calendar_month") return opts.orderQty;
+  if (opts.productIdForMonthLookup == null) {
+    return opts.monthAggregateExclOrder + opts.orderQty;
+  }
+  const prev = opts.monthByProductExclOrder.get(opts.productIdForMonthLookup) ?? 0;
+  return prev + opts.orderQty;
+}
+
+/** `min_sum` bilan solishtiriladigan yig‘indi: zakaz yoki oy (boshqa zakazlar + joriy). */
+export function effectiveSubtotalForSumMinRule(
+  rule: BonusRuleRow,
+  baseSubtotalBeforeDiscount: PrismaClient.Decimal,
+  clientMonthMerchandiseExclOrder: PrismaClient.Decimal
+): PrismaClient.Decimal {
+  if (rule.type !== "sum") return baseSubtotalBeforeDiscount;
+  if ((rule.sum_threshold_scope ?? "order") === "calendar_month") {
+    return clientMonthMerchandiseExclOrder.add(baseSubtotalBeforeDiscount);
+  }
+  return baseSubtotalBeforeDiscount;
+}
+
 function ruleNeedsOrderContext(rule: BonusRuleRow): boolean {
   const nonempty = (s: string | null | undefined) => s != null && String(s).trim() !== "";
   return (
@@ -49,6 +195,58 @@ export function ruleMatchesClient(
   }
   if (rule.client_category != null && String(rule.client_category).trim() !== "") {
     if (String(rule.client_category).trim() !== String(client.category ?? "").trim()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Zakazdagi agent (bonus cheklovi uchun). */
+export type OrderAgentBonusContext = {
+  userId: number;
+  branch: string | null;
+  trade_direction_id: number | null;
+};
+
+function normBonusBranch(s: string): string {
+  return String(s).trim().toLowerCase();
+}
+
+/**
+ * Bo‘sh ro‘yxatlar = o‘sha o‘q bo‘yicha cheklov yo‘q.
+ * Filial + aniq agentlar bir vaqtda: OR (filialdagi yoki ro‘yxatdagi agent).
+ * Savdo yo‘nalishi: AND (tanlangan bo‘lsa, `trade_direction_id` mos kelishi kerak).
+ */
+export function ruleMatchesOrderAgentScope(
+  rule: BonusRuleRow,
+  agent: OrderAgentBonusContext | null
+): boolean {
+  const branches = rule.scope_branch_codes ?? [];
+  const agentIds = rule.scope_agent_user_ids ?? [];
+  const dirIds = rule.scope_trade_direction_ids ?? [];
+
+  const hasBranch = branches.length > 0;
+  const hasAgents = agentIds.length > 0;
+  const hasDirs = dirIds.length > 0;
+
+  if (!hasBranch && !hasAgents && !hasDirs) return true;
+
+  if (agent == null) return false;
+
+  if (hasBranch || hasAgents) {
+    const branchSet = new Set(branches.map(normBonusBranch));
+    const branchOk =
+      hasBranch && agent.branch != null && branchSet.has(normBonusBranch(agent.branch));
+    const agentOk = hasAgents && agentIds.includes(agent.userId);
+
+    if (hasBranch && hasAgents) {
+      if (!(branchOk || agentOk)) return false;
+    } else if (hasBranch && !branchOk) return false;
+    else if (hasAgents && !agentOk) return false;
+  }
+
+  if (hasDirs) {
+    if (agent.trade_direction_id == null || !dirIds.includes(agent.trade_direction_id)) {
       return false;
     }
   }
@@ -285,6 +483,8 @@ export type OrderBonusPrereqEnv = {
   tx: Prisma.TransactionClient;
   tenantId: number;
   client: { id: number; category: string | null };
+  /** Zakaz agenti; cheklov yo‘q qoidalarda `null` ham bo‘lishi mumkin. */
+  orderAgent: OrderAgentBonusContext | null;
   orderedProductIds: ReadonlySet<number>;
   productById: ReadonlyMap<number, ProductLite>;
   baseSubtotalBeforeDiscount: PrismaClient.Decimal;
@@ -294,6 +494,12 @@ export type OrderBonusPrereqEnv = {
   warehouseId?: number | null;
   availableByProductId: ReadonlyMap<number, number>;
   ruleCache: Map<number, BonusRuleRow | null>;
+  /** Shu kalendar oyidagi boshqa zakazlar: `total_sum + discount_sum` (joriy zakaz chiqarilgan). */
+  clientMonthMerchandiseSubtotalExclOrder: PrismaClient.Decimal;
+  /** Boshqa zakazlardan pullik donalar jami (bonus qatorlarsiz), joriy zakaz chiqarilgan — `qty` + calendar_month. */
+  clientMonthPaidQtyAggregateExclOrder: number;
+  /** SKU bo‘yicha boshqa zakazlardan pullik donalar, joriy zakaz chiqarilgan. */
+  clientMonthPaidQtyByProductExclOrder: ReadonlyMap<number, number>;
 };
 
 function ruleActiveAt(rule: BonusRuleRow, now: Date): boolean {
@@ -327,7 +533,13 @@ function qtyRuleWouldProduceAnyPeek(rule: BonusRuleRow, env: OrderBonusPrereqEnv
   }
 
   if (!ruleHasPurchaseScope(rule)) {
-    const bonusUnits = computeQtyBonusForRuleRow(rule, totalPaidQty);
+    const eff = effectivePurchasedQtyForQtyRule(rule, {
+      orderQty: totalPaidQty,
+      productIdForMonthLookup: null,
+      monthAggregateExclOrder: env.clientMonthPaidQtyAggregateExclOrder,
+      monthByProductExclOrder: env.clientMonthPaidQtyByProductExclOrder
+    });
+    const bonusUnits = computeQtyBonusForRuleRow(rule, eff);
     if (bonusUnits <= 0) return false;
     const ctx: QtyGiftResolveContext = { availableByProductId: env.availableByProductId, minUnits: bonusUnits };
     if (rule.bonus_product_ids.length === 0) {
@@ -350,7 +562,13 @@ function qtyRuleWouldProduceAnyPeek(rule: BonusRuleRow, env: OrderBonusPrereqEnv
     const product = env.productById.get(purchasedPid);
     if (!product) continue;
     if (!ruleMatchesProduct(rule, product)) continue;
-    const bonusUnits = computeQtyBonusForRuleRow(rule, purchasedQty);
+    const eff = effectivePurchasedQtyForQtyRule(rule, {
+      orderQty: purchasedQty,
+      productIdForMonthLookup: purchasedPid,
+      monthAggregateExclOrder: env.clientMonthPaidQtyAggregateExclOrder,
+      monthByProductExclOrder: env.clientMonthPaidQtyByProductExclOrder
+    });
+    const bonusUnits = computeQtyBonusForRuleRow(rule, eff);
     if (bonusUnits <= 0) continue;
     const giftPid = resolveQtyGiftProductId(rule, purchasedPid, env.giftOverrides, {
       availableByProductId: env.availableByProductId,
@@ -367,6 +585,7 @@ function ruleMatchesAsStandaloneAutoBonusForOrder(rule: BonusRuleRow, env: Order
   if (!ruleActiveAt(rule, now)) return false;
   if (ruleBlockedByOncePerClient(rule, env.clientUsedAutoBonusRuleIds)) return false;
   if (!ruleMatchesClient(rule, env.client)) return false;
+  if (!ruleMatchesOrderAgentScope(rule, env.orderAgent)) return false;
   if (!ruleMatchesOrderProductScope(rule, env.orderedProductIds, env.productById)) return false;
 
   if (rule.type === "discount") {
@@ -374,7 +593,12 @@ function ruleMatchesAsStandaloneAutoBonusForOrder(rule: BonusRuleRow, env: Order
   }
   if (rule.type === "sum") {
     if (rule.min_sum == null) return false;
-    if (env.baseSubtotalBeforeDiscount.lt(new PrismaClient.Decimal(rule.min_sum))) return false;
+    const effective = effectiveSubtotalForSumMinRule(
+      rule,
+      env.baseSubtotalBeforeDiscount,
+      env.clientMonthMerchandiseSubtotalExclOrder
+    );
+    if (effective.lt(new PrismaClient.Decimal(rule.min_sum))) return false;
     const giftPid = resolveSumRuleGiftProductId(rule, env.orderedProductIds, env.productById, env.qtyByProduct);
     return giftPid != null && giftPid > 0;
   }
@@ -417,6 +641,7 @@ async function findWinningDiscountRuleWithPrereqs(
   const candidates = discountRulesSorted
     .filter((r) => r.type === "discount" && !ruleNeedsOrderContext(r) && !ruleBlockedByOncePerClient(r, clientUsedAutoBonusRuleIds))
     .filter((r) => ruleMatchesClient(r, client))
+    .filter((r) => ruleMatchesOrderAgentScope(r, prereqEnv.orderAgent))
     .filter((r) => ruleMatchesOrderProductScope(r, orderedProductIds, productById))
     .filter((r) => r.discount_pct != null && r.discount_pct > 0);
   for (const r of candidates) {
@@ -431,11 +656,13 @@ export function findWinningDiscountRule(
   client: { id: number; category: string | null },
   orderedProductIds: ReadonlySet<number>,
   productById: ReadonlyMap<number, ProductLite>,
-  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set()
+  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
+  orderAgent: OrderAgentBonusContext | null = null
 ): BonusRuleRow | null {
   const candidates = discountRulesSorted
     .filter((r) => r.type === "discount" && !ruleNeedsOrderContext(r) && !ruleBlockedByOncePerClient(r, clientUsedAutoBonusRuleIds))
     .filter((r) => ruleMatchesClient(r, client))
+    .filter((r) => ruleMatchesOrderAgentScope(r, orderAgent))
     .filter((r) => ruleMatchesOrderProductScope(r, orderedProductIds, productById))
     .filter((r) => r.discount_pct != null && r.discount_pct > 0);
   return candidates[0] ?? null;
@@ -484,14 +711,16 @@ export function applyAutomaticDiscountToPaidLines(
   client: { id: number; category: string | null },
   orderedProductIds: ReadonlySet<number>,
   productById: ReadonlyMap<number, ProductLite>,
-  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set()
+  clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
+  orderAgent: OrderAgentBonusContext | null = null
 ): { lines: PaidLineDraft[]; total: PrismaClient.Decimal } {
   const rule = findWinningDiscountRule(
     discountRulesSorted,
     client,
     orderedProductIds,
     productById,
-    clientUsedAutoBonusRuleIds
+    clientUsedAutoBonusRuleIds,
+    orderAgent
   );
   if (!rule) {
     return { lines: paidLines.map((l) => ({ ...l })), total: paidTotal };
@@ -517,7 +746,14 @@ export async function findWinningSumPeek(
   productById: ReadonlyMap<number, ProductLite>,
   clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
   qtyByProduct: ReadonlyMap<number, number> = new Map(),
-  engineOpts?: { rules?: BonusRuleRow[]; prereqEnv?: OrderBonusPrereqEnv }
+  engineOpts?: {
+    rules?: BonusRuleRow[];
+    prereqEnv?: OrderBonusPrereqEnv;
+    orderAgent?: OrderAgentBonusContext | null;
+    /** `prereqEnv` bo‘lmasa, oy qoidasi uchun */
+    calendarMonthReferenceAt?: Date;
+    excludeOrderForMonthSum?: number;
+  }
 ): Promise<SumBonusPeek | null> {
   const now = new Date();
   const rules =
@@ -534,11 +770,31 @@ export async function findWinningSumPeek(
     (r) => !ruleNeedsOrderContext(r) && !ruleBlockedByOncePerClient(r, clientUsedAutoBonusRuleIds)
   );
 
+  let monthExcl = new PrismaClient.Decimal(0);
+  if (engineOpts?.prereqEnv) {
+    monthExcl = engineOpts.prereqEnv.clientMonthMerchandiseSubtotalExclOrder;
+  } else if (
+    filtered.some((r) => r.type === "sum" && (r.sum_threshold_scope ?? "order") === "calendar_month")
+  ) {
+    monthExcl = await fetchClientMonthMerchandiseSubtotalExclOrder(tx, {
+      tenantId,
+      clientId: client.id,
+      referenceAt: engineOpts?.calendarMonthReferenceAt ?? new Date(),
+      excludeOrderId: engineOpts?.excludeOrderForMonthSum,
+      timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+    });
+  }
+
+  const orderAgentPeek =
+    engineOpts?.prereqEnv?.orderAgent ?? engineOpts?.orderAgent ?? null;
+
   for (const rule of filtered) {
     if (rule.min_sum == null) continue;
     const minSum = new PrismaClient.Decimal(rule.min_sum);
-    if (baseSubtotalBeforeDiscount.lt(minSum)) continue;
+    const effective = effectiveSubtotalForSumMinRule(rule, baseSubtotalBeforeDiscount, monthExcl);
+    if (effective.lt(minSum)) continue;
     if (!ruleMatchesClient(rule, client)) continue;
+    if (!ruleMatchesOrderAgentScope(rule, orderAgentPeek)) continue;
     if (!ruleMatchesOrderProductScope(rule, orderedProductIds, productById)) continue;
 
     const giftPid = resolveSumRuleGiftProductId(rule, orderedProductIds, productById, qtyByProduct);
@@ -581,7 +837,8 @@ export async function computeSumThresholdBonusLines(
   orderedProductIds: ReadonlySet<number>,
   productById: ReadonlyMap<number, ProductLite>,
   clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
-  qtyByProduct: ReadonlyMap<number, number> = new Map()
+  qtyByProduct: ReadonlyMap<number, number> = new Map(),
+  calendarContext?: { referenceAt: Date; excludeOrderId?: number }
 ): Promise<BonusLineDraft[]> {
   const peek = await findWinningSumPeek(
     tx,
@@ -591,7 +848,11 @@ export async function computeSumThresholdBonusLines(
     orderedProductIds,
     productById,
     clientUsedAutoBonusRuleIds,
-    qtyByProduct
+    qtyByProduct,
+    {
+      calendarMonthReferenceAt: calendarContext?.referenceAt,
+      excludeOrderForMonthSum: calendarContext?.excludeOrderId
+    }
   );
   if (!peek) return [];
   return buildSumBonusDraft(tenantId, peek.giftPid, peek.units);
@@ -621,7 +882,10 @@ export async function findQtyBonusPeeks(
   engineOpts?: {
     rules?: BonusRuleRow[];
     prereqEnv?: OrderBonusPrereqEnv;
+    orderAgent?: OrderAgentBonusContext | null;
     availableByProductId?: Map<number, number>;
+    /** `prereqEnv` bo‘lmasa, `calendar_month` qty uchun */
+    calendarContext?: { referenceAt: Date; excludeOrderId?: number };
   }
 ): Promise<QtyBonusPeek[]> {
   const now = new Date();
@@ -639,6 +903,35 @@ export async function findQtyBonusPeeks(
     (r) => !ruleNeedsOrderContext(r) && !ruleBlockedByOncePerClient(r, clientUsedAutoBonusRuleIds)
   );
 
+  const needsMonthQty = filtered.some(
+    (r) => r.type === "qty" && (r.sum_threshold_scope ?? "order") === "calendar_month"
+  );
+  let monthAgg = 0;
+  let monthByProd: ReadonlyMap<number, number> = new Map<number, number>();
+  if (needsMonthQty) {
+    if (engineOpts?.prereqEnv) {
+      monthAgg = engineOpts.prereqEnv.clientMonthPaidQtyAggregateExclOrder;
+      monthByProd = engineOpts.prereqEnv.clientMonthPaidQtyByProductExclOrder;
+    } else {
+      const refAt = engineOpts?.calendarContext?.referenceAt ?? new Date();
+      const excl = engineOpts?.calendarContext?.excludeOrderId;
+      monthAgg = await fetchClientMonthPaidQtyAggregateExclOrder(tx, {
+        tenantId,
+        clientId: client.id,
+        referenceAt: refAt,
+        excludeOrderId: excl,
+        timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+      });
+      monthByProd = await fetchClientMonthPaidQtyByProductExclOrder(tx, {
+        tenantId,
+        clientId: client.id,
+        referenceAt: refAt,
+        excludeOrderId: excl,
+        timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+      });
+    }
+  }
+
   const stockProductIds = new Set<number>();
   for (const pid of qtyByProduct.keys()) stockProductIds.add(pid);
   for (const r of filtered) {
@@ -655,12 +948,22 @@ export async function findQtyBonusPeeks(
     if (q > 0) totalPaidQty += q;
   }
 
+  const orderAgentQty =
+    engineOpts?.prereqEnv?.orderAgent ?? engineOpts?.orderAgent ?? null;
+
   for (const rule of filtered) {
     if (ruleHasPurchaseScope(rule)) continue;
     if (!ruleMatchesClient(rule, client)) continue;
+    if (!ruleMatchesOrderAgentScope(rule, orderAgentQty)) continue;
     if (!ruleMatchesOrderProductScope(rule, orderedProductIds, productById)) continue;
 
-    const bonusUnits = computeQtyBonusForRuleRow(rule, totalPaidQty);
+    const effAgg = effectivePurchasedQtyForQtyRule(rule, {
+      orderQty: totalPaidQty,
+      productIdForMonthLookup: null,
+      monthAggregateExclOrder: monthAgg,
+      monthByProductExclOrder: monthByProd
+    });
+    const bonusUnits = computeQtyBonusForRuleRow(rule, effAgg);
     if (bonusUnits <= 0) continue;
 
     const ctx: QtyGiftResolveContext = { availableByProductId, minUnits: bonusUnits };
@@ -712,9 +1015,16 @@ export async function findQtyBonusPeeks(
 
     for (const rule of scopedRules) {
       if (!ruleMatchesClient(rule, client)) continue;
+      if (!ruleMatchesOrderAgentScope(rule, orderAgentQty)) continue;
       if (!ruleMatchesProduct(rule, product)) continue;
 
-      const bonusUnits = computeQtyBonusForRuleRow(rule, purchasedQty);
+      const effSku = effectivePurchasedQtyForQtyRule(rule, {
+        orderQty: purchasedQty,
+        productIdForMonthLookup: purchasedPid,
+        monthAggregateExclOrder: monthAgg,
+        monthByProductExclOrder: monthByProd
+      });
+      const bonusUnits = computeQtyBonusForRuleRow(rule, effSku);
       if (bonusUnits <= 0) continue;
 
       const giftPid = resolveQtyGiftProductId(rule, purchasedPid, giftOverrides, {
@@ -818,7 +1128,9 @@ export async function resolveOrderBonusesForCreate(
   stackPolicy: BonusStackPolicy,
   clientUsedAutoBonusRuleIds: ReadonlySet<number> = new Set(),
   qtyBonusGiftOverrides: ReadonlyMap<number, number> = new Map(),
-  warehouseId?: number | null
+  warehouseId?: number | null,
+  calendarContext?: { referenceAt: Date; excludeOrderId?: number },
+  orderAgent: OrderAgentBonusContext | null = null
 ): Promise<{
   lines: PaidLineDraft[];
   total: PrismaClient.Decimal;
@@ -849,10 +1161,43 @@ export async function resolveOrderBonusesForCreate(
   }
   const availableByProductId = await loadAvailableQtyByProductId(tx, tenantId, warehouseId, stockProductIds);
 
+  const refAt = calendarContext?.referenceAt ?? new Date();
+  const clientMonthMerchandiseSubtotalExclOrder = await fetchClientMonthMerchandiseSubtotalExclOrder(tx, {
+    tenantId,
+    clientId: client.id,
+    referenceAt: refAt,
+    excludeOrderId: calendarContext?.excludeOrderId,
+    timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+  });
+
+  const needsQtyMonth = qtyRules.some(
+    (r) => (r.sum_threshold_scope ?? "order") === "calendar_month"
+  );
+  const [clientMonthPaidQtyAggregateExclOrder, clientMonthPaidQtyByProductExclOrder] =
+    needsQtyMonth
+      ? await Promise.all([
+          fetchClientMonthPaidQtyAggregateExclOrder(tx, {
+            tenantId,
+            clientId: client.id,
+            referenceAt: refAt,
+            excludeOrderId: calendarContext?.excludeOrderId,
+            timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+          }),
+          fetchClientMonthPaidQtyByProductExclOrder(tx, {
+            tenantId,
+            clientId: client.id,
+            referenceAt: refAt,
+            excludeOrderId: calendarContext?.excludeOrderId,
+            timeZone: BONUS_SUM_THRESHOLD_TIMEZONE
+          })
+        ])
+      : [0, new Map<number, number>()];
+
   const prereqEnv: OrderBonusPrereqEnv = {
     tx,
     tenantId,
     client,
+    orderAgent,
     orderedProductIds,
     productById,
     baseSubtotalBeforeDiscount,
@@ -861,7 +1206,10 @@ export async function resolveOrderBonusesForCreate(
     giftOverrides: qtyBonusGiftOverrides,
     warehouseId,
     availableByProductId,
-    ruleCache: new Map()
+    ruleCache: new Map(),
+    clientMonthMerchandiseSubtotalExclOrder,
+    clientMonthPaidQtyAggregateExclOrder,
+    clientMonthPaidQtyByProductExclOrder
   };
 
   const discountRule = await findWinningDiscountRuleWithPrereqs(

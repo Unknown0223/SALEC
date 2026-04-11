@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { api } from "@/lib/api";
@@ -51,7 +52,17 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Calculator, Copy, Download, Eye, ListOrdered, RefreshCw, Search, Settings } from "lucide-react";
+import {
+  Calculator,
+  CalendarDays,
+  Copy,
+  Download,
+  Eye,
+  ListOrdered,
+  RefreshCw,
+  Search,
+  Settings
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
@@ -267,6 +278,8 @@ function OrdersPageContent() {
     DEFAULT_ORDERS_FILTER_VISIBILITY
   );
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
+  const ordersDateRangeAnchorRef = useRef<HTMLButtonElement>(null);
+  const [ordersDateRangeOpen, setOrdersDateRangeOpen] = useState(false);
 
   useEffect(() => {
     setNakladnoyPrefs(loadNakladnoyExportPrefs());
@@ -921,25 +934,23 @@ function OrdersPageContent() {
                   </div>
                 ) : null}
               </div>
-              <label className="orders-filter-field-label">
-                <span className="sr-only">С даты</span>
-                <Input
-                  type="date"
-                  className="h-9 w-[11rem] bg-background text-foreground"
-                  value={filters.date_from}
-                  onChange={(e) => replaceOrdersQuery({ date_from: e.target.value, page: 1 })}
-                />
-              </label>
-              <span className="pb-2 text-foreground/70">—</span>
-              <label className="orders-filter-field-label">
-                <span className="sr-only">По дату</span>
-                <Input
-                  type="date"
-                  className="h-9 w-[11rem] bg-background text-foreground"
-                  value={filters.date_to}
-                  onChange={(e) => replaceOrdersQuery({ date_to: e.target.value, page: 1 })}
-                />
-              </label>
+              <button
+                ref={ordersDateRangeAnchorRef}
+                type="button"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                  "h-9 max-w-[min(100%,20rem)] gap-2 font-normal text-foreground",
+                  ordersDateRangeOpen && "border-primary/60 bg-primary/5"
+                )}
+                aria-expanded={ordersDateRangeOpen}
+                aria-haspopup="dialog"
+                onClick={() => setOrdersDateRangeOpen((o) => !o)}
+              >
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <span className="truncate text-xs sm:text-sm">
+                  {formatDateRangeButton(filters.date_from, filters.date_to)}
+                </span>
+              </button>
               {tenantSlug ? (
                 <Link
                   className={cn(
@@ -1732,6 +1743,17 @@ function OrdersPageContent() {
         onOpenChange={setNakladnoySettingsOpen}
         prefs={nakladnoyPrefs}
         onSave={setNakladnoyPrefs}
+      />
+
+      <DateRangePopover
+        open={ordersDateRangeOpen}
+        onOpenChange={setOrdersDateRangeOpen}
+        anchorRef={ordersDateRangeAnchorRef}
+        dateFrom={filters.date_from}
+        dateTo={filters.date_to}
+        onApply={({ dateFrom, dateTo }) => {
+          replaceOrdersQuery({ date_from: dateFrom, date_to: dateTo, page: 1 });
+        }}
       />
     </PageShell>
   );

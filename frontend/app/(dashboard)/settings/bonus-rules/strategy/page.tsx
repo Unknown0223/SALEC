@@ -20,14 +20,14 @@ export default function BonusStrategyPage() {
           "h-8 w-fit -ml-2 text-muted-foreground"
         )}
       >
-        ← Faol qoidalar
+        ← Активные правила
       </Link>
       <PageHeader
-        title="Bonus strategiyasi"
+        title="Стратегия бонусов"
         description={
           tenantSlug
-            ? `Bir zakazda nechta avtomatik bonus slot qo‘llanishi. Tenant: ${tenantSlug}`
-            : "Bir zakazda nechta avtomatik bonus slot qo‘llanishi."
+            ? `Сколько автоматических бонусных слотов применять в одном заказе. Тенант: ${tenantSlug}`
+            : "Сколько автоматических бонусных слотов применять в одном заказе."
         }
         actions={
           <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">

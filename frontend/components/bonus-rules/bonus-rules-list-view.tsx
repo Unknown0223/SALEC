@@ -1,6 +1,9 @@
 "use client";
 
 import type { BonusRuleRow } from "@/components/bonus-rules/bonus-rule-types";
+import { BonusRuleOrderScopeDialog } from "@/components/bonus-rules/bonus-rule-order-scope-dialog";
+import { ruleSummary } from "@/components/bonus-rules/rule-summary";
+import { BonusRuleLinkedBonusesCell } from "@/components/bonus-rules/bonus-rule-linked-bonuses-cell";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import { api } from "@/lib/api";
+import { writeBonusRuleCloneDraft } from "@/lib/bonus-rule-clone-draft";
 import { STALE } from "@/lib/query-stale";
 import { TableColumnSettingsDialog } from "@/components/data-table/table-column-settings-dialog";
 import { TableRowActionGroup } from "@/components/data-table/table-row-actions";
@@ -40,50 +44,28 @@ type ListResponse = {
   limit: number;
 };
 
-export function ruleSummary(r: BonusRuleRow): string {
-  if (r.type === "qty" && r.conditions?.length) {
-    return r.conditions
-      .map((c) => {
-        const range =
-          c.min_qty != null || c.max_qty != null
-            ? `${c.min_qty ?? "—"}…${c.max_qty ?? "—"}: `
-            : "";
-        return `${range}har ${c.step_qty}→+${c.bonus_qty}${c.max_bonus_qty != null ? ` (≤${c.max_bonus_qty})` : ""}`;
-      })
-      .join("; ");
-  }
-  if (r.type === "qty") {
-    return `${r.buy_qty ?? "—"} + ${r.free_qty ?? "—"} bonus`;
-  }
-  if (r.type === "sum") {
-    return `min ${r.min_sum ?? "—"}`;
-  }
-  if (r.type === "discount") {
-    return `${r.discount_pct ?? "—"}%`;
-  }
-  return r.type;
-}
+export { ruleSummary } from "@/components/bonus-rules/rule-summary";
 
 function bonusTypeLabel(type: string): string {
   switch (type) {
     case "qty":
-      return "Miqdor bo‘yicha bonus";
+      return "Бонус за количество";
     case "sum":
-      return "Summa bo‘yicha bonus";
+      return "Бонус по сумме";
     case "discount":
-      return "Chegirma (%)";
+      return "Скидка (%)";
     default:
       return type;
   }
 }
 
-/** Skidkalar bo‘limi jadvali: `sum` va `discount` uchun qisqa tur. */
+/** Скидки: `sum` и `discount`. */
 function skidkaTypeLabel(type: string): string {
   switch (type) {
     case "sum":
-      return "Minimal summa · sovg‘a";
+      return "Мин. сумма · подарок";
     case "discount":
-      return "Foizli chegirma (%)";
+      return "Процентная скидка (%)";
     default:
       return type;
   }
@@ -93,7 +75,7 @@ function formatRuleDateTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return new Intl.DateTimeFormat("uz-UZ", {
+  return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -122,11 +104,11 @@ function termKind(r: BonusRuleRow): TermKind {
 function termBadge(kind: TermKind) {
   switch (kind) {
     case "expired":
-      return <Badge variant="destructive">Muddati tugagan</Badge>;
+      return <Badge variant="destructive">Истёк</Badge>;
     case "upcoming":
-      return <Badge variant="info">Kutilmoqda</Badge>;
+      return <Badge variant="info">Ожидается</Badge>;
     default:
-      return <Badge variant="success">Amal qiladi</Badge>;
+      return <Badge variant="success">Действует</Badge>;
   }
 }
 
@@ -138,36 +120,36 @@ type Props = {
   variant?: BonusRulesListVariant;
 };
 
-/** Bonuslar ro‘yxati: miqdor + summa (chegirmasiz). */
+/** Бонусы: только qty. */
 const BONUS_LIST_COLUMNS = [
-  { id: "name", label: "Nomi" },
-  { id: "type", label: "Bonus turi" },
-  { id: "linked", label: "Oldindan shart / stack" },
-  { id: "only_assortment", label: "Faqat assortiment" },
-  { id: "once_per_client", label: "Har mijozga bir marta" },
-  { id: "valid_from", label: "Boshlanishi" },
-  { id: "valid_to", label: "Tugashi" },
-  { id: "method", label: "Usul" },
-  { id: "term", label: "Muddat" },
-  { id: "priority", label: "Ustunlik" },
-  { id: "summary", label: "Shart (miqdor yoki summa)" },
-  { id: "active", label: "Faol" }
+  { id: "name", label: "Название" },
+  { id: "type", label: "Тип бонуса" },
+  { id: "linked", label: "Связанные бонусы" },
+  { id: "only_assortment", label: "Только по ассортименту" },
+  { id: "once_per_client", label: "Один раз на клиента" },
+  { id: "valid_from", label: "Действует с" },
+  { id: "valid_to", label: "Действует до" },
+  { id: "method", label: "Метод" },
+  { id: "term", label: "Срок" },
+  { id: "priority", label: "Приоритет" },
+  { id: "summary", label: "Условие (кол-во или сумма)" },
+  { id: "active", label: "Активен" }
 ] as const;
 
-/** Chegirmalar ro‘yxati: foizli chegirma + minimal summa bo‘yicha sovg‘a (`sum`). */
+/** Скидки: sum и discount. */
 const DISCOUNT_LIST_COLUMNS = [
-  { id: "name", label: "Nomi" },
-  { id: "type", label: "Skidka turi" },
-  { id: "linked", label: "Oldindan shart / stack" },
-  { id: "only_assortment", label: "Faqat assortiment" },
-  { id: "once_per_client", label: "Har mijozga bir marta" },
-  { id: "valid_from", label: "Boshlanishi" },
-  { id: "valid_to", label: "Tugashi" },
-  { id: "method", label: "Usul" },
-  { id: "term", label: "Muddat" },
-  { id: "priority", label: "Ustunlik" },
-  { id: "summary", label: "Chegirma foizi / qisqa shart" },
-  { id: "active", label: "Faol" }
+  { id: "name", label: "Название" },
+  { id: "type", label: "Тип скидки" },
+  { id: "linked", label: "Связанные правила" },
+  { id: "only_assortment", label: "Только по ассортименту" },
+  { id: "once_per_client", label: "Один раз на клиента" },
+  { id: "valid_from", label: "Действует с" },
+  { id: "valid_to", label: "Действует до" },
+  { id: "method", label: "Метод" },
+  { id: "term", label: "Срок" },
+  { id: "priority", label: "Приоритет" },
+  { id: "summary", label: "% скидки / краткое условие" },
+  { id: "active", label: "Активен" }
 ] as const;
 
 function listColumnsForVariant(v: BonusRulesListVariant) {
@@ -175,44 +157,6 @@ function listColumnsForVariant(v: BonusRulesListVariant) {
 }
 
 const DEFAULT_HIDDEN = ["priority", "summary", "active"] as const;
-
-function buildDuplicatePayload(rule: BonusRuleRow) {
-  return {
-    name: `${rule.name} (nusxa)`,
-    type: rule.type as "qty" | "sum" | "discount",
-    buy_qty: rule.buy_qty,
-    free_qty: rule.free_qty,
-    min_sum: rule.min_sum,
-    discount_pct: rule.discount_pct,
-    priority: rule.priority,
-    is_active: rule.is_active,
-    valid_from: rule.valid_from,
-    valid_to: rule.valid_to,
-    client_category: rule.client_category,
-    payment_type: rule.payment_type,
-    client_type: rule.client_type,
-    sales_channel: rule.sales_channel,
-    price_type: rule.price_type,
-    product_ids: rule.product_ids,
-    bonus_product_ids: rule.bonus_product_ids,
-    product_category_ids: rule.product_category_ids,
-    target_all_clients: rule.target_all_clients,
-    selected_client_ids: rule.selected_client_ids,
-    is_manual: rule.is_manual,
-    in_blocks: rule.in_blocks,
-    once_per_client: rule.once_per_client,
-    one_plus_one_gift: rule.one_plus_one_gift,
-    prerequisite_rule_ids: [...(rule.prerequisite_rule_ids ?? [])],
-    conditions: rule.conditions.map((c) => ({
-      min_qty: c.min_qty,
-      max_qty: c.max_qty,
-      step_qty: c.step_qty,
-      bonus_qty: c.bonus_qty,
-      max_bonus_qty: c.max_bonus_qty,
-      sort_order: c.sort_order
-    }))
-  };
-}
 
 export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
   const isDiscounts = variant === "discounts";
@@ -231,6 +175,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
   const [filtersVisible, setFiltersVisible] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [focusedRowId, setFocusedRowId] = useState<number | null>(null);
+  const [scopeRule, setScopeRule] = useState<BonusRuleRow | null>(null);
 
   const listColumns = useMemo(() => listColumnsForVariant(variant), [variant]);
 
@@ -315,23 +260,6 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
     }
   });
 
-  const duplicateMut = useMutation({
-    mutationFn: async (rule: BonusRuleRow) => {
-      const payload = buildDuplicatePayload(rule);
-      const { data: created } = await api.post<BonusRuleRow>(
-        `/api/${tenantSlug}/bonus-rules`,
-        payload
-      );
-      return created;
-    },
-    onSuccess: async (created) => {
-      await qc.invalidateQueries({ queryKey: ["bonus-rules", tenantSlug] });
-      const base =
-        created.type === "qty" ? "/settings/bonus-rules" : "/settings/discount-rules";
-      router.push(`${base}/${created.id}/edit`);
-    }
-  });
-
   const toggleMut = useMutation({
     mutationFn: async ({ id, is_active }: { id: number; is_active: boolean }) => {
       await api.patch(`/api/${tenantSlug}/bonus-rules/${id}/active`, { is_active });
@@ -364,7 +292,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
 
   const shartOptionsSorted = useMemo(() => {
     const list = shartOptionsRows ?? [];
-    return [...list].sort((a, b) => a.name.localeCompare(b.name, "uz"));
+    return [...list].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [shartOptionsRows]);
 
   const rows = data?.data ?? [];
@@ -399,29 +327,29 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
     const sep = ";";
     const headers = isDiscounts
       ? [
-          "Nomi",
-          "Skidka turi",
-          "Qiymat (foiz yoki min. summa)",
-          "Faqat assortiment",
-          "Har mijozga bir marta",
-          "Boshlanishi",
-          "Tugashi",
-          "Usul",
-          "Muddat holati"
+          "Название",
+          "Тип скидки",
+          "Значение (% или мин. сумма)",
+          "Только ассортимент",
+          "Один раз на клиента",
+          "Действует с",
+          "Действует до",
+          "Метод",
+          "Срок"
         ]
       : [
-          "Nomi",
-          "Bonus turi",
-          "Faqat assortiment",
-          "Har mijozga bir marta",
-          "Boshlanishi",
-          "Tugashi",
-          "Usul",
-          "Muddat holati"
+          "Название",
+          "Тип бонуса",
+          "Только ассортимент",
+          "Один раз на клиента",
+          "Действует с",
+          "Действует до",
+          "Метод",
+          "Срок"
         ];
     const lines = rows.map((r) => {
       const tk = termKind(r);
-      const termLabel = tk === "expired" ? "Tugagan" : tk === "upcoming" ? "Kutilmoqda" : "Amal qiladi";
+      const termLabel = tk === "expired" ? "Истёк" : tk === "upcoming" ? "Ожидается" : "Действует";
       const skidkaValue =
         r.type === "discount"
           ? String(r.discount_pct ?? "—")
@@ -433,11 +361,11 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
         ...(isDiscounts
           ? [skidkaTypeLabel(r.type), skidkaValue]
           : [bonusTypeLabel(r.type)]),
-        onlyByAssortment(r) ? "Ha" : "Yo‘q",
-        r.once_per_client ? "Ha" : "Yo‘q",
+        onlyByAssortment(r) ? "Да" : "Нет",
+        r.once_per_client ? "Да" : "Нет",
         formatRuleDateTime(r.valid_from),
         formatRuleDateTime(r.valid_to),
-        r.is_manual ? "Qo‘lda" : "Avto",
+        r.is_manual ? "Вручную" : "Авто",
         termLabel
       ];
       return base.join(sep);
@@ -447,18 +375,18 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${isDiscounts ? "chegirma" : "bonus"}-qoidalari-${filterKey}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${isDiscounts ? "skidki" : "bonusy"}-${filterKey}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }, [rows, filterKey, isDiscounts]);
 
   const title = isDiscounts
     ? activeOnly
-      ? "Chegirmalar (faol)"
-      : "Chegirmalar (nofaol)"
+      ? "Скидки (активные)"
+      : "Скидки (неактивные)"
     : activeOnly
-      ? "Bonuslar (faol)"
-      : "Bonuslar (nofaol)";
+      ? "Бонусы (активные)"
+      : "Бонусы (неактивные)";
 
   return (
     <PageShell>
@@ -468,26 +396,26 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
           <p className="text-sm text-muted-foreground">
             {tenantSlug
               ? isDiscounts
-                ? `Tenant: ${tenantSlug} · foizli chegirma va minimal summa (sovg‘a); dona bonuslari alohida`
-                : `Tenant: ${tenantSlug} · faqat dona (miqdor) bonuslari; summa/skidka alohida bo‘limda`
+                ? `Тенант: ${tenantSlug} · процентные скидки и мин. сумма (подарок); бонусы по штукам — отдельно`
+                : `Тенант: ${tenantSlug} · только бонусы по количеству; сумма/скидка — в другом разделе`
               : isDiscounts
-                ? "Foiz + minimal summa qoidalari"
-                : "Faqat miqdor (dona) bonuslari"}
+                ? "Правила: процент и минимальная сумма"
+                : "Только бонусы по количеству"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!isDiscounts ? (
             <>
-              <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
-                Bonus toifasi
+              <Button type="button" variant="outline" size="sm" disabled title="Скоро">
+                Категория бонуса
               </Button>
-              <Button type="button" variant="outline" size="sm" disabled title="Tez orada">
-                Bonuslarni uzaytirish
+              <Button type="button" variant="outline" size="sm" disabled title="Скоро">
+                Продлить бонусы
               </Button>
             </>
           ) : null}
           <Link className={cn(buttonVariants({ size: "sm" }))} href={`${listBase}/new`}>
-            {isDiscounts ? "Chegirma yaratish" : "Bonus yaratish"}
+            {isDiscounts ? "Создать скидку" : "Создать бонус"}
           </Link>
         </div>
       </div>
@@ -495,11 +423,11 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
       <TableColumnSettingsDialog
         open={columnDialogOpen}
         onOpenChange={setColumnDialogOpen}
-        title="Ustunlarni boshqarish"
+        title="Настройка столбцов"
         description={
           isDiscounts
-            ? "Chegirmalar jadvali: ko‘rinadigan ustunlar va tartib (bonuslar jadvalidan alohida saqlanadi)."
-            : "Bonuslar jadvali: ko‘rinadigan ustunlar va tartib (chegirmalar jadvalidan alohida saqlanadi)."
+            ? "Таблица скидок: видимые столбцы и порядок (отдельно от таблицы бонусов)."
+            : "Таблица бонусов: видимые столбцы и порядок (отдельно от таблицы скидок)."
         }
         columns={[...listColumns]}
         columnOrder={tablePrefs.columnOrder}
@@ -515,7 +443,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
             <CardContent className="space-y-2 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-foreground/80">
-                  {isDiscounts ? "Filtr (chegirmalar)" : "Filtr (bonuslar)"}
+                  {isDiscounts ? "Фильтр (скидки)" : "Фильтр (бонусы)"}
                 </p>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
@@ -523,7 +451,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 border-teal-600/40 text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40"
-                    title={filtersVisible ? "Filtrlarni yashirish" : "Filtrlarni ko‘rsatish"}
+                    title={filtersVisible ? "Скрыть фильтры" : "Показать фильтры"}
                     aria-expanded={filtersVisible}
                     onClick={() => setFiltersVisible((v) => !v)}
                   >
@@ -534,7 +462,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 border-teal-600/40 text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40"
-                    title="Filtrlarni tozalash"
+                    title="Сбросить фильтры"
                     onClick={resetListFilters}
                   >
                     <RotateCcw className="size-4" />
@@ -544,43 +472,43 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
               {filtersVisible ? (
                 <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
                   <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-                    <Label className="text-xs font-medium text-foreground/88">Qo‘llanish usuli</Label>
+                    <Label className="text-xs font-medium text-foreground/88">Способ применения</Label>
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label="Qo‘llanish usuli"
+                      aria-label="Способ применения"
                       value={methodFilter}
                       onChange={(e) => setMethodFilter(e.target.value as typeof methodFilter)}
                     >
-                      <option value="all">Barchasi</option>
-                      <option value="auto">Avto</option>
-                      <option value="manual">Qo‘lda</option>
+                      <option value="all">Все</option>
+                      <option value="auto">Авто</option>
+                      <option value="manual">Вручную</option>
                     </select>
                   </div>
                   <div className="grid min-w-[9.5rem] max-w-[220px] flex-[1_1_9.5rem] gap-1.5">
-                    <Label className="text-xs font-medium text-foreground/88">Muddat holati</Label>
+                    <Label className="text-xs font-medium text-foreground/88">Состояние срока</Label>
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label="Muddat holati"
+                      aria-label="Состояние срока"
                       value={termFilter}
                       onChange={(e) => setTermFilter(e.target.value as typeof termFilter)}
                     >
-                      <option value="all">Barchasi</option>
-                      <option value="expired">Muddati tugagan</option>
-                      <option value="current">Hozir amal qiladi</option>
-                      <option value="upcoming">Hali boshlanmagan</option>
+                      <option value="all">Все</option>
+                      <option value="expired">Истёк срок</option>
+                      <option value="current">Действует сейчас</option>
+                      <option value="upcoming">Ещё не начался</option>
                     </select>
                   </div>
                   <div className="grid min-w-[12rem] max-w-[280px] flex-[1_1_12rem] gap-1.5">
                     <Label className="text-xs font-medium text-foreground/88">
-                      {isDiscounts ? "Chegirma qoidasi" : "Bonus qoidasi"}
+                      {isDiscounts ? "Правило скидки" : "Правило бонуса"}
                     </Label>
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label={isDiscounts ? "Chegirma qoidasi bo‘yicha filtr" : "Bonus qoidasi bo‘yicha filtr"}
+                      aria-label={isDiscounts ? "Фильтр по правилу скидки" : "Фильтр по правилу бонуса"}
                       value={ruleIdFilter}
                       onChange={(e) => setRuleIdFilter(e.target.value === "all" ? "all" : e.target.value)}
                     >
-                      <option value="all">{isDiscounts ? "Barcha chegirmalar" : "Barcha bonuslar"}</option>
+                      <option value="all">{isDiscounts ? "Все скидки" : "Все бонусы"}</option>
                       {shartOptionsSorted.map((r) => (
                         <option key={r.id} value={String(r.id)}>
                           {r.name}
@@ -599,7 +527,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
         <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
-          Tenant topilmadi.{" "}
+          Тенант не найден.{" "}
           <Link className="underline underline-offset-4" href="/login">
             Войти снова
           </Link>
@@ -612,15 +540,15 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                 className="table-toolbar flex flex-wrap items-end justify-between gap-3 border-b border-border/80 bg-muted/30 px-3 py-2 sm:px-4"
                 role="toolbar"
                 aria-label={
-                  isDiscounts ? "Chegirmalar jadvali: qatorlar va qidiruv" : "Bonuslar jadvali: qatorlar va qidiruv"
+                  isDiscounts ? "Таблица скидок: строки и поиск" : "Таблица бонусов: строки и поиск"
                 }
               >
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="grid gap-0.5">
-                    <Label className="sr-only">Sahifadagi qatorlar soni</Label>
+                    <Label className="sr-only">Число строк на странице</Label>
                     <select
                       className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                      aria-label="Sahifadagi qatorlar"
+                      aria-label="Строк на странице"
                       value={String(tablePrefs.pageSize)}
                       onChange={(e) => tablePrefs.setPageSize(Number(e.target.value))}
                     >
@@ -636,7 +564,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 shrink-0"
-                    title="Ustunlarni boshqarish"
+                    title="Настройка столбцов"
                     onClick={() => setColumnDialogOpen(true)}
                   >
                     <LayoutGrid className="size-4" />
@@ -645,10 +573,10 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       className="h-9 bg-background pl-8 text-sm"
-                      placeholder={isDiscounts ? "Chegirma nomi…" : "Bonus nomi…"}
+                      placeholder={isDiscounts ? "Название скидки…" : "Название бонуса…"}
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
-                      aria-label={isDiscounts ? "Chegirma nomi bo‘yicha qidirish" : "Bonus nomi bo‘yicha qidirish"}
+                      aria-label={isDiscounts ? "Поиск по названию скидки" : "Поиск по названию бонуса"}
                     />
                   </div>
                   <Button
@@ -667,7 +595,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                     variant="outline"
                     size="icon"
                     className="h-9 w-9 shrink-0"
-                    title="Yangilash"
+                    title="Обновить"
                     onClick={() => void refetch()}
                     disabled={isFetching}
                   >
@@ -677,7 +605,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                 <div className="flex flex-wrap items-center gap-2 pb-0.5 text-xs text-muted-foreground sm:pb-0">
                   {data != null ? (
                     <>
-                      Jami:{" "}
+                      Всего:{" "}
                       <span className="font-medium text-foreground">{data.total}</span>
                     </>
                   ) : null}
@@ -685,10 +613,10 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
               </div>
 
               {isLoading ? (
-                <p className="px-4 py-6 text-sm text-muted-foreground">Yuklanmoqda…</p>
+                <p className="px-4 py-6 text-sm text-muted-foreground">Загрузка…</p>
               ) : isError ? (
                 <p className="px-4 py-6 text-sm text-destructive">
-                  Xato: {error instanceof Error ? error.message : "API ga ulanib bo‘lmadi"}
+                  Ошибка: {error instanceof Error ? error.message : "Не удалось связаться с API"}
                 </p>
               ) : (
             <div className="overflow-x-auto rounded-lg border border-border/60 bg-card shadow-sm">
@@ -701,7 +629,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                         className="rounded border-input"
                         checked={allOnPageSelected}
                         onChange={toggleSelectAllOnPage}
-                        aria-label="Sahifadagi barchasini tanlash"
+                        aria-label="Выбрать все на странице"
                       />
                     </th>
                     {visibleDataColumns.map((colId) => {
@@ -712,7 +640,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                         </th>
                       );
                     })}
-                    <th className="px-3 py-2 text-right font-medium">Amallar</th>
+                    <th className="px-3 py-2 text-right font-medium">Действия</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -724,11 +652,11 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                       >
                         {activeOnly
                           ? isDiscounts
-                            ? "Chegirma qoidasi yo‘q"
-                            : "Bonus qoidasi yo‘q"
+                            ? "Нет правил скидок"
+                            : "Нет правил бонусов"
                           : isDiscounts
-                            ? "Nofaol chegirma yo‘q"
-                            : "Nofaol bonus yo‘q"}
+                            ? "Нет неактивных скидок"
+                            : "Нет неактивных бонусов"}
                       </td>
                     </tr>
                   ) : (
@@ -756,7 +684,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                                   return next;
                                 });
                               }}
-                              aria-label={`Tanlash: ${row.name}`}
+                              aria-label={`Выбрать: ${row.name}`}
                             />
                           </td>
                           {visibleDataColumns.map((colId) => (
@@ -768,35 +696,24 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                                   {isDiscounts ? skidkaTypeLabel(row.type) : bonusTypeLabel(row.type)}
                                 </span>
                               ) : colId === "linked" ? (
-                                <div className="flex flex-col gap-1.5 text-xs">
-                                  <span className="text-muted-foreground">
-                                    {(row.prerequisite_rule_ids?.length ?? 0) > 0
-                                      ? `${row.prerequisite_rule_ids!.length} ta oldindan`
-                                      : "—"}
-                                  </span>
-                                  <Link
-                                    href="/settings/bonus-rules/strategy"
-                                    className="inline-flex w-fit items-center gap-1 text-[10px] text-primary underline-offset-4 hover:underline"
-                                    title="Tenant bo‘yicha umumiy stack: bir zakazda chegirma, summa va miqdor bonuslarini qanday birlashtirish."
-                                    aria-label="Bonus strategiyasi"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    Umumiy stack
-                                  </Link>
-                                </div>
+                                tenantSlug ? (
+                                  <div className="min-w-0" onClick={(e) => e.stopPropagation()}>
+                                    <BonusRuleLinkedBonusesCell tenantSlug={tenantSlug} row={row} />
+                                  </div>
+                                ) : null
                               ) : colId === "only_assortment" ? (
-                                <span>{onlyByAssortment(row) ? "Ha" : "Yo‘q"}</span>
+                                <span>{onlyByAssortment(row) ? "Да" : "Нет"}</span>
                               ) : colId === "once_per_client" ? (
-                                <span>{row.once_per_client ? "Ha" : "Yo‘q"}</span>
+                                <span>{row.once_per_client ? "Да" : "Нет"}</span>
                               ) : colId === "valid_from" ? (
                                 formatRuleDateTime(row.valid_from)
                               ) : colId === "valid_to" ? (
                                 formatRuleDateTime(row.valid_to)
                               ) : colId === "method" ? (
                                 row.is_manual ? (
-                                  <Badge variant="warning">Qo‘lda</Badge>
+                                  <Badge variant="warning">Вручную</Badge>
                                 ) : (
-                                  <Badge variant="success">Avto</Badge>
+                                  <Badge variant="success">Авто</Badge>
                                 )
                               ) : colId === "term" ? (
                                 termBadge(tk)
@@ -813,21 +730,21 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                                     e.stopPropagation();
                                     toggleMut.mutate({ id: row.id, is_active: e.target.checked });
                                   }}
-                                  aria-label={`${row.name} faolligi`}
+                                  aria-label={`Активность: ${row.name}`}
                                 />
                               ) : null}
                             </td>
                           ))}
                           <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                            <TableRowActionGroup className="justify-end" ariaLabel="Qoida">
+                            <TableRowActionGroup className="justify-end" ariaLabel="Правило">
                               {!activeOnly ? (
                                 <Button
                                   type="button"
                                   size="icon-sm"
                                   variant="ghost"
                                   className="text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700"
-                                  title="Faollashtirish"
-                                  aria-label="Faollashtirish"
+                                  title="Активировать"
+                                  aria-label="Активировать"
                                   disabled={toggleMut.isPending}
                                   onClick={() => toggleMut.mutate({ id: row.id, is_active: true })}
                                 >
@@ -839,32 +756,36 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
                                 size="icon-sm"
                                 variant="ghost"
                                 className="text-muted-foreground hover:text-foreground"
-                                title="Nusxalash"
-                                aria-label="Nusxalash"
-                                disabled={duplicateMut.isPending}
-                                onClick={() => duplicateMut.mutate(row)}
+                                title="Копировать в форму «Новое правило»"
+                                aria-label="Копировать в форму нового правила"
+                                disabled={!tenantSlug}
+                                onClick={() => {
+                                  if (!tenantSlug) return;
+                                  writeBonusRuleCloneDraft(isDiscounts ? "discount" : "bonus", row);
+                                  router.push(`${listBase}/new`);
+                                }}
                               >
                                 <Copy className="size-3.5" />
                               </Button>
-                              <Link
-                                href={`${listBase}/${row.id}/edit`}
-                                className={cn(
-                                  buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                                  "text-muted-foreground hover:text-foreground"
-                                )}
-                                title="Mijozlar / maqsad"
-                                aria-label="Mijozlar va filtrlar"
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="text-muted-foreground hover:text-foreground"
+                                title="Филиал, агенты, клиенты, направление"
+                                aria-label="Привязка к заказу"
+                                onClick={() => setScopeRule(row)}
                               >
                                 <UserRound className="size-3.5" />
-                              </Link>
+                              </Button>
                               <Link
                                 href={`${listBase}/${row.id}/edit`}
                                 className={cn(
                                   buttonVariants({ variant: "outline", size: "icon-sm" }),
                                   "text-muted-foreground hover:text-foreground"
                                 )}
-                                title="Tahrirlash"
-                                aria-label="Tahrirlash"
+                                title="Редактировать"
+                                aria-label="Редактировать"
                               >
                                 <Pencil className="size-3.5" />
                               </Link>
@@ -883,6 +804,17 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
         </div>
       )}
 
+      {tenantSlug ? (
+        <BonusRuleOrderScopeDialog
+          open={scopeRule != null}
+          onOpenChange={(o) => {
+            if (!o) setScopeRule(null);
+          }}
+          tenantSlug={tenantSlug}
+          rule={scopeRule}
+        />
+      ) : null}
+
       {data && data.total > data.limit ? (
         <div className="mt-3 flex items-center gap-2">
           <Button
@@ -892,7 +824,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-            Oldingi
+            Назад
           </Button>
           <span className="text-sm text-muted-foreground">
             {page} / {Math.ceil(data.total / data.limit) || 1}
@@ -904,7 +836,7 @@ export function BonusRulesListView({ activeOnly, variant = "bonuses" }: Props) {
             disabled={page * data.limit >= data.total}
             onClick={() => setPage((p) => p + 1)}
           >
-            Keyingi
+            Вперёд
           </Button>
         </div>
       ) : null}

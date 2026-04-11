@@ -2,6 +2,7 @@
 
 import { OrderSseListener } from "@/components/dashboard/order-sse-listener";
 import {
+  dashboardKassaNav,
   dashboardOrdersNav,
   dashboardSidebarLayout,
   dashboardStockNav,
@@ -101,6 +102,12 @@ function stockNavChildActive(pathname: string): boolean {
   return dashboardStockNav.items.some((item) => isNavActive(pathname, item.href));
 }
 
+function kassaNavChildActive(pathname: string): boolean {
+  return dashboardKassaNav.groups.some((g) =>
+    g.items.some((item) => !item.disabled && item.href !== "#" && isNavActive(pathname, item.href))
+  );
+}
+
 function linkIcon(href: string) {
   const path = href.split("?")[0] ?? href;
   if (path === "/dashboard") return LayoutDashboard;
@@ -127,9 +134,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { tenantSlug, clearSession } = useAuthStore();
   const effectiveRole = useEffectiveRole();
-  const [openSection, setOpenSection] = useState<"orders" | "stock" | "users" | null>(null);
+  const [openSection, setOpenSection] = useState<"orders" | "stock" | "kassa" | "users" | null>(null);
   const usersOpen = openSection === "users";
   const stockOpen = openSection === "stock";
+  const kassaOpen = openSection === "kassa";
   const ordersOpen = openSection === "orders";
 
   useEffect(() => {
@@ -141,6 +149,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setOpenSection("stock");
       return;
     }
+    if (kassaNavChildActive(pathname)) {
+      setOpenSection("kassa");
+      return;
+    }
     if (usersNavChildActive(pathname)) {
       setOpenSection("users");
       return;
@@ -148,7 +160,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setOpenSection(null);
   }, [pathname]);
 
-  function toggleSection(section: "orders" | "stock" | "users") {
+  function toggleSection(section: "orders" | "stock" | "kassa" | "users") {
     setOpenSection((prev) => (prev === section ? null : section));
   }
 
@@ -302,6 +314,87 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         );
                       })}
                     </ul>
+                  )}
+                </div>
+              );
+            }
+
+            if (entry.kind === "kassa") {
+              const rowClass = (active: boolean, muted: boolean) =>
+                cn(
+                  "flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
+                  muted && "cursor-not-allowed text-sidebar-foreground/40",
+                  !muted &&
+                    (active
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                      : "text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground")
+                );
+              return (
+                <div key="kassa" className="flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection("kassa")}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                      kassaNavChildActive(pathname)
+                        ? "bg-sidebar-accent/90 text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/90 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                    )}
+                    aria-expanded={kassaOpen}
+                  >
+                    <ClientLucideIcon icon={Wallet} className="size-[18px] shrink-0 opacity-90" />
+                    <span className="min-w-0 flex-1">{dashboardKassaNav.sectionTitle}</span>
+                    {kassaOpen ? (
+                      <ClientLucideIcon icon={ChevronDown} className="size-4 shrink-0 opacity-80" />
+                    ) : (
+                      <ClientLucideIcon icon={ChevronRight} className="size-4 shrink-0 opacity-80" />
+                    )}
+                  </button>
+                  {kassaOpen && (
+                    <div className="ml-1 space-y-3 border-l border-sidebar-border/60 py-0.5 pl-2">
+                      {dashboardKassaNav.groups.map((group) => (
+                        <div key={group.title}>
+                          <div className="relative py-1">
+                            <div className="absolute inset-x-0 top-1/2 border-t border-sidebar-border/50" />
+                            <p className="relative mx-auto w-fit bg-sidebar px-2 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/50">
+                              {group.title}
+                            </p>
+                          </div>
+                          <ul className="mt-1 flex flex-col gap-0.5">
+                            {group.items
+                              .filter((item) => navItemVisible(item, effectiveRole))
+                              .map((item) => {
+                              const muted = Boolean(item.disabled || item.href === "#");
+                              const active = !muted && isNavActive(pathname, item.href);
+                              return (
+                                <li key={`${group.title}-${item.label}`}>
+                                  {muted ? (
+                                    <span className={rowClass(false, true)}>
+                                      <span
+                                        className="mt-1.5 size-1.5 shrink-0 rounded-full bg-sidebar-foreground/25"
+                                        aria-hidden
+                                      />
+                                      {item.label}
+                                    </span>
+                                  ) : (
+                                    <Link href={item.href} className={rowClass(active, false)}>
+                                      <span
+                                        className={cn(
+                                          "mt-1.5 size-1.5 shrink-0 rounded-full",
+                                          active ? "bg-sidebar-primary-foreground/90" : "bg-sidebar-primary"
+                                        )}
+                                        aria-hidden
+                                      />
+                                      {item.label}
+                                    </Link>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               );

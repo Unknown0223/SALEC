@@ -29,6 +29,6 @@ test.describe("Orders & payments shell (FAZA 10)", () => {
     await expect(page).not.toHaveURL(/\/login/);
     const h1 = page.locator("h1").first();
     await h1.waitFor({ state: "visible", timeout: 30_000 });
-    await expect(h1).toContainText(/lovlar/i);
+    await expect(h1).toContainText(/Оплаты|ловлар/i);
   });
 });

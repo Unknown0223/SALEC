@@ -11,6 +11,7 @@ import {
 import {
   getClientReturnsData,
   createPeriodReturn,
+  createPeriodReturnBatch,
   createFullReturnFromOrder,
   MAX_RETURN_ITEMS
 } from "./returns-enhanced.service";
@@ -34,6 +35,14 @@ const createBody = z.object({
     .min(1)
 });
 
+const periodReturnLine = z.object({
+  product_id: z.number().int().positive(),
+  qty: z.number().positive().optional(),
+  paid_qty: z.number().min(0).optional(),
+  bonus_qty: z.number().min(0).optional(),
+  bonus_cash: z.number().min(0).optional()
+});
+
 const periodReturnBody = z.object({
   client_id: z.number().int().positive(),
   order_id: z.number().int().positive().optional(),
@@ -43,16 +52,45 @@ const periodReturnBody = z.object({
   note: z.string().max(2000).optional().nullable(),
   refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
   lines: z
-    .array(
-      z.object({
-        product_id: z.number().int().positive(),
-        qty: z.number().positive()
-      })
-    )
+    .array(periodReturnLine)
     .min(1)
-    .refine(lines => lines.reduce((a, l) => a + l.qty, 0) <= MAX_RETURN_ITEMS, {
-      message: `Max ${MAX_RETURN_ITEMS} ta mahsulot qaytarish mumkin`
-    })
+    .refine(
+      (lines) =>
+        lines.reduce((a, l) => {
+          const q = l.qty ?? 0;
+          if (q > 0) return a + q;
+          return a + (l.paid_qty ?? 0) + (l.bonus_qty ?? 0);
+        }, 0) <= MAX_RETURN_ITEMS,
+      { message: `Max ${MAX_RETURN_ITEMS} ta mahsulot qaytarish mumkin` }
+    )
+});
+
+const periodReturnBatchLine = z.object({
+  order_id: z.number().int().positive(),
+  product_id: z.number().int().positive(),
+  qty: z.number().positive().optional(),
+  paid_qty: z.number().min(0).optional(),
+  bonus_qty: z.number().min(0).optional(),
+  bonus_cash: z.number().min(0).optional()
+});
+
+const periodReturnBatchBody = z.object({
+  client_id: z.number().int().positive(),
+  warehouse_id: z.number().int().positive().optional(),
+  note: z.string().max(2000).optional().nullable(),
+  refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
+  lines: z
+    .array(periodReturnBatchLine)
+    .min(1)
+    .refine(
+      (lines) =>
+        lines.reduce((a, l) => {
+          const q = l.qty ?? 0;
+          if (q > 0) return a + q;
+          return a + (l.paid_qty ?? 0) + (l.bonus_qty ?? 0);
+        }, 0) <= MAX_RETURN_ITEMS,
+      { message: `Max ${MAX_RETURN_ITEMS} ta mahsulot qaytarish mumkin` }
+    )
 });
 
 const fullReturnBody = z.object({
@@ -108,9 +146,19 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
       if (!Number.isFinite(clientId) || clientId < 1) {
         return reply.status(400).send({ error: "ClientIdRequired" });
       }
+      const orderIdsRaw = q.order_ids?.trim();
+      let orderIds: number[] | undefined;
+      if (orderIdsRaw) {
+        const parsed = orderIdsRaw
+          .split(/[, ]+/)
+          .map((s) => Number.parseInt(s.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        const uniq = [...new Set(parsed)];
+        if (uniq.length > 0) orderIds = uniq;
+      }
       const orderRaw = q.order_id?.trim();
       let orderId: number | undefined;
-      if (orderRaw) {
+      if (!orderIds?.length && orderRaw) {
         const n = Number.parseInt(orderRaw, 10);
         if (!Number.isNaN(n) && n > 0) orderId = n;
       }
@@ -120,12 +168,18 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
           clientId,
           q.date_from,
           q.date_to,
-          orderId
+          orderId,
+          orderIds
         );
         return reply.send(data);
       } catch (e) {
         const code = e instanceof Error ? e.message : "";
         if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (code === "ORDER_NOT_DELIVERED")
+          return reply.status(400).send({
+            error: "OrderNotDelivered",
+            message: "Возврат с полки доступен только для заказов со статусом «Доставлен»."
+          });
         if (code === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
         throw e;
       }
@@ -157,7 +211,62 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
         if (code === "NOTHING_TO_RETURN")
           return reply.status(400).send({ error: "NothingToReturn" });
         if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (code === "ORDER_NOT_DELIVERED")
+          return reply.status(400).send({
+            error: "OrderNotDelivered",
+            message: "Возврат с полки доступен только для заказов со статусом «Доставлен»."
+          });
         if (code === "NO_WAREHOUSE") return reply.status(400).send({ error: "NoWarehouse" });
+        if (code === "BONUS_CASH_EXCEEDS")
+          return reply.status(400).send({ error: "BonusCashExceeds" });
+        if (code === "MIXED_LINE_MODES" || code === "MIXED_LINE_FIELDS")
+          return reply.status(400).send({ error: "BadLineMode" });
+        if (code === "EMPTY_LINE") return reply.status(400).send({ error: "EmptyLine" });
+        throw e;
+      }
+    }
+  );
+
+  // ─── Create period return — bir nechta zakaz (polki po zakaz) ───────────
+  app.post(
+    "/api/:slug/returns/period-batch",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = periodReturnBatchBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const data = await createPeriodReturnBatch(
+          request.tenant!.id,
+          parsed.data,
+          actorUserIdOrNull(request)
+        );
+        return reply.status(201).send(data);
+      } catch (e) {
+        const code = e instanceof Error ? e.message : "";
+        if (code === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
+        if (code === "BAD_PRODUCT") return reply.status(400).send({ error: "BadProduct" });
+        if (code === "EMPTY_LINES") return reply.status(400).send({ error: "EmptyLines" });
+        if (code === "TOO_MANY_ITEMS")
+          return reply.status(400).send({ error: "TooManyItems", max: MAX_RETURN_ITEMS });
+        if (code === "RETURN_QTY_EXCEEDS_ORDERED")
+          return reply.status(400).send({ error: "QtyExceedsOrdered" });
+        if (code === "NOTHING_TO_RETURN")
+          return reply.status(400).send({ error: "NothingToReturn" });
+        if (code === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (code === "ORDER_NOT_DELIVERED")
+          return reply.status(400).send({
+            error: "OrderNotDelivered",
+            message: "Возврат с полки доступен только для заказов со статусом «Доставлен»."
+          });
+        if (code === "NO_WAREHOUSE") return reply.status(400).send({ error: "NoWarehouse" });
+        if (code === "BONUS_CASH_EXCEEDS")
+          return reply.status(400).send({ error: "BonusCashExceeds" });
+        if (code === "MIXED_LINE_MODES" || code === "MIXED_LINE_FIELDS")
+          return reply.status(400).send({ error: "BadLineMode" });
+        if (code === "EMPTY_LINE") return reply.status(400).send({ error: "EmptyLine" });
         throw e;
       }
     }

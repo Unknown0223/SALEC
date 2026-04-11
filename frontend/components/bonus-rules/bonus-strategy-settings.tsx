@@ -76,26 +76,26 @@ export function BonusStrategySettings() {
     },
     onSuccess: (bs) => {
       void qc.setQueryData(["settings", "bonus-stack", tenantSlug], bs);
-      setMsg("Saqlandi.");
+      setMsg("Сохранено.");
     },
     onError: (e: Error) => {
       if (e.message === "badmax") {
-        setMsg("Max. slot: musbat butun son yoki bo‘sh.");
+        setMsg("Макс. слотов: положительное целое или пусто.");
         return;
       }
       const ax = e as AxiosError<{ error?: string }>;
       if (ax.response?.status === 403) {
-        setMsg("Faqat admin o‘zgartira oladi.");
+        setMsg("Изменять может только администратор.");
         return;
       }
-      setMsg(ax.response?.data?.error ?? "Xato");
+      setMsg(ax.response?.data?.error ?? "Ошибка");
     }
   });
 
   return (
     <>
       {!hydrated ? (
-        <p className="text-sm text-muted-foreground">Sessiya…</p>
+        <p className="text-sm text-muted-foreground">Сессия…</p>
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
@@ -105,7 +105,7 @@ export function BonusStrategySettings() {
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
-        <p className="text-sm text-destructive">Yuklab bo‘lmadi.</p>
+        <p className="text-sm text-destructive">Не удалось загрузить.</p>
       ) : (
         <Card className="max-w-lg shadow-panel">
           <CardContent className="pt-6">
@@ -119,7 +119,7 @@ export function BonusStrategySettings() {
               }}
             >
               <div className="space-y-2">
-                <Label htmlFor="bs-mode">Rejim</Label>
+                <Label htmlFor="bs-mode">Режим</Label>
                 <select
                   id="bs-mode"
                   className={cn(inputCls, "py-0")}
@@ -127,21 +127,21 @@ export function BonusStrategySettings() {
                   onChange={(e) => setMode(e.target.value as BonusStackDto["mode"])}
                   disabled={saveMut.isPending || !isAdmin}
                 >
-                  <option value="all">Barcha mos slotlar (standart)</option>
-                  <option value="first_only">Faqat eng yuqori priority li bittasi</option>
-                  <option value="capped">Cheklangan son (max_units)</option>
+                  <option value="all">Все подходящие слоты (по умолчанию)</option>
+                  <option value="first_only">Только одно с наивысшим приоритетом</option>
+                  <option value="capped">Ограниченное число (max_units)</option>
                 </select>
               </div>
 
               {mode === "capped" ? (
                 <div className="space-y-2">
-                  <Label htmlFor="bs-max">Maks. slotlar soni</Label>
+                  <Label htmlFor="bs-max">Макс. число слотов</Label>
                   <Input
                     id="bs-max"
                     className={inputCls}
                     type="number"
                     min={1}
-                    placeholder="Masalan: 2"
+                    placeholder="Например: 2"
                     value={maxUnits}
                     onChange={(e) => setMaxUnits(e.target.value)}
                     disabled={saveMut.isPending || !isAdmin}
@@ -157,15 +157,15 @@ export function BonusStrategySettings() {
                   onChange={(e) => setForbidAll(e.target.checked)}
                   disabled={saveMut.isPending || !isAdmin}
                 />
-                <span>Mos slotlar hammasiga teng bo‘lsa, hammasini berishni taqiqlash (N−1)</span>
+                <span>Запретить выдать все слоты, если они равны по приоритету (N−1)</span>
               </label>
 
               <p className="text-xs text-muted-foreground">
-                Batafsil: loyiha ichida <code className="rounded bg-muted px-1">docs/BONUS_STACKING_PLAN.md</code>
+                Подробнее: <code className="rounded bg-muted px-1">docs/BONUS_STACKING_PLAN.md</code>
               </p>
 
               {!isAdmin ? (
-                <p className="text-sm text-muted-foreground">Faqat ko‘rish: o‘zgartirish uchun admin kerak.</p>
+                <p className="text-sm text-muted-foreground">Только просмотр; для изменений нужен администратор.</p>
               ) : null}
 
               {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
@@ -173,11 +173,11 @@ export function BonusStrategySettings() {
               <div className="flex flex-wrap gap-2">
                 {isAdmin ? (
                   <Button type="submit" disabled={saveMut.isPending}>
-                    {saveMut.isPending ? "Saqlanmoqda…" : "Saqlash"}
+                    {saveMut.isPending ? "Сохранение…" : "Сохранить"}
                   </Button>
                 ) : null}
                 <Button type="button" variant="outline" onClick={() => void refetch()} disabled={saveMut.isPending}>
-                  Yangilash
+                  Обновить
                 </Button>
               </div>
             </form>

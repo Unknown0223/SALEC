@@ -48,7 +48,7 @@ export default function EditBonusRulePage() {
         href="/settings/bonus-rules/active"
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 w-fit -ml-2 text-muted-foreground")}
       >
-        ← Bonus qoidalari ro‘yxati
+        ← Список правил бонусов
       </Link>
 
       {!authHydrated ? (
@@ -68,11 +68,11 @@ export default function EditBonusRulePage() {
           {error instanceof Error ? error.message : "Правило не найдено или ошибка"}
         </p>
       ) : data && (data.type === "sum" || data.type === "discount") ? (
-        <p className="text-sm text-muted-foreground">Skidkalar bo‘limiga yo‘naltirilmoqda…</p>
+        <p className="text-sm text-muted-foreground">Переход в раздел скидок…</p>
       ) : data ? (
         <>
           <PageHeader
-            title="Bonus qoidasini tahrirlash"
+            title="Редактирование правила бонуса"
             description={`${data.name} · #${data.id}`}
             actions={
               <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">

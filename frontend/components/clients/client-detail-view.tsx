@@ -2,6 +2,8 @@
 
 import type { ClientRow } from "@/lib/client-types";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { DateRangePopover, formatDateRangeButton, localYmd } from "@/components/ui/date-range-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
@@ -15,8 +17,9 @@ import { useEffectiveRole } from "@/lib/auth-store";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export type ClientDetailApiRow = ClientRow & {
   phone_normalized: string | null;
@@ -86,10 +89,6 @@ type ClientAuditResponse = {
   limit: number;
 };
 
-function localYmd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function parseFilenameFromDisposition(cd: string | undefined): string | null {
   if (!cd) return null;
   const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
@@ -112,6 +111,8 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-01`;
   });
   const [reconDateTo, setReconDateTo] = useState(() => localYmd(new Date()));
+  const [reconRangeOpen, setReconRangeOpen] = useState(false);
+  const reconRangeAnchorRef = useRef<HTMLButtonElement>(null);
   const [reconPdfLoading, setReconPdfLoading] = useState(false);
   const [reconPdfError, setReconPdfError] = useState<string | null>(null);
 
@@ -289,28 +290,22 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           <p className="text-xs font-medium text-muted-foreground sm:w-full">Akt-sverka (PDF)</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <Label htmlFor="recon-from" className="text-xs">
-                Dan
-              </Label>
-              <Input
-                id="recon-from"
-                type="date"
-                className="h-9 w-[150px] font-mono text-xs"
-                value={reconDateFrom}
-                onChange={(ev) => setReconDateFrom(ev.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="recon-to" className="text-xs">
-                Gacha
-              </Label>
-              <Input
-                id="recon-to"
-                type="date"
-                className="h-9 w-[150px] font-mono text-xs"
-                value={reconDateTo}
-                onChange={(ev) => setReconDateTo(ev.target.value)}
-              />
+              <span className="text-xs text-muted-foreground">Davr</span>
+              <button
+                ref={reconRangeAnchorRef}
+                type="button"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                  "h-9 min-w-[200px] max-w-[min(100%,20rem)] justify-start gap-2 font-normal",
+                  reconRangeOpen && "border-primary/60 bg-primary/5"
+                )}
+                aria-expanded={reconRangeOpen}
+                aria-haspopup="dialog"
+                onClick={() => setReconRangeOpen((o) => !o)}
+              >
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <span className="truncate text-sm">{formatDateRangeButton(reconDateFrom, reconDateTo)}</span>
+              </button>
             </div>
             <Button
               type="button"
@@ -755,6 +750,17 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
         </div>
       ) : null}
 
+      <DateRangePopover
+        open={reconRangeOpen}
+        onOpenChange={setReconRangeOpen}
+        anchorRef={reconRangeAnchorRef}
+        dateFrom={reconDateFrom}
+        dateTo={reconDateTo}
+        onApply={({ dateFrom, dateTo }) => {
+          setReconDateFrom(dateFrom);
+          setReconDateTo(dateTo);
+        }}
+      />
     </div>
   );
 }
