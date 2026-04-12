@@ -45,9 +45,14 @@ function validatePolygon(polygon: unknown): { lat: number; lng: number }[] {
 
 export async function listTerritories(
   tenantId: number,
-  opts: { is_active?: boolean; q?: string; page: number; limit: number }
+  opts: { is_active?: boolean; q?: string; page: number; limit: number; archive?: boolean }
 ) {
   const where: Prisma.TerritoryWhereInput = { tenant_id: tenantId };
+  if (opts.archive) {
+    where.deleted_at = { not: null };
+  } else {
+    where.deleted_at = null;
+  }
   if (opts.is_active !== undefined) where.is_active = opts.is_active;
   const q = (opts.q ?? "").trim();
   if (q) {
@@ -83,7 +88,9 @@ export async function listTerritories(
     is_active: t.is_active,
     created_at: t.created_at.toISOString(),
     updated_at: t.updated_at.toISOString(),
-    user_count: t.userLinks.length
+    user_count: t.userLinks.length,
+    deleted_at: t.deleted_at ? t.deleted_at.toISOString() : null,
+    deleted_by_user_id: t.deleted_by_user_id ?? null
   }));
   return { data, total, page: opts.page, limit: opts.limit };
 }
@@ -114,7 +121,7 @@ export async function createTerritory(
 ) {
   if (body.code) {
     const clash = await prisma.territory.findFirst({
-      where: { tenant_id: tenantId, code: body.code }
+      where: { tenant_id: tenantId, code: body.code, deleted_at: null }
     });
     if (clash) throw new Error("CodeTaken");
   }
@@ -153,10 +160,11 @@ export async function updateTerritory(
     where: { id, tenant_id: tenantId }
   });
   if (!existing) return null;
+  if (existing.deleted_at != null) throw new Error("VOIDED");
 
   if (body.code !== undefined && body.code) {
     const clash = await prisma.territory.findFirst({
-      where: { tenant_id: tenantId, code: body.code, NOT: { id } }
+      where: { tenant_id: tenantId, code: body.code, deleted_at: null, NOT: { id } }
     });
     if (clash) throw new Error("CodeTaken");
   }
@@ -179,18 +187,36 @@ export async function updateTerritory(
   return updated;
 }
 
-export async function deleteTerritory(tenantId: number, id: number) {
+export async function deleteTerritory(
+  tenantId: number,
+  id: number,
+  actorUserId: number | null
+): Promise<void> {
   const existing = await prisma.territory.findFirst({
     where: { id, tenant_id: tenantId },
-    select: { id: true }
+    select: { id: true, deleted_at: true }
   });
-  if (!existing) return false;
+  if (!existing) throw new Error("NOT_FOUND");
+  if (existing.deleted_at != null) throw new Error("ALREADY_VOIDED");
+  const uid =
+    actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+  await prisma.territory.update({
+    where: { id },
+    data: { deleted_at: new Date(), deleted_by_user_id: uid }
+  });
+}
 
-  await prisma.$transaction(async (tx) => {
-    await tx.territoryUserLink.deleteMany({ where: { territory_id: id } });
-    await tx.territory.delete({ where: { id } });
+export async function restoreTerritory(tenantId: number, id: number): Promise<void> {
+  const existing = await prisma.territory.findFirst({
+    where: { id, tenant_id: tenantId },
+    select: { id: true, deleted_at: true }
   });
-  return true;
+  if (!existing) throw new Error("NOT_FOUND");
+  if (existing.deleted_at == null) throw new Error("NOT_VOIDED");
+  await prisma.territory.update({
+    where: { id },
+    data: { deleted_at: null, deleted_by_user_id: null }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +234,7 @@ export async function assignUser(
   assignedBy?: number
 ) {
   const territory = await prisma.territory.findFirst({
-    where: { id: territoryId, tenant_id: tenantId },
+    where: { id: territoryId, tenant_id: tenantId, deleted_at: null },
     select: { id: true }
   });
   if (!territory) throw new Error("TerritoryNotFound");
@@ -279,7 +305,7 @@ export async function validateCheckin(
     return { inside: false, territory_id: null, territory_name: null };
   }
 
-  const where: Prisma.TerritoryWhereInput = { tenant_id: tenantId, is_active: true };
+  const where: Prisma.TerritoryWhereInput = { tenant_id: tenantId, is_active: true, deleted_at: null };
   if (territoryId !== null) where.id = territoryId;
 
   const territories = await prisma.territory.findMany({ where });
@@ -331,7 +357,7 @@ export async function pointInPolygonSQL(
 ): Promise<boolean> {
   // Verify the territory exists and belongs to the tenant
   const territory = await prisma.territory.findFirst({
-    where: { id: territoryId, tenant_id: tenantId },
+    where: { id: territoryId, tenant_id: tenantId, deleted_at: null },
     select: { id: true }
   });
   if (!territory) return false;
@@ -418,7 +444,7 @@ export async function getTerritoryStats(
 ) {
   // Fetch all territories for the tenant
   const territories = await prisma.territory.findMany({
-    where: { tenant_id: tenantId },
+    where: { tenant_id: tenantId, deleted_at: null },
     select: { id: true, name: true }
   });
 

@@ -39,6 +39,8 @@ export type ClientAgentAssignmentApi = {
   slot: number;
   agent_id: number | null;
   agent_name: string | null;
+  /** Agent `User.code` (masalan GGTR006) */
+  agent_code: string | null;
   visit_date: string | null;
   expeditor_phone: string | null;
   /** 1=Du … 7=Ya */
@@ -318,7 +320,7 @@ function mapAgentAssignmentsToApi(
     expeditor_phone: string | null;
     visit_weekdays: unknown;
     expeditor_user_id: number | null;
-    agent: { name: string } | null;
+    agent: { name: string; code: string | null } | null;
     expeditor_user: { id: number; name: string } | null;
   }>
 ): ClientAgentAssignmentApi[] {
@@ -326,6 +328,7 @@ function mapAgentAssignmentsToApi(
     slot: r.slot,
     agent_id: r.agent_id,
     agent_name: r.agent?.name ?? null,
+    agent_code: r.agent?.code?.trim() ? r.agent.code.trim() : null,
     visit_date: r.visit_date?.toISOString() ?? null,
     expeditor_phone: r.expeditor_phone,
     visit_weekdays: parseVisitWeekdaysJson(r.visit_weekdays),
@@ -1091,7 +1094,7 @@ export async function listClientsForTenantPaged(
         zone: true,
         contact_persons: true,
         agent_id: true,
-        agent: { select: { name: true } },
+        agent: { select: { name: true, code: true } },
         agent_assignments: {
           orderBy: { slot: "asc" },
           select: {
@@ -1101,7 +1104,7 @@ export async function listClientsForTenantPaged(
             expeditor_phone: true,
             visit_weekdays: true,
             expeditor_user_id: true,
-            agent: { select: { name: true } },
+            agent: { select: { name: true, code: true } },
             expeditor_user: { select: { id: true, name: true } }
           }
         },
@@ -1180,10 +1183,23 @@ export type ClientDetailRow = ClientListRow & {
   phone_normalized: string | null;
   /** `cancelled` / `returned` dan tashqari zakazlar `total_sum` yig‘indisi (kredit yuki). */
   open_orders_total: string;
+  updated_at: string;
+  /** `client_audit_logs` bo‘yicha birinchi `client.create` */
+  created_by_user_label: string | null;
+  /** Oxirgi `client.patch` yozuvi */
+  last_modified_by_user_label: string | null;
 };
 
+function auditActorLabel(user: { name: string; login: string } | null | undefined): string | null {
+  if (!user) return null;
+  const n = user.name?.trim();
+  if (n) return n;
+  const l = user.login?.trim();
+  return l || null;
+}
+
 export async function getClientDetail(tenantId: number, id: number): Promise<ClientDetailRow> {
-  const [c, agg, balRow] = await Promise.all([
+  const [c, agg, balRow, auditPair] = await Promise.all([
     prisma.client.findFirst({
       where: { id, tenant_id: tenantId, merged_into_client_id: null },
       select: {
@@ -1199,6 +1215,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         is_active: true,
         agent_id: true,
         created_at: true,
+        updated_at: true,
         responsible_person: true,
         landmark: true,
         inn: true,
@@ -1231,7 +1248,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         longitude: true,
         zone: true,
         contact_persons: true,
-        agent: { select: { name: true } },
+        agent: { select: { name: true, code: true } },
         agent_assignments: {
           orderBy: { slot: "asc" },
           select: {
@@ -1241,7 +1258,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
             expeditor_phone: true,
             visit_weekdays: true,
             expeditor_user_id: true,
-            agent: { select: { name: true } },
+            agent: { select: { name: true, code: true } },
             expeditor_user: { select: { id: true, name: true } }
           }
         }
@@ -1258,8 +1275,21 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     prisma.clientBalance.findUnique({
       where: { tenant_id_client_id: { tenant_id: tenantId, client_id: id } },
       select: { balance: true }
-    })
+    }),
+    Promise.all([
+      prisma.clientAuditLog.findFirst({
+        where: { tenant_id: tenantId, client_id: id, action: "client.create" },
+        orderBy: { created_at: "asc" },
+        include: { user: { select: { login: true, name: true } } }
+      }),
+      prisma.clientAuditLog.findFirst({
+        where: { tenant_id: tenantId, client_id: id, action: "client.patch" },
+        orderBy: { created_at: "desc" },
+        include: { user: { select: { login: true, name: true } } }
+      })
+    ])
   ]);
+  const [createLog, lastPatchLog] = auditPair;
   if (!c) {
     throw new Error("NOT_FOUND");
   }
@@ -1287,6 +1317,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     agent_id: disp.agent_id,
     agent_name: disp.agent_name,
     created_at: c.created_at.toISOString(),
+    updated_at: c.updated_at.toISOString(),
     account_balance,
     responsible_person: c.responsible_person,
     landmark: c.landmark,
@@ -1321,7 +1352,9 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     zone: c.zone,
     agent_assignments,
     contact_persons: parseContactPersonsJson(c.contact_persons),
-    open_orders_total
+    open_orders_total,
+    created_by_user_label: auditActorLabel(createLog?.user ?? undefined),
+    last_modified_by_user_label: auditActorLabel(lastPatchLog?.user ?? undefined)
   };
 }
 
@@ -1337,7 +1370,8 @@ export async function listClientBalanceMovements(
   tenantId: number,
   clientId: number,
   page: number,
-  limit: number
+  limit: number,
+  opts?: { date_from?: Date | null; date_to_end?: Date | null }
 ): Promise<{
   data: ClientBalanceMovementRow[];
   total: number;
@@ -1359,10 +1393,18 @@ export async function listClientBalanceMovements(
     return { data: [], total: 0, page, limit, account_balance: "0" };
   }
 
+  const createdAt: { gte?: Date; lte?: Date } = {};
+  if (opts?.date_from) createdAt.gte = opts.date_from;
+  if (opts?.date_to_end) createdAt.lte = opts.date_to_end;
+  const movementWhere = {
+    client_balance_id: bal.id,
+    ...(Object.keys(createdAt).length > 0 ? { created_at: createdAt } : {})
+  };
+
   const [total, rows] = await Promise.all([
-    prisma.clientBalanceMovement.count({ where: { client_balance_id: bal.id } }),
+    prisma.clientBalanceMovement.count({ where: movementWhere }),
     prisma.clientBalanceMovement.findMany({
-      where: { client_balance_id: bal.id },
+      where: movementWhere,
       orderBy: { created_at: "desc" },
       skip: (page - 1) * limit,
       take: limit,
@@ -1537,6 +1579,7 @@ export async function getClientReconciliationPdfBuffer(
       where: {
         tenant_id: tenantId,
         client_id: clientId,
+        deleted_at: null,
         created_at: { gte: dateFromStart, lte: dateToEnd }
       },
       orderBy: { created_at: "asc" },

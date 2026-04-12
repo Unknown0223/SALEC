@@ -1,8 +1,22 @@
-import type { FastifyInstance } from "fastify";
+import { unlink } from "fs/promises";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { writeClientImportTempFile } from "../../jobs/import-temp-file";
 import { ensureTenantContext } from "../../lib/tenant-context";
+import { enqueueClientsImportJob } from "../jobs/jobs.service";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import type { ListClientsQuery } from "./clients.service";
+import { getClientBalanceLedger } from "./client-balance-ledger.service";
+import { getClientDebtorCreditorMonthly } from "./client-debtor-creditor-report.service";
+import { getClientSalesAnalytics } from "./client-sales-analytics.service";
+import {
+  createClientEquipmentRow,
+  createClientPhotoReportRow,
+  deleteClientPhotoReport,
+  listClientEquipmentSplit,
+  listClientPhotoReports,
+  markClientEquipmentRemoved
+} from "./client-assets.service";
 import {
   addClientBalanceMovement,
   bulkSetClientsActive,
@@ -21,6 +35,63 @@ import {
 } from "./clients.service";
 
 const catalogRoles = ["admin", "operator"] as const;
+
+const createClientEquipmentBodySchema = z.object({
+  inventory_type: z.string().min(1).max(256),
+  equipment_kind: z.string().max(256).nullable().optional(),
+  serial_number: z.string().max(128).nullable().optional(),
+  inventory_number: z.string().max(128).nullable().optional(),
+  note: z.string().max(2000).nullable().optional()
+});
+
+const createClientPhotoBodySchema = z.object({
+  image_url: z.string().min(1).max(4000),
+  caption: z.string().max(1000).nullable().optional(),
+  order_id: z.number().int().positive().nullable().optional()
+});
+
+type ClientImportMultipartOk = {
+  buf: Buffer;
+  sheetName?: string;
+  headerRowIndex?: number;
+  columnMap?: Record<string, number>;
+};
+
+async function parseClientImportMultipart(request: FastifyRequest): Promise<ClientImportMultipartOk | null> {
+  let buf: Buffer | null = null;
+  let sheetName: string | undefined;
+  let headerRowIndex: number | undefined;
+  let columnMap: Record<string, number> | undefined;
+
+  const parts = request.parts();
+  for await (const part of parts) {
+    if (part.type === "file") {
+      buf = await part.toBuffer();
+    } else if (part.type === "field") {
+      if (part.fieldname === "sheetName") {
+        const s = String(part.value ?? "").trim();
+        if (s) sheetName = s;
+      } else if (part.fieldname === "headerRowIndex") {
+        const n = Number.parseInt(String(part.value ?? ""), 10);
+        if (Number.isFinite(n) && n >= 0) headerRowIndex = n;
+      } else if (part.fieldname === "columnMap") {
+        try {
+          const parsed = JSON.parse(String(part.value ?? "{}")) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            columnMap = parsed as Record<string, number>;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  if (!buf || buf.length === 0) {
+    return null;
+  }
+  return { buf, sheetName, headerRowIndex, columnMap };
+}
 
 function parseLocalYmd(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
@@ -325,45 +396,55 @@ export async function registerClientRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      let buf: Buffer | null = null;
-      let sheetName: string | undefined;
-      let headerRowIndex: number | undefined;
-      let columnMap: Record<string, number> | undefined;
-
-      const parts = request.parts();
-      for await (const part of parts) {
-        if (part.type === "file") {
-          buf = await part.toBuffer();
-        } else if (part.type === "field") {
-          if (part.fieldname === "sheetName") {
-            const s = String(part.value ?? "").trim();
-            if (s) sheetName = s;
-          } else if (part.fieldname === "headerRowIndex") {
-            const n = Number.parseInt(String(part.value ?? ""), 10);
-            if (Number.isFinite(n) && n >= 0) headerRowIndex = n;
-          } else if (part.fieldname === "columnMap") {
-            try {
-              const parsed = JSON.parse(String(part.value ?? "{}")) as unknown;
-              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                columnMap = parsed as Record<string, number>;
-              }
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-      }
-
-      if (!buf || buf.length === 0) {
+      const parsed = await parseClientImportMultipart(request);
+      if (!parsed) {
         return reply.status(400).send({ error: "NoFile" });
       }
-
-      const result = await importClientsFromXlsx(request.tenant!.id, buf, {
-        sheetName,
-        headerRowIndex,
-        columnMap
+      const result = await importClientsFromXlsx(request.tenant!.id, parsed.buf, {
+        sheetName: parsed.sheetName,
+        headerRowIndex: parsed.headerRowIndex,
+        columnMap: parsed.columnMap
       });
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients/import/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const user = getAccessUser(request);
+      const parsed = await parseClientImportMultipart(request);
+      if (!parsed) {
+        return reply.status(400).send({ error: "NoFile" });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writeClientImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueClientsImportJob(tenant.id, Number(user.sub), tempPath, {
+          sheetName: parsed.sheetName,
+          headerRowIndex: parsed.headerRowIndex,
+          columnMap: parsed.columnMap
+        });
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "clients.import.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 
@@ -539,6 +620,292 @@ export async function registerClientRoutes(app: FastifyInstance) {
   );
 
   app.get(
+    "/api/:slug/clients/:id/sales-analytics",
+    { preHandler: [jwtAccessVerify] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const q = request.query as Record<string, string | undefined>;
+      let product_category_id: number | undefined;
+      if (q.product_category_id?.trim()) {
+        const n = Number.parseInt(q.product_category_id.trim(), 10);
+        if (Number.isFinite(n) && n > 0) product_category_id = n;
+      }
+      let agent_ids: number[] | undefined;
+      const agentIdsRaw = q.agent_ids?.trim();
+      if (agentIdsRaw) {
+        const parts = agentIdsRaw.split(/[,;\s]+/).map((s) => Number.parseInt(s.trim(), 10));
+        const ids = parts.filter((n) => Number.isFinite(n) && n > 0);
+        if (ids.length > 0) agent_ids = ids;
+      }
+      const noAgentRaw = q.no_agent?.trim().toLowerCase();
+      const include_no_agent = noAgentRaw === "1" || noAgentRaw === "true" || noAgentRaw === "yes";
+      try {
+        const row = await getClientSalesAnalytics(request.tenant!.id, id, {
+          date_from: q.date_from,
+          date_to: q.date_to,
+          status: q.status,
+          order_type: q.order_type,
+          consignment: q.consignment,
+          product_category_id: product_category_id ?? null,
+          payment_type: q.payment_type?.trim() || null,
+          agent_ids: agent_ids ?? null,
+          include_no_agent: include_no_agent || undefined
+        });
+        return reply.send(row);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/:id/equipment",
+    { preHandler: [jwtAccessVerify] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        const data = await listClientEquipmentSplit(request.tenant!.id, id);
+        return reply.send(data);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients/:id/equipment",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = createClientEquipmentBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const row = await createClientEquipmentRow(request.tenant!.id, id, parsed.data);
+        return reply.status(201).send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients/:id/equipment/:equipmentId/remove",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      const equipmentId = Number.parseInt((request.params as { equipmentId: string }).equipmentId, 10);
+      if (Number.isNaN(id) || Number.isNaN(equipmentId)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        await markClientEquipmentRemoved(request.tenant!.id, id, equipmentId);
+        return reply.send({ ok: true });
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/:id/photo-reports",
+    { preHandler: [jwtAccessVerify] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        const data = await listClientPhotoReports(request.tenant!.id, id);
+        return reply.send({ data });
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/clients/:id/photo-reports",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = createClientPhotoBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const actor = getAccessUser(request);
+        const sub = Number.parseInt(actor.sub, 10);
+        const actorUserId = Number.isFinite(sub) && sub > 0 ? sub : null;
+        const row = await createClientPhotoReportRow(request.tenant!.id, id, actorUserId, parsed.data);
+        return reply.status(201).send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
+        if (msg === "ORDER_NOT_FOUND") return reply.status(400).send({ error: "OrderNotFound" });
+        throw e;
+      }
+    }
+  );
+
+  app.delete(
+    "/api/:slug/clients/:id/photo-reports/:photoId",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      const photoId = Number.parseInt((request.params as { photoId: string }).photoId, 10);
+      if (Number.isNaN(id) || Number.isNaN(photoId)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        await deleteClientPhotoReport(request.tenant!.id, id, photoId);
+        return reply.send({ ok: true });
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/:id/balance-ledger",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const q = request.query as Record<string, string | undefined>;
+      const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
+      const ledger_detail = q.ledger_detail === "1" || q.ledger_detail === "true";
+      const maxLedgerLimit = ledger_detail ? 5000 : 100;
+      const limitNum = Math.min(
+        maxLedgerLimit,
+        Math.max(1, Number.parseInt(q.limit ?? "20", 10) || 20)
+      );
+      const search = q.search?.trim() || undefined;
+      const lkRaw = q.ledger_kind?.trim();
+      const ledger_kind =
+        lkRaw === "debt" || lkRaw === "payment" ? lkRaw : ("all" as const);
+      const noAgent = q.no_agent === "1" || q.no_agent === "true";
+      let filter_agent_ids: number[] = [];
+      const rawIds = q.agent_ids?.trim();
+      if (rawIds) {
+        for (const part of rawIds.split(/[,;]+/)) {
+          const t = part.trim();
+          if (!t) continue;
+          const n = Number.parseInt(t, 10);
+          if (Number.isFinite(n) && n > 0) filter_agent_ids.push(n);
+        }
+        filter_agent_ids = [...new Set(filter_agent_ids)];
+      }
+      let filter_agent_id: number | null = null;
+      if (filter_agent_ids.length === 0 && q.agent_id?.trim()) {
+        const aid = Number.parseInt(q.agent_id.trim(), 10);
+        if (!Number.isFinite(aid) || aid <= 0) {
+          return reply.status(400).send({ error: "InvalidAgentId" });
+        }
+        filter_agent_id = aid;
+      }
+      let dateFrom: Date | null = null;
+      let dateToEnd: Date | null = null;
+      if (q.date_from?.trim()) {
+        const a = parseLocalYmd(q.date_from);
+        if (!a) return reply.status(400).send({ error: "InvalidDate", field: "date_from" });
+        dateFrom = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 0, 0, 0, 0);
+      }
+      if (q.date_to?.trim()) {
+        const b = parseLocalYmd(q.date_to);
+        if (!b) return reply.status(400).send({ error: "InvalidDate", field: "date_to" });
+        dateToEnd = endOfLocalDay(b);
+      }
+      if (dateFrom && dateToEnd && dateFrom > dateToEnd) {
+        return reply.status(400).send({ error: "BadDateRange" });
+      }
+      try {
+        const result = await getClientBalanceLedger(request.tenant!.id, id, {
+          page: pageNum,
+          limit: limitNum,
+          date_from: dateFrom,
+          date_to_end: dateToEnd,
+          search,
+          ledger_kind,
+          filter_agent_id: filter_agent_id ?? null,
+          filter_agent_ids: filter_agent_ids.length > 0 ? filter_agent_ids : undefined,
+          filter_no_agent: noAgent,
+          ledger_detail
+        });
+        return reply.send(result);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/:id/debtor-creditor-monthly",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id)) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        const rows = await getClientDebtorCreditorMonthly(request.tenant!.id, id);
+        return reply.send({ rows });
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_FOUND") {
+          return reply.status(404).send({ error: "NotFound" });
+        }
+        throw e;
+      }
+    }
+  );
+
+  app.get(
     "/api/:slug/clients/:id/balance-movements",
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
@@ -550,8 +917,23 @@ export async function registerClientRoutes(app: FastifyInstance) {
       const q = request.query as Record<string, string | undefined>;
       const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
       const limitNum = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
+      let dateFrom: Date | null = null;
+      let dateToEnd: Date | null = null;
+      if (q.date_from?.trim()) {
+        const a = parseLocalYmd(q.date_from);
+        if (!a) return reply.status(400).send({ error: "InvalidDate", field: "date_from" });
+        dateFrom = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 0, 0, 0, 0);
+      }
+      if (q.date_to?.trim()) {
+        const b = parseLocalYmd(q.date_to);
+        if (!b) return reply.status(400).send({ error: "InvalidDate", field: "date_to" });
+        dateToEnd = endOfLocalDay(b);
+      }
       try {
-        const result = await listClientBalanceMovements(request.tenant!.id, id, pageNum, limitNum);
+        const result = await listClientBalanceMovements(request.tenant!.id, id, pageNum, limitNum, {
+          date_from: dateFrom,
+          date_to_end: dateToEnd
+        });
         return reply.send(result);
       } catch (e) {
         if (e instanceof Error && e.message === "NOT_FOUND") {

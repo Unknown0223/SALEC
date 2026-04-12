@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClientRow } from "@/lib/client-types";
+import type { ClientRow, ContactPersonSlot } from "@/lib/client-types";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DateRangePopover, formatDateRangeButton, localYmd } from "@/components/ui/date-range-popover";
@@ -19,11 +19,14 @@ import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 export type ClientDetailApiRow = ClientRow & {
   phone_normalized: string | null;
   open_orders_total: string;
+  updated_at: string;
+  created_by_user_label?: string | null;
+  last_modified_by_user_label?: string | null;
 };
 
 type BalanceMovementsResponse = {
@@ -42,11 +45,11 @@ type BalanceMovementsResponse = {
 
 function auditActionLabel(action: string): string {
   const m: Record<string, string> = {
-    "client.patch": "Rekvizitlar",
-    "client.balance_movement": "Balans",
-    "client.merge": "Birlashtirish",
-    "client.payment": "To‘lov",
-    "client.sales_return": "Qaytarish"
+    "client.patch": "Реквизиты",
+    "client.balance_movement": "Баланс",
+    "client.merge": "Объединение",
+    "client.payment": "Оплата",
+    "client.sales_return": "Возврат"
   };
   return m[action] ?? action;
 }
@@ -93,6 +96,127 @@ function parseFilenameFromDisposition(cd: string | undefined): string | null {
   if (!cd) return null;
   const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
   return m?.[1] ? decodeURIComponent(m[1].trim()) : null;
+}
+
+const WEEKDAY_RU: Record<number, string> = {
+  1: "Пн",
+  2: "Вт",
+  3: "Ср",
+  4: "Чт",
+  5: "Пт",
+  6: "Сб",
+  7: "Вс"
+};
+
+function nz(s: string | null | undefined): boolean {
+  return s != null && String(s).trim() !== "";
+}
+
+function assignmentHasDetailData(a: ClientRow["agent_assignments"][number]): boolean {
+  const wd = Array.isArray(a.visit_weekdays) ? a.visit_weekdays.filter((x) => x >= 1 && x <= 7) : [];
+  return (
+    nz(a.agent_code) ||
+    a.agent_id != null ||
+    a.expeditor_user_id != null ||
+    wd.length > 0 ||
+    (a.visit_date != null && String(a.visit_date).trim() !== "") ||
+    (a.expeditor_phone != null && a.expeditor_phone.trim() !== "")
+  );
+}
+
+function formatVisitDateShort(iso: string | null): string | null {
+  if (!iso?.trim()) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
+function formatAgentAssignmentLine(a: ClientRow["agent_assignments"][number]): string {
+  const code = a.agent_code?.trim() ?? "";
+  const name = a.agent_name?.trim() ?? "";
+  const chunks: string[] = [];
+  if (code) chunks.push(code);
+  if (a.agent_id != null) {
+    chunks.push(name ? `[${name}]` : `[VACANT]`);
+  } else if (name) {
+    chunks.push(`[${name}]`);
+  } else if (code) {
+    chunks.push(`[VACANT]`);
+  } else {
+    chunks.push("—");
+  }
+  const d = formatVisitDateShort(a.visit_date);
+  if (d) chunks.push(d);
+  const wd = Array.isArray(a.visit_weekdays)
+    ? Array.from(new Set(a.visit_weekdays)).filter((x) => x >= 1 && x <= 7).sort((x, y) => x - y)
+    : [];
+  if (wd.length > 0) {
+    chunks.push(`(${wd.map((i) => WEEKDAY_RU[i] ?? String(i)).join(" , ")})`);
+  }
+  return chunks.join(" ");
+}
+
+function territoryFullLine(c: ClientRow): string {
+  const parts = [c.region, c.city, c.district, c.zone, c.neighborhood].map((x) => (x ?? "").trim()).filter(Boolean);
+  return parts.length ? parts.join(" · ") : "";
+}
+
+function addressStructuredLine(c: ClientRow): string {
+  const line = [c.street, c.house_number, c.apartment].map((x) => (x ?? "").trim()).filter(Boolean).join(", ");
+  return line;
+}
+
+type DetailRow = { label: string; value: ReactNode };
+
+function DetailSection({ title, rows }: { title: string; rows: Array<DetailRow | null | false> }) {
+  const list = rows.filter((r): r is DetailRow => Boolean(r));
+  if (list.length === 0) return null;
+  return (
+    <div className="overflow-hidden rounded-lg border shadow-sm">
+      <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <table className="w-full min-w-[280px] border-collapse text-sm">
+        <tbody>
+          {list.map((r, i) => (
+            <tr key={i} className="border-b border-border last:border-b-0">
+              <th className="w-44 max-w-[11rem] px-4 py-2.5 align-top text-left text-xs font-medium text-muted-foreground">
+                {r.label}
+              </th>
+              <td className="px-4 py-2.5 break-words">{r.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function optStrRow(label: string, value: string | null | undefined): DetailRow | null {
+  if (!nz(value)) return null;
+  return { label, value: String(value).trim() };
+}
+
+function buildContactPersonRows(cps: ContactPersonSlot[]): DetailRow[] {
+  const nonempty = cps
+    .map((cp, idx) => ({ idx, cp }))
+    .filter(({ cp }) => nz(cp.firstName) || nz(cp.lastName) || nz(cp.phone));
+  return nonempty.map(({ cp }, j) => {
+    const namePart = [cp.firstName?.trim(), cp.lastName?.trim()].filter(Boolean).join(" ");
+    const phone = cp.phone?.trim();
+    const value = (
+      <span>
+        {namePart || "—"}
+        {phone ? (
+          <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+            {formatDigitsGroupedLoose(phone)}
+          </span>
+        ) : null}
+      </span>
+    );
+    const label = nonempty.length > 1 ? `Контактное лицо (${j + 1})` : "Контактное лицо";
+    return { label, value };
+  });
 }
 
 export function ClientDetailView({ tenantSlug, clientId }: Props) {
@@ -169,7 +293,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     mutationFn: async () => {
       const delta = Number.parseFloat(deltaInput.replace(/\s/g, "").replace(",", "."));
       if (!Number.isFinite(delta) || delta === 0) {
-        throw new Error("Summa 0 dan farq qilishi kerak");
+        throw new Error("Сумма должна отличаться от 0");
       }
       const { data: row } = await api.post<ClientDetailApiRow>(
         `/api/${tenantSlug}/clients/${clientId}/balance-movements`,
@@ -188,14 +312,14 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     onError: (e: unknown) => {
       const ax = e as { response?: { status?: number; data?: { error?: string } } };
       if (ax.response?.status === 403) {
-        setBalanceFormError("Faqat admin kiritishi mumkin.");
+        setBalanceFormError("Вводить может только администратор.");
         return;
       }
       if (ax.response?.data?.error === "BadDelta") {
-        setBalanceFormError("Noto‘g‘ri summa.");
+        setBalanceFormError("Некорректная сумма.");
         return;
       }
-      setBalanceFormError(e instanceof Error ? e.message : "Xato");
+      setBalanceFormError(e instanceof Error ? e.message : "Ошибка");
     }
   });
 
@@ -222,7 +346,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       );
       const ct = String(res.headers["content-type"] ?? "").toLowerCase();
       if (!ct.includes("pdf")) {
-        throw new Error("PDF tayyor bo‘lmadi");
+        throw new Error("Не удалось сформировать PDF");
       }
       const blob = res.data as Blob;
       const filename =
@@ -243,7 +367,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setReconPdfError(e instanceof Error ? e.message : "PDF yuklashda xatolik");
+      setReconPdfError(e instanceof Error ? e.message : "Ошибка загрузки PDF");
     } finally {
       setReconPdfLoading(false);
     }
@@ -255,7 +379,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
   if (isError || !data) {
     return (
       <p className="text-sm text-destructive">
-        {error instanceof Error ? error.message : "Klient topilmadi yoki xato."}
+        {error instanceof Error ? error.message : "Клиент не найден или ошибка."}
       </p>
     );
   }
@@ -264,6 +388,11 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     movementsQuery.data != null
       ? Math.max(1, Math.ceil(movementsQuery.data.total / movementsQuery.data.limit))
       : 1;
+
+  const assignmentsOrdered = [...data.agent_assignments].sort((a, b) => a.slot - b.slot);
+  const assignmentsVisible = assignmentsOrdered.filter(assignmentHasDetailData);
+  const structuredAddr = addressStructuredLine(data);
+  const territoryLine = territoryFullLine(data);
 
   return (
     <div className="flex flex-col gap-6 text-sm">
@@ -274,23 +403,23 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
             href={`/clients/${clientId}/edit`}
             className="inline-flex h-9 items-center justify-center rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground shadow-sm transition-colors hover:bg-secondary/80"
           >
-            Tahrir kartochka
+            Редактировать карточку
           </Link>
           <Link
             href={`/orders?client_id=${clientId}`}
             className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-muted"
           >
-            Shu mijozning zakazlari
+            Заказы этого клиента
           </Link>
         </div>
       </div>
 
       {canReconciliationPdf ? (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <p className="text-xs font-medium text-muted-foreground sm:w-full">Akt-sverka (PDF)</p>
+          <p className="text-xs font-medium text-muted-foreground sm:w-full">Акт сверки (PDF)</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Davr</span>
+              <span className="text-xs text-muted-foreground">Период</span>
               <button
                 ref={reconRangeAnchorRef}
                 type="button"
@@ -315,7 +444,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
               disabled={reconPdfLoading}
               onClick={() => void downloadReconciliationPdf()}
             >
-              {reconPdfLoading ? "Yuklanmoqda…" : "PDF yuklab olish"}
+              {reconPdfLoading ? "Загрузка…" : "Скачать PDF"}
             </Button>
           </div>
           {reconPdfError ? (
@@ -327,11 +456,11 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       <div className="flex flex-wrap gap-1 border-b border-border pb-px">
         {(
           [
-            ["main", "Asosiy"],
-            ["balance", "Balans"],
-            ["orders", "Zakazlar"],
-            ["payments", "To‘lovlar"],
-            ["audit", "Tarix"]
+            ["main", "Основное"],
+            ["balance", "Баланс"],
+            ["orders", "Заказы"],
+            ["payments", "Оплаты"],
+            ["audit", "История"]
           ] as const
         ).map(([id, label]) => (
           <button
@@ -351,80 +480,207 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       </div>
 
       {tab === "main" ? (
-        <div className="overflow-x-auto rounded-lg border shadow-sm">
-          <table className="w-full min-w-[520px] border-collapse text-sm">
-            <tbody>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground w-44">
-                  Telefon
-                </th>
-                <td className="px-4 py-3 font-mono text-xs">
-                  {data.phone?.trim() ? formatDigitsGroupedLoose(data.phone) : "—"}
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Telefon (normal.)
-                </th>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {data.phone_normalized?.trim() ? formatDigitsGroupedLoose(data.phone_normalized) : "—"}
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Manzil</th>
-                <td className="px-4 py-3">
-                  {data.address ? (
-                    <span>
-                      {data.address}{" "}
-                      <a
-                        href={`https://yandex.com/maps/?text=${encodeURIComponent(data.address)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary text-xs underline-offset-2 hover:underline whitespace-nowrap"
-                      >
-                        Xaritada ochish
-                      </a>
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Toifa</th>
-                <td className="px-4 py-3">{data.category ?? "—"}</td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Kredit limiti
-                </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">
-                  {formatNumberGrouped(data.credit_limit, { maxFractionDigits: 2 })}
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Hisob saldosi
-                </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">
-                  {formatNumberGrouped(data.account_balance, { maxFractionDigits: 2 })}
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Ochiq zakazlar (jami)
-                </th>
-                <td className="px-4 py-3 tabular-nums font-mono text-xs">
-                  {formatNumberGrouped(data.open_orders_total, { maxFractionDigits: 2 })}
-                </td>
-              </tr>
-              {showCreditHint ? (
-                <>
-                  <tr className="border-b border-border bg-muted/15">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground align-top">
-                      Kredit yuki
-                    </th>
-                    <td className="px-4 py-3">
+        <div className="space-y-4">
+          <DetailSection
+            title="Команда"
+            rows={[
+              ...(assignmentsVisible.length > 0
+                ? assignmentsVisible.flatMap((a) => {
+                    const expName = a.expeditor_name?.trim();
+                    const expPhone = a.expeditor_phone?.trim();
+                    const hasEx = Boolean(expName || expPhone);
+                    const agentRow: DetailRow = {
+                      label: `Команда ${a.slot}`,
+                      value: (
+                        <div>
+                          <div className="text-xs text-muted-foreground">Агент</div>
+                          <div className="font-mono text-xs sm:text-sm">{formatAgentAssignmentLine(a)}</div>
+                          {hasEx ? (
+                            <div className="mt-2">
+                              <div className="text-xs text-muted-foreground">Экспедитор</div>
+                              <div>
+                                {expName || "—"}
+                                {expPhone ? (
+                                  <div className="font-mono text-xs text-muted-foreground">
+                                    {formatDigitsGroupedLoose(expPhone)}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    };
+                    return [agentRow];
+                  })
+                : data.agent_id != null || nz(data.agent_name)
+                  ? [
+                      {
+                        label: "Агент (основной)",
+                        value: (
+                          <span className="font-mono text-xs sm:text-sm">
+                            {data.agent_name?.trim()
+                              ? `[${data.agent_name.trim()}]`
+                              : data.agent_id != null
+                                ? `ID ${formatGroupedInteger(data.agent_id)}`
+                                : "—"}
+                          </span>
+                        )
+                      }
+                    ]
+                  : [])
+            ]}
+          />
+
+          <DetailSection
+            title="Фирма"
+            rows={[
+              { label: "Название", value: data.name },
+              optStrRow("Юридическое название", data.legal_name)
+            ]}
+          />
+
+          <DetailSection
+            title="Контакты"
+            rows={[
+              optStrRow("Ответственное лицо", data.responsible_person),
+              ...buildContactPersonRows(data.contact_persons),
+              data.phone?.trim()
+                ? {
+                    label: "Телефон",
+                    value: <span className="font-mono text-xs">{formatDigitsGroupedLoose(data.phone)}</span>
+                  }
+                : null,
+              data.phone_normalized?.trim()
+                ? {
+                    label: "Телефон (норм.)",
+                    value: (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {formatDigitsGroupedLoose(data.phone_normalized)}
+                      </span>
+                    )
+                  }
+                : null
+            ]}
+          />
+
+          <DetailSection
+            title="Территория и адрес"
+            rows={[
+              optStrRow("Территория", territoryLine || null),
+              optStrRow("Ориентир", data.landmark),
+              optStrRow("Код клиента", data.client_code),
+              data.address?.trim()
+                ? {
+                    label: "Адрес",
+                    value: (
+                      <span>
+                        {data.address.trim()}{" "}
+                        <a
+                          href={`https://yandex.com/maps/?text=${encodeURIComponent(data.address.trim())}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary text-xs underline-offset-2 hover:underline whitespace-nowrap"
+                        >
+                          На карте
+                        </a>
+                      </span>
+                    )
+                  }
+                : null,
+              optStrRow("Улица, дом", structuredAddr || null),
+              optStrRow("GPS (текст)", data.gps_text),
+              nz(data.latitude) || nz(data.longitude)
+                ? {
+                    label: "Координаты",
+                    value: (
+                      <span className="font-mono text-xs">
+                        {[data.latitude?.trim(), data.longitude?.trim()].filter(Boolean).join(", ")}
+                      </span>
+                    )
+                  }
+                : null
+            ]}
+          />
+
+          <DetailSection
+            title="Классификация"
+            rows={[
+              optStrRow("Тип клиента", data.client_type_code),
+              optStrRow("Формат клиента", data.client_format),
+              optStrRow("Категория", data.category),
+              optStrRow("Категория товаров", data.product_category_ref),
+              optStrRow("Канал продаж", data.sales_channel)
+            ]}
+          />
+
+          <DetailSection
+            title="Статус и учёт"
+            rows={[
+              {
+                label: "Статус",
+                value: (
+                  <span
+                    className={
+                      data.is_active ? "text-green-700 dark:text-green-400" : "text-muted-foreground"
+                    }
+                  >
+                    {data.is_active ? "Активный" : "Неактивный"}
+                  </span>
+                )
+              },
+              optStrRow("Кто создал", data.created_by_user_label),
+              optStrRow("Кто изменил", data.last_modified_by_user_label),
+              {
+                label: "Дата создания",
+                value: (
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(data.created_at).toLocaleString("ru-RU")}
+                  </span>
+                )
+              },
+              {
+                label: "Дата обновления",
+                value: (
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(data.updated_at).toLocaleString("ru-RU")}
+                  </span>
+                )
+              }
+            ]}
+          />
+
+          <DetailSection
+            title="Финансы"
+            rows={[
+              {
+                label: "Кредитный лимит",
+                value: (
+                  <span className="tabular-nums font-mono text-xs">
+                    {formatNumberGrouped(data.credit_limit, { maxFractionDigits: 2 })}
+                  </span>
+                )
+              },
+              {
+                label: "Сальдо счёта",
+                value: (
+                  <span className="tabular-nums font-mono text-xs">
+                    {formatNumberGrouped(data.account_balance, { maxFractionDigits: 2 })}
+                  </span>
+                )
+              },
+              {
+                label: "Открытые заказы (всего)",
+                value: (
+                  <span className="tabular-nums font-mono text-xs">
+                    {formatNumberGrouped(data.open_orders_total, { maxFractionDigits: 2 })}
+                  </span>
+                )
+              },
+              showCreditHint
+                ? {
+                    label: "Кредитная нагрузка",
+                    value: (
                       <div className="max-w-xs space-y-1">
                         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                           <div
@@ -435,59 +691,54 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                           />
                         </div>
                         <p className="text-[11px] text-muted-foreground tabular-nums">
-                          {((openNum / creditLimitNum) * 100).toFixed(1)}% limitdan band
+                          {((openNum / creditLimitNum) * 100).toFixed(1)}% лимита занято
                         </p>
                       </div>
-                    </td>
-                  </tr>
-                  <tr className="border-b border-border bg-muted/15">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                      Qolgan «joy»
-                    </th>
-                    <td className="px-4 py-3 tabular-nums text-xs">
-                      {formatNumberGrouped(creditLimitNum - openNum, { maxFractionDigits: 2 })} (limit − ochiq
-                      zakazlar; saldo alohida)
-                    </td>
-                  </tr>
-                </>
-              ) : null}
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Holat</th>
-                <td className="px-4 py-3">
-                  <span
-                    className={
-                      data.is_active ? "text-green-700 dark:text-green-400" : "text-muted-foreground"
-                    }
-                  >
-                    {data.is_active ? "Faol" : "Nofaol"}
-                  </span>
-                </td>
-              </tr>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Agent ID
-                </th>
-                <td className="px-4 py-3 font-mono text-xs">
-                  {data.agent_id != null ? formatGroupedInteger(data.agent_id) : "—"}
-                </td>
-              </tr>
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">
-                  Ro‘yxatga olingan
-                </th>
-                <td className="px-4 py-3 text-muted-foreground text-xs">
-                  {new Date(data.created_at).toLocaleString()}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    )
+                  }
+                : null,
+              showCreditHint
+                ? {
+                    label: "Остаток лимита",
+                    value: (
+                      <span className="tabular-nums text-xs">
+                        {formatNumberGrouped(creditLimitNum - openNum, { maxFractionDigits: 2 })}{" "}
+                        <span className="text-muted-foreground">
+                          (лимит − открытые заказы; сальдо отдельно)
+                        </span>
+                      </span>
+                    )
+                  }
+                : null
+            ]}
+          />
+
+          <DetailSection
+            title="Реквизиты и прочее"
+            rows={[
+              optStrRow("ИНН", data.inn),
+              optStrRow("ПИНФЛ", data.client_pinfl),
+              optStrRow("ПДЛ", data.pdl),
+              optStrRow("Номер договора", data.contract_number),
+              optStrRow("Банк", data.bank_name),
+              optStrRow("Счёт", data.bank_account),
+              optStrRow("МФО", data.bank_mfo),
+              optStrRow("ОКЭД", data.oked),
+              optStrRow("Рег. код плательщика НДС", data.vat_reg_code),
+              optStrRow("Лицензия до", data.license_until),
+              optStrRow("Логистика", data.logistics_service),
+              optStrRow("Часы работы", data.working_hours),
+              optStrRow("Дата визита (карточка)", formatVisitDateShort(data.visit_date)),
+              optStrRow("Комментарий", data.notes)
+            ]}
+          />
         </div>
       ) : null}
 
       {tab === "balance" ? (
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Joriy saldo:{" "}
+            Текущий баланс:{" "}
             <span className="font-mono tabular-nums text-foreground">
               {formatNumberGrouped(movementsQuery.data?.account_balance ?? data.account_balance, {
                 maxFractionDigits: 2
@@ -504,9 +755,9 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 addMovement.mutate();
               }}
             >
-              <p className="text-sm font-medium">Harakat qo‘shish</p>
+              <p className="text-sm font-medium">Добавить движение</p>
               <div className="grid gap-1.5">
-                <Label htmlFor="bal-delta">O‘zgarish (UZS, manfiy — chiqim)</Label>
+                <Label htmlFor="bal-delta">Изменение (UZS, отриц. — расход)</Label>
                 <Input
                   id="bal-delta"
                   type="text"
@@ -514,11 +765,11 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                   value={deltaInput}
                   onChange={(e) => setDeltaInput(e.target.value)}
                   disabled={addMovement.isPending}
-                  placeholder="masalan 50000 yoki -10000"
+                  placeholder="например 50000 или -10000"
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="bal-note">Izoh (ixtiyoriy)</Label>
+                <Label htmlFor="bal-note">Примечание (необязательно)</Label>
                 <Input
                   id="bal-note"
                   value={noteInput}
@@ -530,27 +781,27 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 <p className="text-xs text-destructive">{balanceFormError}</p>
               ) : null}
               <Button type="submit" size="sm" disabled={addMovement.isPending}>
-                {addMovement.isPending ? "Saqlanmoqda…" : "Qo‘shish"}
+                {addMovement.isPending ? "Сохранение…" : "Добавить"}
               </Button>
             </form>
           ) : (
-            <p className="text-xs text-muted-foreground">Harakat qo‘shish faqat admin uchun.</p>
+            <p className="text-xs text-muted-foreground">Добавление движений доступно только администратору.</p>
           )}
 
           {movementsQuery.isLoading ? (
-            <p className="text-xs text-muted-foreground">Harakatlar Загрузка…</p>
+            <p className="text-xs text-muted-foreground">Загрузка движений…</p>
           ) : movementsQuery.isError ? (
-            <p className="text-xs text-destructive">Harakatlarni yuklab bo‘lmadi.</p>
+            <p className="text-xs text-destructive">Не удалось загрузить движения.</p>
           ) : (
             <>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full min-w-[480px] border-collapse text-xs">
                   <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Vaqt</th>
-                      <th className="px-2 py-2 font-medium text-right">O‘zgarish</th>
-                      <th className="px-2 py-2 font-medium">Izoh</th>
-                      <th className="px-2 py-2 font-medium">Kim</th>
+                      <th className="px-2 py-2 font-medium">Время</th>
+                      <th className="px-2 py-2 font-medium text-right">Изменение</th>
+                      <th className="px-2 py-2 font-medium">Примечание</th>
+                      <th className="px-2 py-2 font-medium">Кто</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -578,7 +829,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     disabled={balPage <= 1}
                     onClick={() => setBalPage((p) => Math.max(1, p - 1))}
                   >
-                    Oldingi
+                    Назад
                   </Button>
                   <span className="text-muted-foreground">
                     {formatGroupedInteger(balPage)} / {formatGroupedInteger(balTotalPages)}
@@ -590,7 +841,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     disabled={balPage >= balTotalPages}
                     onClick={() => setBalPage((p) => p + 1)}
                   >
-                    Keyingi
+                    Вперёд
                   </Button>
                 </div>
               ) : null}
@@ -605,7 +856,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
             <li>
               <Link className="text-primary underline-offset-4 hover:underline" href="/orders">
-                Barcha zakazlar
+                Все заказы
               </Link>
             </li>
             <li>
@@ -613,7 +864,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 className="text-primary underline-offset-4 hover:underline"
                 href={`/orders?client_id=${clientId}`}
               >
-                Faqat bu mijoz zakazlari
+                Только заказы этого клиента
               </Link>
             </li>
           </ul>
@@ -623,28 +874,28 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       {tab === "payments" ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">Mijozga bog‘langan to‘lov yozuvlari.</p>
+            <p className="text-xs text-muted-foreground">Платежи, привязанные к клиенту.</p>
             <Link
               className="text-sm font-medium text-primary underline-offset-4 hover:underline"
               href={`/payments/new?client_id=${clientId}`}
             >
-              + Yangi to‘lov
+              + Новый платёж
             </Link>
           </div>
           {paymentsTabQ.isLoading ? (
             <p className="text-xs text-muted-foreground">Загрузка…</p>
           ) : paymentsTabQ.isError ? (
-            <p className="text-xs text-destructive">Ro‘yxatni yuklab bo‘lmadi (huquq yoki tarmoq).</p>
+            <p className="text-xs text-destructive">Не удалось загрузить список (права или сеть).</p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full min-w-[520px] border-collapse text-xs">
                 <thead className="app-table-thead">
                   <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-                    <th className="px-2 py-2 font-medium">Sana</th>
-                    <th className="px-2 py-2 font-medium">Tur</th>
-                    <th className="px-2 py-2 font-medium text-right">Summa</th>
-                    <th className="px-2 py-2 font-medium">Zakaz</th>
-                    <th className="px-2 py-2 font-medium">Izoh</th>
+                    <th className="px-2 py-2 font-medium">Дата</th>
+                    <th className="px-2 py-2 font-medium">Тип</th>
+                    <th className="px-2 py-2 font-medium text-right">Сумма</th>
+                    <th className="px-2 py-2 font-medium">Заказ</th>
+                    <th className="px-2 py-2 font-medium">Примечание</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -675,7 +926,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                 </tbody>
               </table>
               {(paymentsTabQ.data ?? []).length === 0 ? (
-                <p className="p-4 text-center text-xs text-muted-foreground">Hozircha yozuv yo‘q.</p>
+                <p className="p-4 text-center text-xs text-muted-foreground">Пока нет записей.</p>
               ) : null}
             </div>
           )}
@@ -685,22 +936,22 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
       {tab === "audit" ? (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            PATCH, balans harakatlari va birlashtirish jurnali (admin/operator).
+            Журнал PATCH, движений баланса и объединений (админ/оператор).
           </p>
           {auditQuery.isLoading ? (
             <p className="text-xs text-muted-foreground">Загрузка…</p>
           ) : auditQuery.isError ? (
-            <p className="text-xs text-destructive">Jurnalni yuklab bo‘lmadi.</p>
+            <p className="text-xs text-destructive">Не удалось загрузить журнал.</p>
           ) : (
             <>
               <div className="overflow-x-auto rounded-md border">
                 <table className="w-full min-w-[560px] border-collapse text-xs">
                   <thead className="app-table-thead">
                     <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Vaqt</th>
-                      <th className="px-2 py-2 font-medium">Harakat</th>
-                      <th className="px-2 py-2 font-medium">Kim</th>
-                      <th className="px-2 py-2 font-medium">Batafsil</th>
+                      <th className="px-2 py-2 font-medium">Время</th>
+                      <th className="px-2 py-2 font-medium">Действие</th>
+                      <th className="px-2 py-2 font-medium">Кто</th>
+                      <th className="px-2 py-2 font-medium">Подробно</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -728,7 +979,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     disabled={auditPage <= 1}
                     onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
                   >
-                    Oldingi
+                    Назад
                   </Button>
                   <span className="text-muted-foreground">
                     {formatGroupedInteger(auditPage)} /{" "}
@@ -741,7 +992,7 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
                     disabled={auditPage * auditQuery.data.limit >= auditQuery.data.total}
                     onClick={() => setAuditPage((p) => p + 1)}
                   >
-                    Keyingi
+                    Вперёд
                   </Button>
                 </div>
               ) : null}
@@ -799,11 +1050,11 @@ export function ClientOrdersSnippet({
   });
 
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground">Zakazlar Загрузка…</p>;
+    return <p className="text-xs text-muted-foreground">Загрузка заказов…</p>;
   }
   const rows = data?.data ?? [];
   if (rows.length === 0) {
-    return <p className="text-xs text-muted-foreground">Hozircha zakaz yo‘q.</p>;
+    return <p className="text-xs text-muted-foreground">Заказов пока нет.</p>;
   }
 
   return (
@@ -811,9 +1062,9 @@ export function ClientOrdersSnippet({
       <table className="w-full min-w-[480px] border-collapse text-xs">
         <thead className="app-table-thead">
           <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-            <th className="px-2 py-2 font-medium">Raqam</th>
-            <th className="px-2 py-2 font-medium">Holat</th>
-            <th className="px-2 py-2 font-medium text-right">Jami</th>
+            <th className="px-2 py-2 font-medium">Номер</th>
+            <th className="px-2 py-2 font-medium">Статус</th>
+            <th className="px-2 py-2 font-medium text-right">Итого</th>
             <th className="px-2 py-2 font-medium w-20" />
           </tr>
         </thead>
@@ -830,7 +1081,7 @@ export function ClientOrdersSnippet({
                   className="text-primary underline-offset-2 hover:underline"
                   href={`/orders/${o.id}`}
                 >
-                  Ochish
+                  Открыть
                 </Link>
               </td>
             </tr>
@@ -839,9 +1090,9 @@ export function ClientOrdersSnippet({
       </table>
       {data && data.total > rows.length ? (
         <p className="px-2 py-2 text-[11px] text-muted-foreground border-t">
-          + yana {formatGroupedInteger(data.total - rows.length)} ta.{" "}
+          + ещё {formatGroupedInteger(data.total - rows.length)} шт.{" "}
           <Link className="text-primary underline" href={`/orders?client_id=${clientId}`}>
-            Hammasi
+            Все
           </Link>
         </p>
       ) : null}

@@ -20,6 +20,17 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 
 ---
 
+## Fon navbat (BullMQ)
+
+| Metod | Yo‘l | Rol | Javob |
+|-------|------|-----|--------|
+| POST | `/jobs/ping` | `admin`, `operator` | `202` — `{ queue, jobId }` (worker ishlamasa job kutadi) |
+| GET | `/jobs/:jobId` | `admin`, `operator` | `state`, `returnvalue`, … (import joblari tugagach mos natija; mahsulot: `import_products_xlsx` va hok.) |
+
+Redis yo‘q yoki ulanmasa: `503 JobQueueUnavailable`. Worker: `npm run worker:dev` (backend yoki monorepo ildizi).
+
+---
+
 ## Auth (`/auth` va `/api/auth`)
 
 | Metod | Yo‘l | Eslatma |
@@ -53,7 +64,8 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 | GET, POST | `/clients` |
 | GET, PATCH | `/clients/:id` |
 | GET | `/clients/references`, `/clients/export`, … |
-| POST | `/clients/import`, `/clients/merge`, `/clients/bulk-active`, … |
+| POST | `/clients/import` (sinxron), **`/clients/import/async`** (202 + `jobId`, natija: `GET .../jobs/:jobId`) |
+| POST | `/clients/merge`, `/clients/bulk-active`, … |
 | GET | `/clients/:id/audit` |
 | GET, POST | `/clients/:id/balance-movements` |
 
@@ -65,7 +77,8 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 |-------|------------------|
 | GET, POST | `/products` |
 | GET, PATCH, DELETE | `/products/:id` |
-| POST | `/products/import`, `/products/bulk`, `/products/import-catalog`, … |
+| POST | `/products/import` (+ **`/import/async`**), `/products/import-catalog` (+ **`/import-catalog/async`**), `/products/import-catalog-update` (+ **`/import-catalog-update/async`**) — 202 + `jobId`, natija `GET .../jobs/:jobId` |
+| POST | `/products/bulk`, … |
 | GET | `/products/import-template`, `/products/export-catalog` |
 
 ## Product catalog / prices
@@ -76,7 +89,7 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 | POST | `/product-prices/resolve` |
 | GET, PUT | `/products/prices/matrix` |
 | GET, PUT | `/products/:id/prices` |
-| POST | `/products/prices/import` |
+| POST | `/products/prices/import` (sinxron), **`/products/prices/import/async`** (202 + `jobId`; natija `GET .../jobs/:jobId`, job: `import_product_prices_xlsx`) |
 
 ---
 
@@ -100,7 +113,8 @@ Agar boshqa ko‘rsatilmasa, integratsiya bazasi: `backend/src/modules/*/*.route
 |-------|------|
 | GET | `/stock`, `/stock/low`, `/stock/balances`, `/stock/balances/export` |
 | GET | `/stock/import-template` |
-| POST | `/stock/import`, `/stock/receipts` |
+| POST | `/stock/import` (sinxron), **`/stock/import/async`** (202 + `jobId`; natija `GET .../jobs/:jobId`) |
+| POST | `/stock/receipts` |
 | GET, POST | `/goods-receipts`, `/goods-receipts/:id` |
 | PATCH | `/goods-receipts/:id` |
 | GET, POST | `/suppliers` |

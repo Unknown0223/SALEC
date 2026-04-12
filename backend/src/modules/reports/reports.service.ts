@@ -51,8 +51,13 @@ export async function getSalesSummary(
   const [orderCount, orderAgg, payCount, payAgg, retCount, retAgg] = await Promise.all([
     prisma.order.count({ where: { tenant_id: tenantId, created_at: { gte: start, lte: end } } }),
     prisma.order.aggregate({ where: { tenant_id: tenantId, created_at: { gte: start, lte: end } }, _sum: { total_sum: true } }),
-    prisma.payment.count({ where: { tenant_id: tenantId, created_at: { gte: start, lte: end } } }),
-    prisma.payment.aggregate({ where: { tenant_id: tenantId, created_at: { gte: start, lte: end } }, _sum: { amount: true } }),
+    prisma.payment.count({
+      where: { tenant_id: tenantId, deleted_at: null, created_at: { gte: start, lte: end } }
+    }),
+    prisma.payment.aggregate({
+      where: { tenant_id: tenantId, deleted_at: null, created_at: { gte: start, lte: end } },
+      _sum: { amount: true }
+    }),
     prisma.salesReturn.count({ where: { tenant_id: tenantId, status: "posted", created_at: { gte: start, lte: end } } }),
     prisma.salesReturn.aggregate({ where: { tenant_id: tenantId, status: "posted", created_at: { gte: start, lte: end } }, _sum: { refund_amount: true } })
   ]);

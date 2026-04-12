@@ -7,6 +7,7 @@
     "ports:free": "node scripts/free-dev-ports.cjs 4000 3000 3001 3002 3003",
     "repair:next": "node scripts/free-dev-ports.cjs 3000 3001 3002 3003 && npm run clean --prefix frontend",
     "open:panel": "start http://127.0.0.1:3000",
+    "worker:dev": "npm run worker:dev --prefix backend",
     "dev": "node scripts/free-dev-ports.cjs && concurrently -n api,web -c cyan,magenta \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "dev:sync": "node scripts/free-dev-ports.cjs && concurrently -n api,web -c cyan,magenta \"npm run dev --prefix backend\" \"wait-on -t 600000 tcp:127.0.0.1:4000 && npm run dev --prefix frontend\"",
     "dev:clean": "npm run ports:free && npm run clean --prefix frontend && npm run dev",

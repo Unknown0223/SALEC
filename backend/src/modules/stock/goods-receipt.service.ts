@@ -20,6 +20,10 @@ export type GoodsReceiptListRow = {
   warehouse_name: string;
   supplier_id: number | null;
   supplier_name: string | null;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+  deleted_by_name: string | null;
+  delete_reason_ref: string | null;
 };
 
 export async function listGoodsReceipts(
@@ -33,9 +37,16 @@ export async function listGoodsReceipts(
     search?: string;
     page: number;
     limit: number;
+    /** true — faqat arxiv */
+    archive?: boolean;
   }
 ): Promise<{ data: GoodsReceiptListRow[]; total: number }> {
   const where: Prisma.GoodsReceiptWhereInput = { tenant_id: tenantId };
+  if (q.archive) {
+    where.deleted_at = { not: null };
+  } else {
+    where.deleted_at = null;
+  }
   if (q.warehouse_id != null && q.warehouse_id > 0) where.warehouse_id = q.warehouse_id;
   if (q.supplier_id != null && q.supplier_id > 0) where.supplier_id = q.supplier_id;
   if (q.status?.trim()) where.status = q.status.trim();
@@ -67,29 +78,37 @@ export async function listGoodsReceipts(
       take: q.limit,
       include: {
         warehouse: { select: { id: true, name: true } },
-        supplier: { select: { id: true, name: true } }
+        supplier: { select: { id: true, name: true } },
+        deleted_by: { select: { id: true, name: true } }
       }
     })
   ]);
 
-  const data: GoodsReceiptListRow[] = rows.map((r) => ({
-    id: r.id,
-    number: r.number,
-    status: r.status,
-    created_at: r.created_at.toISOString(),
-    receipt_at: r.receipt_at?.toISOString() ?? null,
-    total_qty: r.total_qty.toString(),
-    total_sum: r.total_sum.toString(),
-    total_volume_m3: r.total_volume_m3.toString(),
-    total_weight_kg: r.total_weight_kg.toString(),
-    comment: r.comment,
-    price_type: r.price_type,
-    external_ref: r.external_ref,
-    warehouse_id: r.warehouse_id,
-    warehouse_name: r.warehouse.name,
-    supplier_id: r.supplier_id,
-    supplier_name: r.supplier?.name ?? null
-  }));
+  const data: GoodsReceiptListRow[] = rows.map((r) => {
+    const dbid = r.deleted_by_user_id ?? null;
+    return {
+      id: r.id,
+      number: r.number,
+      status: r.status,
+      created_at: r.created_at.toISOString(),
+      receipt_at: r.receipt_at?.toISOString() ?? null,
+      total_qty: r.total_qty.toString(),
+      total_sum: r.total_sum.toString(),
+      total_volume_m3: r.total_volume_m3.toString(),
+      total_weight_kg: r.total_weight_kg.toString(),
+      comment: r.comment,
+      price_type: r.price_type,
+      external_ref: r.external_ref,
+      warehouse_id: r.warehouse_id,
+      warehouse_name: r.warehouse.name,
+      supplier_id: r.supplier_id,
+      supplier_name: r.supplier?.name ?? null,
+      deleted_at: r.deleted_at ? r.deleted_at.toISOString() : null,
+      deleted_by_user_id: dbid,
+      deleted_by_name: r.deleted_by?.name ?? null,
+      delete_reason_ref: r.delete_reason_ref?.trim() || null
+    };
+  });
 
   return { data, total };
 }
@@ -253,11 +272,60 @@ export async function createGoodsReceipt(
   return { id: rec.id, number };
 }
 
-export async function deleteGoodsReceiptDraft(tenantId: number, id: number): Promise<void> {
+export async function deleteGoodsReceiptDraft(
+  tenantId: number,
+  id: number,
+  actorUserId: number | null,
+  reasonRef?: string | null
+): Promise<void> {
   const r = await prisma.goodsReceipt.findFirst({ where: { id, tenant_id: tenantId } });
   if (!r) throw new Error("NOT_FOUND");
+  if (r.deleted_at != null) throw new Error("ALREADY_VOIDED");
   if (r.status !== "draft") throw new Error("NOT_DRAFT");
-  await prisma.goodsReceipt.delete({ where: { id } });
+  const note =
+    reasonRef != null && String(reasonRef).trim() ? String(reasonRef).trim().slice(0, 128) : null;
+  const uid =
+    actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+  const now = new Date();
+  await prisma.goodsReceipt.update({
+    where: { id },
+    data: {
+      deleted_at: now,
+      deleted_by_user_id: uid,
+      delete_reason_ref: note
+    }
+  });
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId: uid,
+    entityType: AuditEntityType.goods_receipt,
+    entityId: String(id),
+    action: "void",
+    payload: { number: r.number, soft: true, draft: true, ...(note ? { reason: note } : {}) }
+  });
+}
+
+export async function restoreGoodsReceiptDraft(
+  tenantId: number,
+  id: number,
+  actorUserId: number | null
+): Promise<void> {
+  const r = await prisma.goodsReceipt.findFirst({ where: { id, tenant_id: tenantId } });
+  if (!r) throw new Error("NOT_FOUND");
+  if (r.deleted_at == null) throw new Error("NOT_VOIDED");
+  if (r.status !== "draft") throw new Error("NOT_DRAFT");
+  await prisma.goodsReceipt.update({
+    where: { id },
+    data: { deleted_at: null, deleted_by_user_id: null, delete_reason_ref: null }
+  });
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId,
+    entityType: AuditEntityType.goods_receipt,
+    entityId: String(id),
+    action: "restore",
+    payload: { number: r.number, draft: true }
+  });
 }
 
 export async function getGoodsReceiptDetail(tenantId: number, id: number) {
@@ -266,6 +334,7 @@ export async function getGoodsReceiptDetail(tenantId: number, id: number) {
     include: {
       warehouse: { select: { id: true, name: true } },
       supplier: { select: { id: true, name: true } },
+      deleted_by: { select: { id: true, name: true } },
       lines: {
         orderBy: { sort_order: "asc" },
         include: { product: { select: { id: true, sku: true, name: true } } }
@@ -273,6 +342,7 @@ export async function getGoodsReceiptDetail(tenantId: number, id: number) {
     }
   });
   if (!r) return null;
+  const dbid = r.deleted_by_user_id ?? null;
   return {
     id: r.id,
     number: r.number,
@@ -286,6 +356,10 @@ export async function getGoodsReceiptDetail(tenantId: number, id: number) {
     total_sum: r.total_sum.toString(),
     total_volume_m3: r.total_volume_m3.toString(),
     total_weight_kg: r.total_weight_kg.toString(),
+    deleted_at: r.deleted_at ? r.deleted_at.toISOString() : null,
+    deleted_by_user_id: dbid,
+    deleted_by_name: r.deleted_by?.name ?? null,
+    delete_reason_ref: r.delete_reason_ref?.trim() || null,
     warehouse: r.warehouse,
     supplier: r.supplier,
     lines: r.lines.map((ln) => ({

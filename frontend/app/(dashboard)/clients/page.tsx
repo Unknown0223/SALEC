@@ -299,8 +299,8 @@ export default function ClientsPage() {
       }
       await qc.invalidateQueries({ queryKey: ["clients", tenantSlug] });
       const errPart =
-        data.errors.length > 0 ? ` Xatolar (${data.errors.length}): ${data.errors.slice(0, 5).join("; ")}` : "";
-      setImportMsg(`Qo‘shildi: ${data.created}.${errPart}`);
+        data.errors.length > 0 ? ` Ошибки (${data.errors.length}): ${data.errors.slice(0, 5).join("; ")}` : "";
+      setImportMsg(`Добавлено: ${data.created}.${errPart}`);
       setImportMapOpen(false);
       setImportStagingFile(null);
       if (importFileRef.current) importFileRef.current.value = "";
@@ -317,12 +317,12 @@ export default function ClientsPage() {
           const mb = data?.maxBytes ? Math.round(data.maxBytes / (1024 * 1024)) : 50;
           setImportMsg(
             data?.message ??
-              `Fayl juda katta (server cheklovi ~${mb} MB). Faylni qisqartiring yoki backend .env da MULTIPART_MAX_FILE_BYTES ni oshiring.`
+              `Файл слишком велик (лимит сервера ~${mb} MB). Уменьшите файл или увеличьте MULTIPART_MAX_FILE_BYTES в .env на сервере.`
           );
           return;
         }
         if (st === 403) {
-          setImportMsg("Ruxsat yo‘q (faqat admin yoki operator).");
+          setImportMsg("Нет доступа (только администратор или оператор).");
           return;
         }
         if (data?.message) {
@@ -331,7 +331,7 @@ export default function ClientsPage() {
         }
       }
       setImportMsg(
-        "Import xatosi: .xlsx, 1-varaq, 1-qator sarlavha (name / nomi / RU: imya). Konsol: F12."
+        "Ошибка импорта: .xlsx, 1 лист, 1 строка заголовков (name / название / RU: имя). Консоль: F12."
       );
     }
   });
@@ -347,16 +347,16 @@ export default function ClientsPage() {
       return body;
     },
     onSuccess: (body) => {
-      setBulkMsg(`Yangilandi: ${body.updated} ta`);
+      setBulkMsg(`Обновлено: ${body.updated} шт.`);
       setSelectedIds(new Set());
       void qc.invalidateQueries({ queryKey: ["clients", tenantSlug] });
     },
     onError: (e: unknown) => {
       if (isAxiosError(e) && e.response?.status === 403) {
-        setBulkMsg("Ruxsat yo‘q (faqat admin yoki operator).");
+        setBulkMsg("Нет доступа (только администратор или оператор).");
         return;
       }
-      setBulkMsg("Guruh yangilashi muvaffaqiyatsiz.");
+      setBulkMsg("Не удалось обновить группу.");
     }
   });
 
@@ -629,18 +629,18 @@ export default function ClientsPage() {
         }}
       />
       <PageHeader
-        title="Klientlar"
-        description={tenantSlug ? `Tenant: ${tenantSlug}` : "Ro‘yxat, filtr va ustunlar"}
+        title="Клиенты"
+        description={tenantSlug ? `Tenant: ${tenantSlug}` : "Список, фильтры и столбцы"}
         actions={
           <>
             <Link className={cn(buttonVariants({ variant: "default", size: "sm" }))} href="/clients/new">
-              Yangi mijoz
+              Новый клиент
             </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
               Панель управления
             </Link>
             <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/products">
-              Mahsulotlar
+              Товары
             </Link>
           </>
         }
@@ -665,15 +665,15 @@ export default function ClientsPage() {
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = "mijozlar_import_shablon.xlsx";
+              a.download = "clients_import_template.xlsx";
               a.click();
               URL.revokeObjectURL(url);
             } catch {
-              setImportMsg("Shablonni yuklab bo‘lmadi (ruxsat yoki tarmoq).");
+              setImportMsg("Не удалось скачать шаблон (права или сеть).");
             }
           }}
         >
-          Shablon (.xlsx)
+          Шаблон (.xlsx)
         </Button>
         <Button
           type="button"
@@ -690,10 +690,10 @@ export default function ClientsPage() {
           variant="outline"
           disabled={rows.length === 0}
           onClick={() => {
-            downloadClientsCsvPage(rows, `mijozlar_sahifa_${page}.csv`);
+            downloadClientsCsvPage(rows, `clients_page_${page}.csv`);
           }}
         >
-          CSV (joriy sahifa)
+          CSV (текущая страница)
         </Button>
         <Button
           type="button"
@@ -720,24 +720,24 @@ export default function ClientsPage() {
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = `mijozlar_filtr_${new Date().toISOString().slice(0, 10)}.csv`;
+              a.download = `clients_filter_${new Date().toISOString().slice(0, 10)}.csv`;
               a.click();
               URL.revokeObjectURL(url);
               if (truncated) {
                 setExportMsg(
-                  `Eksport: jami mos ${total} ta; faylda dastlabki 10 000 qator (qolganlari kesilgan).`
+                  `Экспорт: всего подходит ${total}; в файле первые 10 000 строк (остальное обрезано).`
                 );
               } else if (total) {
-                setExportMsg(`Eksport: ${total} ta qator.`);
+                setExportMsg(`Экспорт: ${total} строк.`);
               }
             } catch {
-              setExportMsg("Filtr bo‘yicha CSV yuklab bo‘lmadi (ruxsat yoki tarmoq).");
+              setExportMsg("Не удалось скачать CSV по фильтру (права или сеть).");
             } finally {
               setExportBusy(false);
             }
           }}
         >
-          {exportBusy ? "CSV…" : "CSV (barcha filtr)"}
+          {exportBusy ? "CSV…" : "CSV (весь фильтр)"}
         </Button>
         {canCatalog ? (
           <>
@@ -748,13 +748,13 @@ export default function ClientsPage() {
               disabled={
                 selectedIds.size === 0 || selectedIds.size > 500 || bulkMut.isPending || !tenantSlug
               }
-              title={selectedIds.size > 500 ? "Bir vaqtda 500 tadan oshmasin" : undefined}
+              title={selectedIds.size > 500 ? "Не более 500 за раз" : undefined}
               onClick={() => {
                 setBulkMsg(null);
                 bulkMut.mutate({ client_ids: Array.from(selectedIds), is_active: true });
               }}
             >
-              Tanlangan → faol
+              Выбранные → активные
             </Button>
             <Button
               type="button"
@@ -763,16 +763,16 @@ export default function ClientsPage() {
               disabled={
                 selectedIds.size === 0 || selectedIds.size > 500 || bulkMut.isPending || !tenantSlug
               }
-              title={selectedIds.size > 500 ? "Bir vaqtda 500 tadan oshmasin" : undefined}
+              title={selectedIds.size > 500 ? "Не более 500 за раз" : undefined}
               onClick={() => {
                 setBulkMsg(null);
                 bulkMut.mutate({ client_ids: Array.from(selectedIds), is_active: false });
               }}
             >
-              Tanlangan → nofaol
+              Выбранные → неактивные
             </Button>
             {selectedIds.size > 0 ? (
-              <span className="text-sm text-muted-foreground">Tanlangan: {selectedIds.size}</span>
+              <span className="text-sm text-muted-foreground">Выбрано: {selectedIds.size}</span>
             ) : null}
           </>
         ) : null}
@@ -792,7 +792,7 @@ export default function ClientsPage() {
                 limit: CLIENT_IMPORT_MAX_FILE_BYTES
               });
               setImportMsg(
-                `Fayl ${mb} MB dan katta (${(f.size / (1024 * 1024)).toFixed(1)} MB). Qisqartiring yoki backend .env: MULTIPART_MAX_FILE_BYTES.`
+                `Файл больше ${mb} MB (${(f.size / (1024 * 1024)).toFixed(1)} MB). Уменьшите размер или настройте MULTIPART_MAX_FILE_BYTES в .env на сервере.`
               );
               e.target.value = "";
               return;
@@ -873,8 +873,8 @@ export default function ClientsPage() {
       <TableColumnSettingsDialog
         open={columnDialogOpen}
         onOpenChange={setColumnDialogOpen}
-        title="Ustunlarni boshqarish"
-        description="Ko‘rinadigan ustunlar va tartib. Sizning akkauntingiz uchun saqlanadi (server)."
+        title="Управление столбцами"
+        description="Видимые столбцы и порядок. Сохраняется для вашей учётной записи (сервер)."
         columns={CLIENT_MANAGEABLE_COLUMNS}
         columnOrder={tablePrefs.columnOrder}
         hiddenColumnIds={tablePrefs.hiddenColumnIds}
@@ -894,7 +894,7 @@ export default function ClientsPage() {
       ) : isLoading && !data ? (
         <p className="text-sm text-muted-foreground">Загрузка…</p>
       ) : isError ? (
-        <QueryErrorState message={getUserFacingError(error, "Klientlarni yuklab bo'lmadi.")} onRetry={() => void refetch()} />
+        <QueryErrorState message={getUserFacingError(error, "Не удалось загрузить клиентов.")} onRetry={() => void refetch()} />
       ) : (
         <div
           className={cn(

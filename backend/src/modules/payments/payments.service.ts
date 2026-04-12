@@ -5,6 +5,10 @@ import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit"
 import { invalidateDashboard } from "../../lib/redis-cache";
 import { getPaymentAllocations, type PaymentAllocationRow } from "./payment-allocations.service";
 
+/**
+ * Bekor qilish (arxiv): qator bazada qoladi, balans qaytariladi, taqsimotlar olib tashlanadi.
+ * To‘liq tarix: `tenant_audit_events`, `delete_reason_ref`, `deleted_by_user_id`.
+ */
 export async function deletePayment(
   tenantId: number,
   paymentId: number,
@@ -15,6 +19,7 @@ export async function deletePayment(
     cancelReasonRef != null && String(cancelReasonRef).trim()
       ? String(cancelReasonRef).trim().slice(0, 128)
       : null;
+  const now = new Date();
   await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.findFirst({
       where: { id: paymentId, tenant_id: tenantId }
@@ -22,8 +27,10 @@ export async function deletePayment(
     if (!payment) {
       throw new Error("NOT_FOUND");
     }
+    if (payment.deleted_at != null) {
+      throw new Error("ALREADY_VOIDED");
+    }
 
-    // Reverse the balance adjustment
     const bal = await tx.clientBalance.findUnique({
       where: {
         tenant_id_client_id: { tenant_id: tenantId, client_id: payment.client_id }
@@ -41,8 +48,8 @@ export async function deletePayment(
             client_balance_id: bal.id,
             delta: payment.amount,
             note: reasonNote
-              ? `Rasxod klient #${payment.id} bekor — ${reasonNote}`
-              : `Rasxod klient #${payment.id} bekor qilindi`,
+              ? `Rasxod klient #${payment.id} bekor (arxiv) — ${reasonNote}`
+              : `Rasxod klient #${payment.id} bekor qilindi (arxiv)`,
             user_id: actorUserId
           }
         });
@@ -56,8 +63,8 @@ export async function deletePayment(
             client_balance_id: bal.id,
             delta: payment.amount.neg(),
             note: reasonNote
-              ? `To'lov #${payment.id} bekor qilindi — ${reasonNote}`
-              : `To'lov #${payment.id} bekor qilindi`,
+              ? `To'lov #${payment.id} bekor (arxiv) — ${reasonNote}`
+              : `To'lov #${payment.id} bekor qilindi (arxiv)`,
             user_id: actorUserId
           }
         });
@@ -67,7 +74,16 @@ export async function deletePayment(
     await tx.paymentAllocation.deleteMany({
       where: { tenant_id: tenantId, payment_id: paymentId }
     });
-    await tx.payment.delete({ where: { id: paymentId } });
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        workflow_status: "deleted",
+        deleted_at: now,
+        deleted_by_user_id:
+          actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null,
+        delete_reason_ref: reasonNote
+      }
+    });
   });
 
   void invalidateDashboard(tenantId);
@@ -78,8 +94,86 @@ export async function deletePayment(
       actorUserId,
       entityType: AuditEntityType.finance,
       entityId: String(paymentId),
-      action: "payment.delete",
-      payload: { payment_id: paymentId, ...(reasonNote ? { cancel_reason_ref: reasonNote } : {}) }
+      action: "payment.void",
+      payload: {
+        payment_id: paymentId,
+        soft: true,
+        ...(reasonNote ? { cancel_reason_ref: reasonNote } : {})
+      }
+    });
+  }
+}
+
+/** Arxivdan qayta tiklash: balansni qayta qo‘llash, bekor maydonlarini tozalash. */
+export async function restorePayment(
+  tenantId: number,
+  paymentId: number,
+  actorUserId: number | null
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const payment = await tx.payment.findFirst({
+      where: { id: paymentId, tenant_id: tenantId }
+    });
+    if (!payment) throw new Error("NOT_FOUND");
+    if (payment.deleted_at == null) throw new Error("NOT_VOIDED");
+
+    const bal = await tx.clientBalance.findUnique({
+      where: {
+        tenant_id_client_id: { tenant_id: tenantId, client_id: payment.client_id }
+      }
+    });
+    if (bal) {
+      const isExpense = String(payment.entry_kind ?? "payment") === "client_expense";
+      if (isExpense) {
+        await tx.clientBalance.update({
+          where: { id: bal.id },
+          data: { balance: { decrement: payment.amount } }
+        });
+        await tx.clientBalanceMovement.create({
+          data: {
+            client_balance_id: bal.id,
+            delta: payment.amount.neg(),
+            note: `Rasxod klient #${payment.id} tiklandi`,
+            user_id: actorUserId
+          }
+        });
+      } else {
+        await tx.clientBalance.update({
+          where: { id: bal.id },
+          data: { balance: { increment: payment.amount } }
+        });
+        await tx.clientBalanceMovement.create({
+          data: {
+            client_balance_id: bal.id,
+            delta: payment.amount,
+            note: `To'lov #${payment.id} tiklandi`,
+            user_id: actorUserId
+          }
+        });
+      }
+    }
+
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        workflow_status: "confirmed",
+        deleted_at: null,
+        deleted_by_user_id: null,
+        delete_reason_ref: null
+      }
+    });
+  });
+
+  void invalidateDashboard(tenantId);
+
+  if (actorUserId) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId,
+      entityType: AuditEntityType.finance,
+      entityId: String(paymentId),
+      action: "payment.restore",
+      payload: { payment_id: paymentId }
     });
   }
 }
@@ -94,6 +188,7 @@ export type PaymentListRow = {
   client_balance: string;
   order_id: number | null;
   order_number: string | null;
+  cash_desk_id: number | null;
   amount: string;
   payment_type: string;
   note: string | null;
@@ -119,6 +214,11 @@ export type PaymentListRow = {
   client_region: string | null;
   client_city: string | null;
   client_district: string | null;
+  /** Arxiv (yumshoq bekor) */
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+  deleted_by_name: string | null;
+  delete_reason_ref: string | null;
 };
 
 export type PaymentDetailRow = PaymentListRow & {
@@ -153,7 +253,7 @@ export type PaymentListQuery = {
   territory_district?: string;
   /** Mijozning agenti: `regular` — agent yo‘q yoki consignment=false; `consignment` — agent.consignment=true */
   deal_type?: "regular" | "consignment" | "both";
-  /** Filtr: `deleted` — hozircha yozuvlar yo‘q (keyin soft-delete) */
+  /** Filtr: `deleted` — faqat arxiv (deleted_at bor) */
   payment_status?: "pending_confirmation" | "confirmed" | "deleted";
   cash_desk_ids?: number[];
   /** payment — faqat to‘lovlar; client_expense — «расходы клиента» */
@@ -196,7 +296,8 @@ function paymentListInclude(tenantId: number): Prisma.PaymentInclude {
       }
     },
     cash_desk: { select: { name: true } },
-    expeditor_user: { select: { id: true, name: true } }
+    expeditor_user: { select: { id: true, name: true } },
+    deleted_by: { select: { id: true, name: true } }
   };
 }
 
@@ -244,6 +345,7 @@ function mapPaymentToListRow(r: any, tenantId: number): PaymentListRow {
     client_balance: bal.toString(),
     order_id: r.order_id,
     order_number: r.order?.number ?? null,
+    cash_desk_id: r.cash_desk_id ?? null,
     amount: r.amount.toString(),
     payment_type: r.payment_type,
     note: r.note,
@@ -264,12 +366,22 @@ function mapPaymentToListRow(r: any, tenantId: number): PaymentListRow {
     confirmed_at: r.confirmed_at ? (r.confirmed_at as Date).toISOString() : null,
     client_region: r.client.region?.trim() || null,
     client_city: r.client.city?.trim() || null,
-    client_district: r.client.district?.trim() || null
+    client_district: r.client.district?.trim() || null,
+    deleted_at: r.deleted_at ? (r.deleted_at as Date).toISOString() : null,
+    deleted_by_user_id: r.deleted_by_user_id ?? null,
+    deleted_by_name: (r.deleted_by as { name: string } | null | undefined)?.name?.trim() || null,
+    delete_reason_ref: r.delete_reason_ref?.trim() || null
   };
 }
 
 function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.PaymentWhereInput {
   const andParts: Prisma.PaymentWhereInput[] = [{ tenant_id: tenantId }];
+
+  if (q.payment_status === "deleted") {
+    andParts.push({ deleted_at: { not: null } });
+  } else {
+    andParts.push({ deleted_at: null });
+  }
 
   if (q.client_id != null && q.client_id > 0) andParts.push({ client_id: q.client_id });
   if (q.order_id != null && q.order_id > 0) andParts.push({ order_id: q.order_id });
@@ -375,8 +487,6 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
     andParts.push({ workflow_status: "pending_confirmation" });
   } else if (q.payment_status === "confirmed") {
     andParts.push({ workflow_status: "confirmed" });
-  } else if (q.payment_status === "deleted") {
-    andParts.push({ id: -1 });
   }
 
   if (q.cash_desk_ids != null && q.cash_desk_ids.length > 0) {
@@ -384,6 +494,212 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
   }
 
   return andParts.length === 1 ? andParts[0]! : { AND: andParts };
+}
+
+export type UpdatePaymentInput = {
+  amount?: number;
+  payment_type?: string;
+  note?: string | null;
+  cash_desk_id?: number | null;
+  paid_at?: string | null;
+  order_id?: number | null;
+  expeditor_user_id?: number | null;
+  ledger_agent_id?: number | null;
+};
+
+/**
+ * To‘lov / «расход клиента» qatorini tahrirlash (bekor qilinganlar emas).
+ * Summa o‘zgarishi mijoz balansiga mos delta bilan yoziladi.
+ */
+export async function updatePayment(
+  tenantId: number,
+  paymentId: number,
+  input: UpdatePaymentInput,
+  actorUserId: number | null
+): Promise<PaymentDetailPayload> {
+  const patched =
+    input.amount !== undefined ||
+    input.payment_type !== undefined ||
+    input.note !== undefined ||
+    input.cash_desk_id !== undefined ||
+    input.paid_at !== undefined ||
+    input.order_id !== undefined ||
+    input.expeditor_user_id !== undefined ||
+    input.ledger_agent_id !== undefined;
+  if (!patched) throw new Error("EMPTY_PATCH");
+
+  const uid =
+    actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.payment.findFirst({
+      where: { id: paymentId, tenant_id: tenantId },
+      include: paymentListInclude(tenantId)
+    });
+    if (!existing) throw new Error("NOT_FOUND");
+    if (existing.deleted_at != null) throw new Error("PAYMENT_VOIDED");
+
+    const allocAgg = await tx.paymentAllocation.aggregate({
+      where: { tenant_id: tenantId, payment_id: paymentId },
+      _sum: { amount: true }
+    });
+    const allocatedSum = allocAgg._sum.amount ?? new Prisma.Decimal(0);
+
+    const ek = String(existing.entry_kind ?? "payment");
+    const oldAmount = existing.amount;
+
+    let nextAmount = oldAmount;
+    if (input.amount !== undefined) {
+      if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("BAD_AMOUNT");
+      nextAmount = new Prisma.Decimal(input.amount);
+      if (nextAmount.lt(allocatedSum)) throw new Error("AMOUNT_BELOW_ALLOCATED");
+    }
+
+    let nextOrderId = existing.order_id;
+    if (input.order_id !== undefined) {
+      let requestedOrderId: number | null;
+      if (input.order_id == null || input.order_id < 1) {
+        requestedOrderId = null;
+      } else {
+        const ord = await tx.order.findFirst({
+          where: { id: input.order_id, tenant_id: tenantId, client_id: existing.client_id }
+        });
+        if (!ord) throw new Error("BAD_ORDER");
+        requestedOrderId = input.order_id;
+      }
+
+      const allocCount = await tx.paymentAllocation.count({
+        where: { tenant_id: tenantId, payment_id: paymentId }
+      });
+      const prevOid = existing.order_id != null && existing.order_id > 0 ? existing.order_id : null;
+      const orderUnchanged =
+        (prevOid === null && requestedOrderId === null) ||
+        (prevOid != null && requestedOrderId != null && prevOid === requestedOrderId);
+      if (allocCount > 0 && !orderUnchanged) {
+        throw new Error("ORDER_LOCKED_BY_ALLOCATIONS");
+      }
+
+      nextOrderId = requestedOrderId;
+    }
+
+    let deskPatch: number | null | undefined;
+    if (input.cash_desk_id !== undefined) {
+      if (input.cash_desk_id == null || input.cash_desk_id < 1) deskPatch = null;
+      else {
+        const desk = await tx.cashDesk.findFirst({
+          where: { id: input.cash_desk_id, tenant_id: tenantId, is_active: true }
+        });
+        if (!desk) throw new Error("BAD_CASH_DESK");
+        deskPatch = desk.id;
+      }
+    }
+
+    let paidAtPatch: Date | null | undefined;
+    if (input.paid_at !== undefined) {
+      if (input.paid_at == null || !String(input.paid_at).trim()) paidAtPatch = null;
+      else {
+        const parsed = new Date(String(input.paid_at).trim());
+        if (Number.isNaN(parsed.getTime())) throw new Error("BAD_PAID_AT");
+        paidAtPatch = parsed;
+      }
+    }
+
+    const orderForExpeditorCheck = input.order_id !== undefined ? nextOrderId : existing.order_id;
+    let expeditorPatch: number | null | undefined;
+    if (input.expeditor_user_id !== undefined) {
+      if (orderForExpeditorCheck != null) throw new Error("BAD_EXPEDITOR_SCOPE");
+      if (input.expeditor_user_id == null || input.expeditor_user_id < 1) expeditorPatch = null;
+      else {
+        const ex = await tx.user.findFirst({
+          where: { id: input.expeditor_user_id, tenant_id: tenantId, is_active: true }
+        });
+        if (!ex) throw new Error("BAD_EXPEDITOR");
+        expeditorPatch = ex.id;
+      }
+    }
+
+    if (!oldAmount.equals(nextAmount)) {
+      const bal = await tx.clientBalance.findUnique({
+        where: { tenant_id_client_id: { tenant_id: tenantId, client_id: existing.client_id } }
+      });
+      if (bal) {
+        const isExpense = ek === "client_expense";
+        const movementDelta = isExpense ? oldAmount.sub(nextAmount) : nextAmount.sub(oldAmount);
+        await tx.clientBalance.update({
+          where: { id: bal.id },
+          data: { balance: { increment: movementDelta } }
+        });
+        const kindLabel = isExpense ? "Rasxod" : "To‘lov";
+        await tx.clientBalanceMovement.create({
+          data: {
+            client_balance_id: bal.id,
+            delta: movementDelta,
+            note: `${kindLabel} #${paymentId} tahrir (summa)`,
+            user_id: uid
+          }
+        });
+      }
+    }
+
+    const data: Prisma.PaymentUncheckedUpdateInput = {};
+    if (input.amount !== undefined) data.amount = nextAmount;
+    if (input.payment_type !== undefined) {
+      const pt = input.payment_type.trim();
+      if (!pt) throw new Error("BAD_PAYMENT_TYPE");
+      data.payment_type = pt.slice(0, 64);
+    }
+    if (input.note !== undefined) {
+      data.note = input.note === null ? null : String(input.note).trim() ? String(input.note).trim() : null;
+    }
+    if (deskPatch !== undefined) data.cash_desk_id = deskPatch;
+    if (paidAtPatch !== undefined) {
+      data.paid_at = paidAtPatch;
+      data.received_at = paidAtPatch;
+      data.confirmed_at = paidAtPatch;
+    }
+    if (input.order_id !== undefined) {
+      const prevNorm = existing.order_id != null && existing.order_id > 0 ? existing.order_id : null;
+      const nextNorm = nextOrderId != null && nextOrderId > 0 ? nextOrderId : null;
+      if (prevNorm !== nextNorm) {
+        data.order_id = nextOrderId;
+        if (nextNorm != null) data.expeditor_user_id = null;
+      }
+    }
+    if (expeditorPatch !== undefined && !(input.order_id !== undefined && nextOrderId != null)) {
+      data.expeditor_user_id = expeditorPatch;
+    }
+
+    if (input.ledger_agent_id !== undefined) {
+      if (input.ledger_agent_id == null || input.ledger_agent_id < 1) {
+        data.ledger_agent_id = null;
+      } else {
+        const la = await resolveLedgerAgentId(tenantId, input.ledger_agent_id, tx);
+        data.ledger_agent_id = la;
+      }
+    }
+
+    await tx.payment.update({
+      where: { id: paymentId },
+      data
+    });
+  });
+
+  void invalidateDashboard(tenantId);
+
+  if (uid) {
+    await appendTenantAuditEvent({
+      tenantId,
+      actorUserId: uid,
+      entityType: AuditEntityType.finance,
+      entityId: String(paymentId),
+      action: "payment.update",
+      payload: { payment_id: paymentId, patch: { ...input } }
+    });
+  }
+
+  const detail = await getPaymentDetail(tenantId, paymentId);
+  if (!detail) throw new Error("NOT_FOUND");
+  return detail;
 }
 
 export async function getPaymentDetail(
@@ -412,7 +728,8 @@ export async function getPaymentDetail(
     payment: {
       ...base,
       created_by_user_id: p.created_by_user_id,
-      created_by_name: p.created_by?.name ?? null
+      created_by_name: p.created_by?.name ?? null,
+      deleted_by_name: p.deleted_by?.name ?? null
     },
     allocations,
     allocated_total: allocatedSum.toString(),
@@ -449,7 +766,7 @@ export async function listPayments(
 export async function listPaymentsForOrder(tenantId: number, orderId: number): Promise<PaymentListRow[]> {
   const inc = paymentListInclude(tenantId);
   const rows = await prisma.payment.findMany({
-    where: { tenant_id: tenantId, order_id: orderId },
+    where: { tenant_id: tenantId, order_id: orderId, deleted_at: null },
     orderBy: { created_at: "desc" },
     include: inc
   });
@@ -459,7 +776,7 @@ export async function listPaymentsForOrder(tenantId: number, orderId: number): P
 export async function listPaymentsForClient(tenantId: number, clientId: number, limit = 50): Promise<PaymentListRow[]> {
   const inc = paymentListInclude(tenantId);
   const rows = await prisma.payment.findMany({
-    where: { tenant_id: tenantId, client_id: clientId },
+    where: { tenant_id: tenantId, client_id: clientId, deleted_at: null },
     orderBy: { created_at: "desc" },
     take: limit,
     include: inc
@@ -479,7 +796,23 @@ export type CreatePaymentInput = {
   entry_kind?: "payment" | "client_expense";
   /** «Расход клиента» — zakazsiz ekskpeditor */
   expeditor_user_id?: number | null;
+  /** Vedoma: `COALESCE(ledger_agent_id, zakaz.agent, mijoz.agent)` */
+  ledger_agent_id?: number | null;
 };
+
+async function resolveLedgerAgentId(
+  tenantId: number,
+  raw: number | null | undefined,
+  tx?: Prisma.TransactionClient
+): Promise<number | null> {
+  if (raw == null || !Number.isFinite(raw) || raw < 1) return null;
+  const db = tx ?? prisma;
+  const u = await db.user.findFirst({
+    where: { id: raw, tenant_id: tenantId, is_active: true }
+  });
+  if (!u) throw new Error("BAD_LEDGER_AGENT");
+  return u.id;
+}
 
 export async function createClientExpense(
   tenantId: number,
@@ -515,6 +848,8 @@ export async function createClientExpense(
     expeditorId = ex.id;
   }
 
+  const ledgerAgentId = await resolveLedgerAgentId(tenantId, input.ledger_agent_id);
+
   const amountDec = new Prisma.Decimal(input.amount);
   const uid =
     actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
@@ -545,7 +880,8 @@ export async function createClientExpense(
         received_at: eventAt,
         confirmed_at: eventAt,
         entry_kind: "client_expense",
-        expeditor_user_id: expeditorId
+        expeditor_user_id: expeditorId,
+        ledger_agent_id: ledgerAgentId
       }
     });
 
@@ -629,6 +965,8 @@ export async function createPayment(
     }
   }
 
+  const ledgerAgentId = await resolveLedgerAgentId(tenantId, input.ledger_agent_id);
+
   const row = await prisma.$transaction(async (tx) => {
     const p = await tx.payment.create({
       data: {
@@ -644,7 +982,8 @@ export async function createPayment(
         paid_at: eventAt,
         received_at: eventAt,
         confirmed_at: eventAt,
-        entry_kind: "payment"
+        entry_kind: "payment",
+        ledger_agent_id: ledgerAgentId
       }
     });
 

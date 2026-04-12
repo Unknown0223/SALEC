@@ -7,6 +7,7 @@ import {
   createOpeningBalance,
   deleteOpeningBalance,
   listOpeningBalances,
+  restoreOpeningBalance,
   type OpeningBalanceListQuery
 } from "./opening-balances.service";
 
@@ -77,9 +78,13 @@ function parseListQuery(q: Record<string, string | undefined>): OpeningBalanceLi
   let balance_type: OpeningBalanceListQuery["balance_type"];
   if (bt === "debt" || bt === "surplus") balance_type = bt;
 
+  const archiveRaw = q.archive?.trim().toLowerCase();
+  const archive = archiveRaw === "true" || archiveRaw === "1" || archiveRaw === "yes";
+
   return {
     page,
     limit,
+    ...(archive ? { archive: true } : {}),
     ...(date_from ? { date_from } : {}),
     ...(date_to ? { date_to } : {}),
     ...(date_field ? { date_field } : {}),
@@ -144,12 +149,42 @@ export async function registerOpeningBalanceRoutes(app: FastifyInstance) {
       if (Number.isNaN(id) || id < 1) {
         return reply.status(400).send({ error: "InvalidId" });
       }
+      const dq = z
+        .object({ delete_reason_ref: z.string().max(128).optional() })
+        .parse((request.query as Record<string, unknown>) ?? {});
       try {
-        await deleteOpeningBalance(request.tenant!.id, id, actorUserIdOrNull(request));
+        await deleteOpeningBalance(
+          request.tenant!.id,
+          id,
+          actorUserIdOrNull(request),
+          dq.delete_reason_ref?.trim() || null
+        );
         return reply.status(204).send();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "ALREADY_VOIDED") return reply.status(409).send({ error: "AlreadyVoided" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/opening-balances/:id/restore",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        const row = await restoreOpeningBalance(request.tenant!.id, id, actorUserIdOrNull(request));
+        return reply.send(row);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "NOT_VOIDED") return reply.status(409).send({ error: "NotVoided" });
         throw e;
       }
     }

@@ -38,13 +38,13 @@ function dateInputToIso(s: string): string | null {
 }
 
 const VISIT_DAYS: { k: number; l: string }[] = [
-  { k: 1, l: "Du" },
-  { k: 2, l: "Se" },
-  { k: 3, l: "Ch" },
-  { k: 4, l: "Pa" },
-  { k: 5, l: "Ju" },
-  { k: 6, l: "Sh" },
-  { k: 7, l: "Ya" }
+  { k: 1, l: "Пн" },
+  { k: 2, l: "Вт" },
+  { k: 3, l: "Ср" },
+  { k: 4, l: "Чт" },
+  { k: 5, l: "Пт" },
+  { k: 6, l: "Сб" },
+  { k: 7, l: "Вс" }
 ];
 
 const MAX_TEAM_ROWS = 10;
@@ -427,10 +427,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
 
   const mutation = useMutation({
     mutationFn: async () => {
-      if (!tenantSlug) throw new Error("Ma’lumot yo‘q");
+      if (!tenantSlug) throw new Error("Нет данных");
       const credit = Number.parseFloat(creditLimit.replace(/\s/g, "").replace(",", "."));
       if (!Number.isFinite(credit) || credit < 0) {
-        throw new Error("Kredit limiti noto‘g‘ri");
+        throw new Error("Некорректный кредитный лимит");
       }
 
       const filled = agentSlots.filter(
@@ -446,13 +446,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         let agent_id: number | null = null;
         if (s.agentId.trim() !== "") {
           const n = Number.parseInt(s.agentId, 10);
-          if (!Number.isFinite(n) || n <= 0) throw new Error(`Agent #${slot} tanlovi noto‘g‘ri`);
+          if (!Number.isFinite(n) || n <= 0) throw new Error(`Некорректный выбор агента в строке ${slot}`);
           agent_id = n;
         }
         let expeditor_user_id: number | null = null;
         if (s.expeditorUserId.trim() !== "") {
           const e = Number.parseInt(s.expeditorUserId, 10);
-          if (!Number.isFinite(e) || e <= 0) throw new Error(`Dastavchik #${slot} noto‘g‘ri`);
+          if (!Number.isFinite(e) || e <= 0) throw new Error(`Некорректный доставщик в строке ${slot}`);
           expeditor_user_id = e;
         }
         return {
@@ -519,14 +519,14 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     onError: (e: unknown) => {
       const ax = e as { response?: { status?: number } };
       if (ax.response?.status === 401) {
-        setLocalError("Sessiya tugagan — qayta kiring.");
+        setLocalError("Сессия истекла — войдите снова.");
         return;
       }
       if (ax.response?.status === 403) {
-        setLocalError("Ruxsat yo‘q (faqat admin yoki operator).");
+        setLocalError("Нет доступа (только администратор или оператор).");
         return;
       }
-      setLocalError(e instanceof Error ? e.message : "Saqlashda xato");
+      setLocalError(e instanceof Error ? e.message : "Ошибка сохранения");
     }
   });
 
@@ -548,10 +548,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   if (clientQ.isError) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Mijozni tahrirlash" description="Yuklashda xato" />
-        <p className="text-sm text-destructive">Kartochkani yuklab bo‘lmadi.</p>
+        <PageHeader title="Редактирование клиента" description="Ошибка загрузки" />
+        <p className="text-sm text-destructive">Не удалось загрузить карточку.</p>
         <Button type="button" variant="outline" onClick={onCancel}>
-          Orqaga
+          Назад
         </Button>
       </div>
     );
@@ -564,11 +564,11 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   return (
     <div className="mx-auto flex w-full max-w-[min(100%,90rem)] flex-col gap-4 px-3 pb-10 pt-1 sm:px-4 lg:px-6">
       <PageHeader
-        title="Mijozni tahrirlash"
-        description="Asosiy varaqda: yuqorida yoziladi, pastda spravochnikdan tanlanadi. Jamoa va xarita o‘ngda."
+        title="Редактирование клиента"
+        description="На основной вкладке: сверху ввод с клавиатуры, ниже — выбор из справочников. Команда и карта справа."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            Orqaga
+            Назад
           </Button>
         }
       />
@@ -576,20 +576,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs">
         <div className="flex flex-wrap gap-3">
           <span>
-            <span className="text-blue-600 dark:text-blue-400">■</span> Yoziladi (klaviatura)
+            <span className="text-blue-600 dark:text-blue-400">■</span> Ввод с клавиатуры
           </span>
           <span>
-            <span className="text-emerald-700 dark:text-emerald-400">■</span> Tanlanadi (
+            <span className="text-emerald-700 dark:text-emerald-400">■</span> Выбор из справочников (
             <Link href="/settings/spravochnik/client-lists" className="underline underline-offset-2">
-              mijoz spravochniklari
+              справочники клиента
             </Link>
             ,{" "}
             <Link href="/settings/spravochnik/agents" className="underline underline-offset-2">
-              agentlar
+              агенты
             </Link>
             ,{" "}
             <Link href="/settings/spravochnik/expeditors" className="underline underline-offset-2">
-              ekspeditorlar
+              экспедиторы
             </Link>
             )
           </span>
@@ -599,8 +599,8 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
       <div className="flex flex-wrap gap-1 border-b border-border">
         {(
           [
-            ["main", "Asosiy ma’lumotlar"],
-            ["extra", "Qo‘shimcha ma’lumotlar"]
+            ["main", "Основные сведения"],
+            ["extra", "Дополнительно"]
           ] as const
         ).map(([id, label]) => (
           <button
@@ -623,17 +623,17 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.95fr)] xl:gap-8">
           <div className="flex flex-col gap-6">
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
-              <Caption variant="write">Yoziladi (klaviatura)</Caption>
+              <Caption variant="write">Ввод с клавиатуры</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Nomi, manzil, telefon va hokazo — to‘g‘ridan-to‘g‘ri kiritiladi.
+                Название, адрес, телефон и др. — вводятся напрямую.
               </p>
               <div className="mt-4 grid gap-4">
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-name">Nomi</Label>
+                  <Label htmlFor="ce-name">Название</Label>
                   <Input id="ce-name" value={name} onChange={(e) => setName(e.target.value)} disabled={mutation.isPending} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-legal">Yuridik / firma nomi</Label>
+                  <Label htmlFor="ce-legal">Юр. название / фирма</Label>
                   <Input
                     id="ce-legal"
                     value={legalName}
@@ -642,20 +642,20 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-addr">Manzil</Label>
+                  <Label htmlFor="ce-addr">Адрес</Label>
                   <Input id="ce-addr" value={address} onChange={(e) => setAddress(e.target.value)} disabled={mutation.isPending} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-land">Mo‘ljal</Label>
+                  <Label htmlFor="ce-land">Ориентир</Label>
                   <Input id="ce-land" value={landmark} onChange={(e) => setLandmark(e.target.value)} disabled={mutation.isPending} />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-1.5">
-                    <Label htmlFor="ce-phone">Telefon</Label>
+                    <Label htmlFor="ce-phone">Телефон</Label>
                     <Input id="ce-phone" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={mutation.isPending} />
                   </div>
                   <div className="grid gap-1.5">
-                    <Label htmlFor="ce-code">Kod</Label>
+                    <Label htmlFor="ce-code">Код</Label>
                     <Input
                       id="ce-code"
                       maxLength={20}
@@ -667,10 +667,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   </div>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-contact">Kontakt shaxs</Label>
+                  <Label htmlFor="ce-contact">Контактное лицо</Label>
                   <Input
                     id="ce-contact"
-                    placeholder="FIO yoki qisqa eslatma"
+                    placeholder="ФИО или краткая пометка"
                     value={responsiblePerson}
                     onChange={(e) => setResponsiblePerson(e.target.value)}
                     disabled={mutation.isPending}
@@ -686,11 +686,11 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     disabled={mutation.isPending}
                   />
                   <Label htmlFor="ce-active" className="font-normal">
-                    Faol
+                    Активный
                   </Label>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ce-notes">Izoh</Label>
+                  <Label htmlFor="ce-notes">Примечание</Label>
                   <textarea
                     id="ce-notes"
                     className={`${inputCls} min-h-[100px] resize-y py-2.5`}
@@ -1025,15 +1025,17 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
             </section>
 
             <div className="rounded-lg border bg-card p-4 shadow-sm">
-              <Caption variant="pick">Jamoa (agent / dastavchik — foydalanuvchilar bo‘limida)</Caption>
+              <Caption variant="pick">
+                Команда (агент / доставщик — в разделе пользователей)
+              </Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Bir nechta jamoani ketma-ket qo‘shishingiz mumkin (maks. {MAX_TEAM_ROWS}).
+                Можно добавить несколько команд подряд (макс. {MAX_TEAM_ROWS}).
               </p>
               <div className="mt-3 space-y-3">
                 {agentSlots.map((slot, idx) => (
                   <div key={idx} className="rounded-md border bg-background p-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-muted-foreground">Jamoa {idx + 1}</span>
+                      <span className="text-xs font-medium text-muted-foreground">Команда {idx + 1}</span>
                       {agentSlots.length > 1 ? (
                         <Button
                           type="button"
@@ -1045,17 +1047,17 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                             setAgentSlots((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
                           }}
                         >
-                          O‘chirish
+                          Удалить
                         </Button>
                       ) : null}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="grid gap-1.5">
-                        <Label className="text-xs">Agent</Label>
+                        <Label className="text-xs">Агент</Label>
                         <FilterSelect
                           className={cn(selectCls, "min-w-0 max-w-none")}
-                          emptyLabel="Agent"
-                          aria-label="Agent"
+                          emptyLabel="Агент"
+                          aria-label="Агент"
                           value={slot.agentId}
                           onChange={(e) => {
                             const next = [...agentSlots];
@@ -1072,11 +1074,11 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                         </FilterSelect>
                       </div>
                       <div className="grid gap-1.5">
-                        <Label className="text-xs">Dastavchik</Label>
+                        <Label className="text-xs">Доставщик</Label>
                         <FilterSelect
                           className={cn(selectCls, "min-w-0 max-w-none")}
-                          emptyLabel="Dastavchik"
-                          aria-label="Dastavchik"
+                          emptyLabel="Доставщик"
+                          aria-label="Доставщик"
                           value={slot.expeditorUserId}
                           onChange={(e) => {
                             const next = [...agentSlots];
@@ -1094,7 +1096,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                       </div>
                     </div>
                     <div className="mt-3">
-                      <Label className="text-xs text-muted-foreground">Tashrif kuni (hafta)</Label>
+                      <Label className="text-xs text-muted-foreground">День посещения (неделя)</Label>
                       <div className="mt-1.5 flex flex-wrap gap-2">
                         {VISIT_DAYS.map(({ k, l }) => (
                           <label key={k} className="flex cursor-pointer items-center gap-1.5 text-xs">
@@ -1123,7 +1125,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   disabled={mutation.isPending || agentSlots.length >= MAX_TEAM_ROWS}
                   onClick={() => setAgentSlots((prev) => (prev.length >= MAX_TEAM_ROWS ? prev : [...prev, emptyAgentSlot()]))}
                 >
-                  Qo‘shish
+                  Добавить
                 </Button>
               </div>
             </div>
@@ -1134,22 +1136,24 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
       {tab === "extra" && (
         <div className="mx-auto w-full max-w-4xl space-y-6">
           <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
-            <Caption variant="pick">Spravochnikdan tanlanadi</Caption>
+            <Caption variant="pick">Выбор из справочника</Caption>
             <p className="mt-1 text-xs text-muted-foreground">
-              Qiymatlar{" "}
-              <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">mijoz spravochniklari</SpravochnikAdminLink>{" "}
-              bo‘limida yaratiladi.
+              Значения создаются в разделе{" "}
+              <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">
+                справочники клиента
+              </SpravochnikAdminLink>
+              .
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0">Mahsulot toifasi</Label>
-                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">Qiymatlar</SpravochnikAdminLink>
+                  <Label className="mb-0">Категория продукта</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-prod-cat">Значения</SpravochnikAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Mahsulot toifasi"
-                  aria-label="Mahsulot toifasi"
+                  emptyLabel="Категория продукта"
+                  aria-label="Категория продукта"
                   value={productCategoryRef}
                   onChange={(e) => setProductCategoryRef(e.target.value)}
                   disabled={mutation.isPending}
@@ -1163,13 +1167,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0">Savdo kanali</Label>
-                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-sales">Qiymatlar</SpravochnikAdminLink>
+                  <Label className="mb-0">Канал продаж</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-sales">Значения</SpravochnikAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Savdo kanali"
-                  aria-label="Savdo kanali"
+                  emptyLabel="Канал продаж"
+                  aria-label="Канал продаж"
                   value={salesChannel}
                   onChange={(e) => setSalesChannel(e.target.value)}
                   disabled={mutation.isPending}
@@ -1185,14 +1189,14 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
           </section>
 
           <section className="rounded-lg border bg-card p-4 shadow-sm">
-            <Caption variant="write">Yoziladi</Caption>
+            <Caption variant="write">Ввод с клавиатуры</Caption>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5 sm:col-span-2">
                 <Label htmlFor="ce-bank">Bank</Label>
                 <Input id="ce-bank" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={mutation.isPending} />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="ce-rs">Hisob raqam</Label>
+                <Label htmlFor="ce-rs">Расчётный счёт</Label>
                 <Input
                   id="ce-rs"
                   value={bankAccount}
@@ -1223,7 +1227,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 <Input id="ce-oked" value={oked} onChange={(e) => setOked(e.target.value)} disabled={mutation.isPending} />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="ce-contract">Shartnoma №</Label>
+                <Label htmlFor="ce-contract">Договор №</Label>
                 <Input
                   id="ce-contract"
                   value={contractNumber}
@@ -1232,7 +1236,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 />
               </div>
               <div className="grid gap-1.5 sm:col-span-2">
-                <Label htmlFor="ce-vat">QQS ro‘yxatdan o‘tish kodi</Label>
+                <Label htmlFor="ce-vat">Код регистрации по НДС</Label>
                 <Input
                   id="ce-vat"
                   value={vatRegCode}
@@ -1244,10 +1248,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
           </section>
 
           <section className="rounded-lg border bg-card p-4 shadow-sm">
-            <Caption>Boshqa (yoziladi yoki tanlanadi)</Caption>
+            <Caption>Прочее (ввод или выбор)</Caption>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="grid gap-1.5">
-                <Label htmlFor="ce-credit">Kredit limiti (UZS)</Label>
+                <Label htmlFor="ce-credit">Кредитный лимит (UZS)</Label>
                 <Input
                   id="ce-credit"
                   inputMode="decimal"
@@ -1258,13 +1262,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0">Logistika xizmati</Label>
-                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-logistics">Qiymatlar</SpravochnikAdminLink>
+                  <Label className="mb-0">Логистическая услуга</Label>
+                  <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-logistics">Значения</SpravochnikAdminLink>
                 </div>
                 <FilterSelect
                   className={cn(selectCls, "min-w-0 max-w-none")}
-                  emptyLabel="Logistika xizmati"
-                  aria-label="Logistika xizmati"
+                  emptyLabel="Логистическая услуга"
+                  aria-label="Логистическая услуга"
                   value={logisticsService}
                   onChange={(e) => setLogisticsService(e.target.value)}
                   disabled={mutation.isPending}
@@ -1277,7 +1281,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 </FilterSelect>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="ce-lic">Litsenziya muddati</Label>
+                <Label htmlFor="ce-lic">Срок лицензии</Label>
                 <Input
                   id="ce-lic"
                   type="date"
@@ -1287,7 +1291,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="ce-wh">Ish vaqti</Label>
+                <Label htmlFor="ce-wh">Часы работы</Label>
                 <Input
                   id="ce-wh"
                   value={workingHours}
@@ -1308,13 +1312,13 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
 
       <div className="flex flex-wrap gap-2 border-t pt-4">
         <Button type="button" variant="outline" onClick={onCancel} disabled={mutation.isPending}>
-          Bekor
+          Отмена
         </Button>
         <Button type="button" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          {mutation.isPending ? "Saqlanmoqda…" : "Saqlash"}
+          {mutation.isPending ? "Сохранение…" : "Сохранить"}
         </Button>
         <Link href={`/clients/${clientId}`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
-          Kartochkaga
+          К карточке
         </Link>
       </div>
     </div>

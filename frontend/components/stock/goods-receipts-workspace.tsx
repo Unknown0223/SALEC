@@ -15,8 +15,8 @@ import { formatGroupedDecimal } from "@/lib/format-numbers";
 import { api } from "@/lib/api";
 import { STALE } from "@/lib/query-stale";
 import { useEffectiveRole } from "@/lib/auth-store";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Download, LayoutGrid, ListFilter, RefreshCw, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, Download, LayoutGrid, ListFilter, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
@@ -57,6 +57,7 @@ export type GoodsReceiptRow = {
   warehouse_name: string;
   supplier_id: number | null;
   supplier_name: string | null;
+  deleted_at?: string | null;
 };
 
 function colLabel(id: string): string {
@@ -141,6 +142,7 @@ type Props = { tenantSlug: string };
 export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
   const role = useEffectiveRole();
   const canWrite = role === "admin" || role === "operator";
+  const qc = useQueryClient();
 
   const [draftWh, setDraftWh] = useState("");
   const [draftSupplier, setDraftSupplier] = useState("");
@@ -150,13 +152,15 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
   const [draftRangeOpen, setDraftRangeOpen] = useState(false);
   const draftRangeAnchorRef = useRef<HTMLButtonElement>(null);
   const [searchDraft, setSearchDraft] = useState("");
+  const [draftArchive, setDraftArchive] = useState(false);
   const [applied, setApplied] = useState({
     warehouseId: "",
     supplierId: "",
     status: "",
     dateFrom: "",
     dateTo: "",
-    q: ""
+    q: "",
+    archive: false
   });
   const [page, setPage] = useState(1);
   const [columnOpen, setColumnOpen] = useState(false);
@@ -177,10 +181,11 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
       status: draftStatus,
       dateFrom: draftFrom,
       dateTo: draftTo,
-      q: searchDraft.trim()
+      q: searchDraft.trim(),
+      archive: draftArchive
     });
     setPage(1);
-  }, [draftWh, draftSupplier, draftStatus, draftFrom, draftTo, searchDraft]);
+  }, [draftWh, draftSupplier, draftStatus, draftFrom, draftTo, searchDraft, draftArchive]);
 
   const resetFilters = useCallback(() => {
     setDraftWh("");
@@ -189,16 +194,36 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
     setDraftFrom("");
     setDraftTo("");
     setSearchDraft("");
+    setDraftArchive(false);
     setApplied({
       warehouseId: "",
       supplierId: "",
       status: "",
       dateFrom: "",
       dateTo: "",
-      q: ""
+      q: "",
+      archive: false
     });
     setPage(1);
   }, []);
+
+  const voidDraftMut = useMutation({
+    mutationFn: async (id: number) => {
+      await api.delete(`/api/${tenantSlug}/goods-receipts/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["goods-receipts", tenantSlug] });
+    }
+  });
+
+  const restoreDraftMut = useMutation({
+    mutationFn: async (id: number) => {
+      await api.post(`/api/${tenantSlug}/goods-receipts/${id}/restore`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["goods-receipts", tenantSlug] });
+    }
+  });
 
   const warehousesQ = useQuery({
     queryKey: ["warehouses", tenantSlug],
@@ -236,6 +261,7 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
       const p = new URLSearchParams();
       p.set("page", String(page));
       p.set("limit", String(tablePrefs.pageSize));
+      if (applied.archive) p.set("archive", "true");
       if (applied.warehouseId) p.set("warehouse_id", applied.warehouseId);
       if (applied.supplierId) p.set("supplier_id", applied.supplierId);
       if (applied.status) p.set("status", applied.status);
@@ -279,7 +305,8 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
     URL.revokeObjectURL(url);
   }, [rows, visible]);
 
-  const colCount = Math.max(1, visible.length);
+  const showDraftActionsCol = canWrite;
+  const colCount = Math.max(1, visible.length) + (showDraftActionsCol ? 1 : 0);
 
   return (
     <PageShell>
@@ -379,6 +406,15 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
                 <span className="truncate text-sm">{formatDateRangeButton(draftFrom, draftTo)}</span>
               </button>
             </div>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="rounded border-input"
+                checked={draftArchive}
+                onChange={(e) => setDraftArchive(e.target.checked)}
+              />
+              Архив черновиков
+            </label>
             <Button
               type="button"
               variant="outline"
@@ -494,6 +530,9 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
                       {colLabel(colId)}
                     </th>
                   ))}
+                  {showDraftActionsCol ? (
+                    <th className="whitespace-nowrap px-3 py-2.5 text-right">Действия</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -520,6 +559,45 @@ export function GoodsReceiptsWorkspace({ tenantSlug }: Props) {
                           {renderCell(row, colId)}
                         </td>
                       ))}
+                      {showDraftActionsCol ? (
+                        <td className="px-3 py-2 text-right">
+                          {row.status === "draft" && applied.archive ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-primary"
+                              title="Восстановить черновик"
+                              disabled={restoreDraftMut.isPending}
+                              onClick={() => {
+                                if (confirm(`Восстановить черновик ${row.number}?`)) {
+                                  restoreDraftMut.mutate(row.id);
+                                }
+                              }}
+                            >
+                              <RotateCcw className="size-4" />
+                            </Button>
+                          ) : row.status === "draft" && !applied.archive ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              title="В архив (черновик)"
+                              disabled={voidDraftMut.isPending}
+                              onClick={() => {
+                                if (confirm(`Убрать черновик ${row.number} в архив?`)) {
+                                  voidDraftMut.mutate(row.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      ) : null}
                     </tr>
                   ))
                 )}

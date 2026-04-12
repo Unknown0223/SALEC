@@ -14,9 +14,20 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tenantSlug: string;
   onCreated?: () => void;
+  lockedClientId?: string;
+  lockedClientLabel?: string;
+  initialLedgerAgentId?: number | null;
 };
 
-export function AddPaymentDialog({ open, onOpenChange, tenantSlug, onCreated }: Props) {
+export function AddPaymentDialog({
+  open,
+  onOpenChange,
+  tenantSlug,
+  onCreated,
+  lockedClientId,
+  lockedClientLabel,
+  initialLedgerAgentId
+}: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -26,11 +37,16 @@ export function AddPaymentDialog({ open, onOpenChange, tenantSlug, onCreated }: 
         <DialogHeader>
           <DialogTitle>Добавить оплату</DialogTitle>
           <DialogDescription>
-            Один или несколько платежей для выбранного клиента. Дополнительные строки можно удалить или добавить.
+            {lockedClientId?.trim()
+              ? "Платёж на баланс клиента. Можно указать заказ и несколько строк."
+              : "Один или несколько платежей для выбранного клиента. Дополнительные строки можно удалить или добавить."}
           </DialogDescription>
         </DialogHeader>
         <AddPaymentForm
           tenantSlug={tenantSlug}
+          lockedClientId={lockedClientId}
+          lockedClientLabel={lockedClientLabel}
+          initialLedgerAgentId={initialLedgerAgentId}
           onSuccess={() => {
             onCreated?.();
             onOpenChange(false);

@@ -1,7 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import { unlink } from "fs/promises";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { writeStockImportTempFile } from "../../jobs/import-temp-file";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
+import { enqueueStockImportJob } from "../jobs/jobs.service";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import {
   applyStockAdjustment,
@@ -130,6 +133,37 @@ const correctionWorkspaceQuerySchema = z
     { message: "Exactly one of catalog_group_id or category_id is required" }
   );
 
+type StockImportMultipartOk = {
+  buf: Buffer;
+  defaultWarehouseId?: number;
+};
+
+async function parseStockImportMultipart(request: FastifyRequest): Promise<StockImportMultipartOk | null> {
+  let buf: Buffer | null = null;
+  let defaultWarehouseId: number | undefined;
+  const parts = request.parts();
+  for await (const part of parts) {
+    if (part.type === "file") {
+      buf = await part.toBuffer();
+    } else if (part.type === "field" && part.fieldname === "warehouse_id") {
+      const raw = String(part.value ?? "").trim();
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n > 0) defaultWarehouseId = n;
+    }
+  }
+  if (!buf || buf.length === 0) {
+    const file = await request.file();
+    if (!file) {
+      return null;
+    }
+    buf = await file.toBuffer();
+  }
+  if (!buf || buf.length === 0) {
+    return null;
+  }
+  return { buf, defaultWarehouseId };
+}
+
 const correctionBulkBodySchema = z.object({
   warehouse_id: z.number().int().positive(),
   kind: z.enum(["correction", "inventory_count"]),
@@ -178,35 +212,62 @@ export async function registerStockRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      let buf: Buffer | null = null;
-      let defaultWarehouseId: number | undefined;
-      const parts = request.parts();
-      for await (const part of parts) {
-        if (part.type === "file") {
-          buf = await part.toBuffer();
-        } else if (part.type === "field" && part.fieldname === "warehouse_id") {
-          const raw = String(part.value ?? "").trim();
-          const n = Number.parseInt(raw, 10);
-          if (Number.isFinite(n) && n > 0) defaultWarehouseId = n;
-        }
+      const parsed = await parseStockImportMultipart(request);
+      if (!parsed) {
+        return reply.status(400).send({ error: "NoFile" });
       }
-      if (!buf || buf.length === 0) {
-        const file = await request.file();
-        if (!file) {
-          return reply.status(400).send({ error: "NoFile" });
-        }
-        buf = await file.toBuffer();
-      }
-      if (buf.length === 0) {
+      if (parsed.buf.length === 0) {
         return reply.status(400).send({ error: "EmptyFile" });
       }
       const result = await importStockReceiptFromXlsx(
         request.tenant!.id,
-        buf,
+        parsed.buf,
         actorUserIdOrNull(request),
-        defaultWarehouseId != null ? { defaultWarehouseId } : undefined
+        parsed.defaultWarehouseId != null ? { defaultWarehouseId: parsed.defaultWarehouseId } : undefined
       );
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/stock/import/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...adminRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const parsed = await parseStockImportMultipart(request);
+      if (!parsed) {
+        return reply.status(400).send({ error: "NoFile" });
+      }
+      if (parsed.buf.length === 0) {
+        return reply.status(400).send({ error: "EmptyFile" });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writeStockImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueStockImportJob(
+          tenant.id,
+          actorUserIdOrNull(request),
+          tempPath,
+          parsed.defaultWarehouseId != null ? { defaultWarehouseId: parsed.defaultWarehouseId } : undefined
+        );
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "stock.import.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 

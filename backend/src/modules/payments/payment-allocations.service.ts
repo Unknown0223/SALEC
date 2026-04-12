@@ -81,6 +81,9 @@ export async function allocatePayment(
       where: { id: paymentId, tenant_id: tenantId }
     });
     if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+    if (payment.deleted_at != null) {
+      throw new Error("PAYMENT_VOIDED");
+    }
     if (String(payment.entry_kind ?? "payment") === "client_expense") {
       throw new Error("NOT_ALLOCATABLE");
     }
@@ -255,7 +258,7 @@ export async function getClientAging(
       }
     }),
     prisma.payment.findMany({
-      where: { tenant_id: tenantId },
+      where: { tenant_id: tenantId, deleted_at: null },
       select: {
         client_id: true,
         amount: true,

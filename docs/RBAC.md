@@ -34,6 +34,7 @@ Quyidagi jadval **eng ko‘p uchraydigan** naqshlarni beradi; aniq marshrut uchu
 | Reports | `reports.route.ts` | Faqat **JWT** — marshrut darajasida `requireRoles` **yo‘q** (xavfsizlikni kuchaytirish uchun kelajakda rol qo‘shish mumkin) | |
 | Bonus rules | `bonus-rules.route.ts` | | admin-heavy |
 | Audit | `audit-events.route.ts` | cheklangan | |
+| Jobs (fon navbat) | `jobs/jobs.route.ts` | — | `POST/GET .../jobs/*` — `admin`, `operator` |
 | Sales directions | `sales-directions.route.ts` | | admin / operator naqshi |
 | Staff | `staff.route.ts` | agent/supervisor/expeditor/operator ro‘yxatlari: turli | yaratish/tahrir: `catalogRoles` / `adminRoles` |
 

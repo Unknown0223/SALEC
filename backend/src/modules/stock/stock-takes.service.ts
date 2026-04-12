@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidateStock } from "../../lib/redis-cache";
 
 function serializeTake(row: {
   id: number;
@@ -202,6 +203,7 @@ export async function postStockTake(tenantId: number, id: number) {
       data: { status: "posted", posted_at: new Date() }
     });
   });
+  void invalidateStock(tenantId, take.warehouse_id);
   return getStockTake(tenantId, id);
 }
 

@@ -5,13 +5,13 @@ Katta Excel import/eksport, oylik hisobotlar, massiv yangilanishlar sinxron HTTP
 ## Maqsad
 
 - **BullMQ + Redis** (stackda reja qilingan) orqali fon ishlar.
-- API faqat job `id` qaytaradi; holat `GET /api/:slug/jobs/:id` yoki WebSocket orqali (keyingi bosqich).
+- API job `id` qaytaradi; holat **`GET /api/:slug/jobs/:jobId`** (hozir `ping` uchun; kelajakda boshqa job nomlari).
 
 ## Bosqichlar
 
-1. **Redis** productionda barqaror; `REDIS_URL` sozlangan.
-2. **Worker** jarayoni (alohida `node dist/worker.js` yoki alohida PM2 protsess).
-3. **Navbatlar:** `import-clients`, `export-report`, `bulk-price-update`.
+1. **Redis** productionda barqaror; `REDIS_URL` sozlangan (`.env.example` ga qarang).
+2. **Worker** jarayoni: lokal `npm run worker:dev` (backend) yoki `npm run worker:dev` (monorepo ildizidan); productionda `npm run worker:start --prefix backend` (builddan keyin) yoki alohida PM2 protsess — kirish nuqtasi `backend/src/worker/index.ts` (navbat: `background-default`).
+3. **Navbatlar:** `import_clients_xlsx`, `import_stock_xlsx`, mahsulot importlari, **`import_product_prices_xlsx`** (`POST .../products/prices/import/async`), kelajakda `export-report`, boshqa og‘ir eksportlar.
 4. **Xatoliklar:** job `failed` + log + foydalanuvchiga xabar.
 
 Hozircha importlar API ichida qoladi; yuk oshganda shu hujjat bo‘yicha ajratish qilinadi.

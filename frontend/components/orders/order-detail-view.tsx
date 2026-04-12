@@ -35,6 +35,8 @@ export type OrderListRow = {
   city: string | null;
   zone: string | null;
   consignment: boolean | null;
+  /** Konsignatsiya zakazi (order.is_consignment). */
+  is_consignment?: boolean;
   day: string | null;
   created_by: string | null;
   created_by_role: string | null;

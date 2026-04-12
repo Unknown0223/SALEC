@@ -14,12 +14,13 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import type { ClientRow } from "@/lib/client-types";
 import { getUserFacingError } from "@/lib/error-utils";
+import { paymentMethodSelectOptions, type ProfilePaymentMethodEntry } from "@/lib/payment-method-options";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { OpeningBalanceListResponse, OpeningBalanceListRow } from "@/lib/opening-balance-types";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { CalendarDays, RefreshCw, RotateCcw, Search, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -39,6 +40,8 @@ type FilterForm = {
   cash_desk_ids: number[];
   balance_type: "" | "debt" | "surplus";
   search: string;
+  /** active — faol yozuvlar; archive — yumshoq o‘chirilganlar */
+  list_mode: "active" | "archive";
 };
 
 const PAGE_SIZE = 10;
@@ -67,7 +70,8 @@ const defaultForm = (): FilterForm => {
     agent_id: "",
     cash_desk_ids: [],
     balance_type: "",
-    search: ""
+    search: "",
+    list_mode: "active"
   };
 };
 
@@ -85,6 +89,7 @@ function buildQuery(form: FilterForm, page: number): string {
   if (form.cash_desk_ids.length > 0) p.set("cash_desk_ids", form.cash_desk_ids.join(","));
   if (form.balance_type) p.set("balance_type", form.balance_type);
   if (form.search.trim()) p.set("search", form.search.trim());
+  if (form.list_mode === "archive") p.set("archive", "true");
   return p.toString();
 }
 
@@ -184,10 +189,13 @@ export function InitialBalancesWorkspace() {
     enabled: Boolean(tenantSlug) && hydrated,
     staleTime: STALE.profile,
     queryFn: async () => {
-      const { data } = await api.get<{ references?: { payment_types?: string[] } }>(
-        `/api/${tenantSlug}/settings/profile`
-      );
-      return data.references?.payment_types ?? [];
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
     }
   });
 
@@ -224,6 +232,16 @@ export function InitialBalancesWorkspace() {
     }
   });
 
+  const restoreMut = useMutation({
+    mutationFn: async (id: number) => {
+      await api.post(`/api/${tenantSlug}/opening-balances/${id}/restore`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["opening-balances", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
+    }
+  });
+
   const listLimit = listQ.data?.limit ?? PAGE_SIZE;
   const totalPages = listQ.data ? Math.max(1, Math.ceil(listQ.data.total / listLimit)) : 1;
 
@@ -232,10 +250,10 @@ export function InitialBalancesWorkspace() {
     return getUserFacingError(listQ.error);
   }, [listQ.isError, listQ.error]);
 
-  const paymentTypeOptions =
-    (profileQ.data?.length ?? 0) > 0
-      ? profileQ.data!
-      : (["naqd", "plastik", "o‘tkazma", "boshqa"] as const);
+  const paymentTypeFilterOpts = useMemo(
+    () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
+    [profileQ.data]
+  );
 
   return (
     <PageShell>
@@ -335,9 +353,9 @@ export function InitialBalancesWorkspace() {
                     value={draft.payment_type}
                     onChange={(e) => setDraft((d) => ({ ...d, payment_type: e.target.value }))}
                   >
-                    {paymentTypeOptions.map((pt) => (
-                      <option key={pt} value={pt}>
-                        {pt}
+                    {paymentTypeFilterOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
                       </option>
                     ))}
                   </FilterSelect>
@@ -430,6 +448,23 @@ export function InitialBalancesWorkspace() {
                     <option value="paid_at">Дата оплаты</option>
                   </FilterSelect>
                 </div>
+                <div className="space-y-1">
+                  <Label className="text-[0.65rem] text-muted-foreground sm:text-xs">Список</Label>
+                  <FilterSelect
+                    emptyLabel="—"
+                    className={cn(filterPanelSelectClassName, "max-w-none bg-background")}
+                    value={draft.list_mode}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        list_mode: e.target.value as FilterForm["list_mode"]
+                      }))
+                    }
+                  >
+                    <option value="active">Активные</option>
+                    <option value="archive">Архив</option>
+                  </FilterSelect>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 pt-3">
@@ -505,6 +540,9 @@ export function InitialBalancesWorkspace() {
                       <th className="whitespace-nowrap px-2 py-2.5">Способ оплаты</th>
                       <th className="whitespace-nowrap px-2 py-2.5 text-right">Сумма</th>
                       <th className="whitespace-nowrap px-2 py-2.5">Комментарий</th>
+                      {applied.list_mode === "archive" ? (
+                        <th className="whitespace-nowrap px-2 py-2.5">Архив</th>
+                      ) : null}
                       <th className="w-12 px-2 py-2.5" />
                     </tr>
                   </thead>
@@ -532,24 +570,50 @@ export function InitialBalancesWorkspace() {
                         <td className="max-w-[14rem] truncate px-2 py-2 text-xs text-muted-foreground">
                           {r.note ?? "—"}
                         </td>
+                        {applied.list_mode === "archive" ? (
+                          <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">
+                            {formatDt(r.deleted_at)}
+                            {r.deleted_by_name ? ` · ${r.deleted_by_name}` : ""}
+                          </td>
+                        ) : null}
                         <td className="px-1 py-2">
-                          <button
-                            type="button"
-                            className="rounded p-1.5 text-destructive hover:bg-destructive/10"
-                            title="Удалить"
-                            disabled={deleteMut.isPending}
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Удалить начальный баланс #${r.id}? Текущий баланс клиента будет скорректирован.`
-                                )
-                              ) {
-                                deleteMut.mutate(r.id);
-                              }
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {applied.list_mode === "archive" ? (
+                            <button
+                              type="button"
+                              className="rounded p-1.5 text-primary hover:bg-primary/10"
+                              title="Восстановить"
+                              disabled={restoreMut.isPending}
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Восстановить начальный баланс #${r.id}? Баланс клиента снова будет скорректирован.`
+                                  )
+                                ) {
+                                  restoreMut.mutate(r.id);
+                                }
+                              }}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="rounded p-1.5 text-destructive hover:bg-destructive/10"
+                              title="В архив"
+                              disabled={deleteMut.isPending}
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Убрать начальный баланс #${r.id} в архив? Текущий баланс клиента будет скорректирован.`
+                                  )
+                                ) {
+                                  deleteMut.mutate(r.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

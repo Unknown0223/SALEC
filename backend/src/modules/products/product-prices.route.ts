@@ -1,9 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import { unlink } from "fs/promises";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../config/database";
+import { writePriceImportTempFile } from "../../jobs/import-temp-file";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { enqueueProductPricesImportJob } from "../jobs/jobs.service";
 import { getTenantDefaultCurrencyCode } from "../tenant-settings/tenant-settings.service";
 import {
   bulkUpsertPricesForType,
@@ -38,6 +41,20 @@ const matrixPatchSchema = z.object({
 });
 
 const catalogRoles = ["admin", "operator"] as const;
+
+async function readPriceImportBuffer(
+  request: FastifyRequest
+): Promise<{ ok: true; buf: Buffer } | { ok: false; error: "NoFile" | "EmptyFile" }> {
+  const file = await request.file();
+  if (!file) {
+    return { ok: false, error: "NoFile" };
+  }
+  const buf = await file.toBuffer();
+  if (buf.length === 0) {
+    return { ok: false, error: "EmptyFile" };
+  }
+  return { ok: true, buf };
+}
 
 export async function registerProductPriceRoutes(app: FastifyInstance) {
   app.get(
@@ -178,20 +195,54 @@ export async function registerProductPriceRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const file = await request.file();
-      if (!file) {
-        return reply.status(400).send({ error: "NoFile" });
-      }
-      const buf = await file.toBuffer();
-      if (buf.length === 0) {
-        return reply.status(400).send({ error: "EmptyFile" });
+      const parsed = await readPriceImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
       }
       const result = await importProductPricesFromXlsx(
         request.tenant!.id,
-        buf,
+        parsed.buf,
         actorUserIdOrNull(request)
       );
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/products/prices/import/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const parsed = await readPriceImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writePriceImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueProductPricesImportJob(
+          tenant.id,
+          actorUserIdOrNull(request),
+          tempPath
+        );
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "product-prices.import.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 }

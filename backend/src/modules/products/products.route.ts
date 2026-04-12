@@ -1,8 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import { unlink } from "fs/promises";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { writeProductImportTempFile } from "../../jobs/import-temp-file";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { ensureTenantContext } from "../../lib/tenant-context";
+import { enqueueProductsXlsxImportJob } from "../jobs/jobs.service";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
 import { prisma } from "../../config/database";
 import {
@@ -56,6 +59,20 @@ const bulkBodySchema = z.object({
 });
 
 const catalogRoles = ["admin", "operator"] as const;
+
+async function readProductImportBuffer(
+  request: FastifyRequest
+): Promise<{ ok: true; buf: Buffer } | { ok: false; error: "NoFile" | "EmptyFile" }> {
+  const file = await request.file();
+  if (!file) {
+    return { ok: false, error: "NoFile" };
+  }
+  const buf = await file.toBuffer();
+  if (buf.length === 0) {
+    return { ok: false, error: "EmptyFile" };
+  }
+  return { ok: true, buf };
+}
 
 type ProductListRow = {
   id: number;
@@ -346,20 +363,55 @@ export async function registerProductRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const file = await request.file();
-      if (!file) {
-        return reply.status(400).send({ error: "NoFile" });
-      }
-      const buf = await file.toBuffer();
-      if (buf.length === 0) {
-        return reply.status(400).send({ error: "EmptyFile" });
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
       }
       const result = await importProductsFromXlsx(
         request.tenant!.id,
-        buf,
+        parsed.buf,
         actorUserIdOrNull(request)
       );
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/products/import/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writeProductImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueProductsXlsxImportJob(
+          tenant.id,
+          actorUserIdOrNull(request),
+          tempPath,
+          "basic"
+        );
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "products.import.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 
@@ -400,20 +452,55 @@ export async function registerProductRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const file = await request.file();
-      if (!file) {
-        return reply.status(400).send({ error: "NoFile" });
-      }
-      const buf = await file.toBuffer();
-      if (buf.length === 0) {
-        return reply.status(400).send({ error: "EmptyFile" });
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
       }
       const result = await importProductsFromCatalogTemplateXlsx(
         request.tenant!.id,
-        buf,
+        parsed.buf,
         actorUserIdOrNull(request)
       );
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/products/import-catalog/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writeProductImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueProductsXlsxImportJob(
+          tenant.id,
+          actorUserIdOrNull(request),
+          tempPath,
+          "catalog"
+        );
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "products.import-catalog.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 
@@ -422,20 +509,55 @@ export async function registerProductRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const file = await request.file();
-      if (!file) {
-        return reply.status(400).send({ error: "NoFile" });
-      }
-      const buf = await file.toBuffer();
-      if (buf.length === 0) {
-        return reply.status(400).send({ error: "EmptyFile" });
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
       }
       const result = await importProductsCatalogUpdateOnlyXlsx(
         request.tenant!.id,
-        buf,
+        parsed.buf,
         actorUserIdOrNull(request)
       );
       return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/api/:slug/products/import-catalog-update/async",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenant = request.tenant!;
+      const parsed = await readProductImportBuffer(request);
+      if (!parsed.ok) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+      let tempPath: string | null = null;
+      try {
+        tempPath = await writeProductImportTempFile(parsed.buf);
+        const { queue, jobId } = await enqueueProductsXlsxImportJob(
+          tenant.id,
+          actorUserIdOrNull(request),
+          tempPath,
+          "catalog_update"
+        );
+        tempPath = null;
+        return reply.status(202).send({
+          queue,
+          jobId,
+          message:
+            "Worker ishga tushgan bo‘lsa, natija uchun GET /api/:slug/jobs/{jobId} ni so‘rang (bir xil JWT)."
+        });
+      } catch (err) {
+        if (tempPath) {
+          await unlink(tempPath).catch(() => {});
+        }
+        request.log.warn({ err }, "products.import-catalog-update.async enqueue failed");
+        return reply.status(503).send({
+          error: "JobQueueUnavailable",
+          message: "Redis yoki navbat mavjud emas. Worker va REDIS_URL ni tekshiring."
+        });
+      }
     }
   );
 

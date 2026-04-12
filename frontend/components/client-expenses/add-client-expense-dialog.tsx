@@ -16,6 +16,11 @@ import { api } from "@/lib/api";
 import { useAuthStoreHydrated } from "@/lib/auth-store";
 import type { ClientRow } from "@/lib/client-types";
 import { getUserFacingError } from "@/lib/error-utils";
+import {
+  defaultPaymentTypeValue,
+  paymentMethodSelectOptions,
+  type ProfilePaymentMethodEntry
+} from "@/lib/payment-method-options";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,14 +44,27 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tenantSlug: string;
   onCreated?: () => void;
+  /** Vedoma / profil: klient oldindan ma’lum */
+  fixedClientId?: number;
+  fixedClientLabel?: string;
+  /** Boshlang‘ich agent (kartochkadan) */
+  defaultLedgerAgentId?: number | null;
 };
 
-const FALLBACK_PAY_TYPES = ["naqd", "plastik", "o‘tkazma", "boshqa"] as const;
-
-export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreated }: Props) {
+export function AddClientExpenseDialog({
+  open,
+  onOpenChange,
+  tenantSlug,
+  onCreated,
+  fixedClientId,
+  fixedClientLabel,
+  defaultLedgerAgentId
+}: Props) {
   const hydrated = useAuthStoreHydrated();
   const qc = useQueryClient();
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(
+    () => (fixedClientId != null && fixedClientId > 0 ? String(fixedClientId) : "")
+  );
   const [agentFilterId, setAgentFilterId] = useState("");
   const [expeditorUserId, setExpeditorUserId] = useState("");
   const [paymentType, setPaymentType] = useState("");
@@ -59,11 +77,25 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
   });
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [ledgerAgentUserId, setLedgerAgentUserId] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  const clientFixed = fixedClientId != null && fixedClientId > 0;
+
+  useEffect(() => {
+    if (open && clientFixed) {
+      setClientId(String(fixedClientId));
+      if (defaultLedgerAgentId != null && defaultLedgerAgentId > 0) {
+        setLedgerAgentUserId(String(defaultLedgerAgentId));
+      } else {
+        setLedgerAgentUserId("");
+      }
+    }
+  }, [open, clientFixed, fixedClientId, defaultLedgerAgentId]);
 
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "add-client-expense"],
-    enabled: Boolean(tenantSlug) && hydrated && open,
+    enabled: Boolean(tenantSlug) && hydrated && open && !clientFixed,
     staleTime: STALE.list,
     queryFn: async () => {
       const { data } = await api.get<{ data: ClientRow[] }>(
@@ -118,14 +150,17 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
   });
 
   const profileQ = useQuery({
-    queryKey: ["settings", "profile", tenantSlug, "add-client-expense-types"],
+    queryKey: ["settings", "profile", tenantSlug, "add-client-expense-refs"],
     enabled: Boolean(tenantSlug) && hydrated && open,
     staleTime: STALE.profile,
     queryFn: async () => {
-      const { data } = await api.get<{ references?: { payment_types?: string[] } }>(
-        `/api/${tenantSlug}/settings/profile`
-      );
-      return data.references?.payment_types?.length ? data.references.payment_types : [...FALLBACK_PAY_TYPES];
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
     }
   });
 
@@ -137,12 +172,17 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
   }, [clientsQ.data, agentFilterId]);
 
   useEffect(() => {
+    if (clientFixed) return;
     if (!clientId) return;
     const ok = filteredClients.some((c) => String(c.id) === clientId);
     if (!ok) setClientId("");
-  }, [filteredClients, clientId]);
+  }, [clientFixed, filteredClients, clientId]);
 
-  const paymentTypeOptions = profileQ.data ?? [...FALLBACK_PAY_TYPES];
+  const paySelectOpts = useMemo(
+    () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
+    [profileQ.data]
+  );
+  const defaultPayType = useMemo(() => defaultPaymentTypeValue(paySelectOpts), [paySelectOpts]);
 
   const submitMut = useMutation({
     mutationFn: async () => {
@@ -151,7 +191,7 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
       const raw = amount.replace(/\s/g, "").replace(",", ".");
       const amt = Number.parseFloat(raw);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("NO_AMOUNT");
-      const pt = (paymentType || paymentTypeOptions[0] || "naqd").trim();
+      const pt = (paymentType || defaultPayType).trim();
       let noteJoined = note.trim() || null;
       if (tradeDirection.trim()) {
         const td = `Направление: ${tradeDirection.trim()}`;
@@ -164,6 +204,10 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
       const exParsed = exRaw ? Number.parseInt(exRaw, 10) : NaN;
       const expeditor_user_id = Number.isFinite(exParsed) && exParsed > 0 ? exParsed : null;
       const paid_at = toIsoFromLocal(paidAtLocal);
+      const laRaw = ledgerAgentUserId.trim();
+      const laParsed = laRaw ? Number.parseInt(laRaw, 10) : NaN;
+      const ledger_agent_id =
+        Number.isFinite(laParsed) && laParsed > 0 ? laParsed : undefined;
       await api.post(`/api/${tenantSlug}/payments`, {
         client_id: cid,
         amount: amt,
@@ -172,13 +216,15 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
         cash_desk_id,
         paid_at: paid_at ?? null,
         entry_kind: "client_expense",
-        expeditor_user_id
+        expeditor_user_id,
+        ...(ledger_agent_id != null ? { ledger_agent_id } : {})
       });
     },
     onSuccess: async () => {
       setErr(null);
       await qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
       await qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
+      await qc.invalidateQueries({ queryKey: ["client-balance-ledger", tenantSlug] });
       onCreated?.();
       onOpenChange(false);
       setAmount("");
@@ -210,45 +256,80 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
               </p>
             ) : null}
 
-            <div className="grid gap-2">
-              <Label htmlFor="ace-client" className="text-sm font-medium text-foreground">
-                Клиенты
-              </Label>
-              <FilterSelect
-                id="ace-client"
-                className={cn(controlClass, "px-2")}
-                emptyLabel="Выберите клиента"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-              >
-                {filteredClients.map((c) => (
-                  <option key={c.id} value={String(c.id)}>
-                    {c.name}
-                    {c.phone ? ` · ${c.phone}` : ""}
-                  </option>
-                ))}
-              </FilterSelect>
-            </div>
+            {clientFixed ? (
+              <>
+                <div className="rounded-lg border border-border bg-muted/25 px-3 py-2.5 text-sm">
+                  <span className="text-muted-foreground">Клиент: </span>
+                  <span className="font-medium text-foreground">
+                    {fixedClientLabel?.trim() || `ID ${fixedClientId}`}
+                  </span>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="ace-ledger-agent" className="text-sm font-medium text-foreground">
+                    Агент (ведомость)
+                  </Label>
+                  <FilterSelect
+                    id="ace-ledger-agent"
+                    className={cn(controlClass, "px-2")}
+                    emptyLabel="Как у клиента в карточке"
+                    value={ledgerAgentUserId}
+                    onChange={(e) => setLedgerAgentUserId(e.target.value)}
+                  >
+                    {(agentsQ.data ?? []).map((a) => (
+                      <option key={a.id} value={String(a.id)}>
+                        {a.fio}
+                        {a.code ? ` (${a.code})` : ""}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                  <p className="text-xs text-muted-foreground">
+                    Если не выбрано — в таблице подставится агент из карточки клиента.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="ace-client" className="text-sm font-medium text-foreground">
+                    Клиенты
+                  </Label>
+                  <FilterSelect
+                    id="ace-client"
+                    className={cn(controlClass, "px-2")}
+                    emptyLabel="Выберите клиента"
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                  >
+                    {filteredClients.map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.name}
+                        {c.phone ? ` · ${c.phone}` : ""}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="ace-agent-filter" className="text-sm font-medium text-foreground">
-                Агент
-              </Label>
-              <FilterSelect
-                id="ace-agent-filter"
-                className={cn(controlClass, "px-2")}
-                emptyLabel="Все агенты"
-                value={agentFilterId}
-                onChange={(e) => setAgentFilterId(e.target.value)}
-              >
-                {(agentsQ.data ?? []).map((a) => (
-                  <option key={a.id} value={String(a.id)}>
-                    {a.fio}
-                    {a.code ? ` (${a.code})` : ""}
-                  </option>
-                ))}
-              </FilterSelect>
-            </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="ace-agent-filter" className="text-sm font-medium text-foreground">
+                    Агент
+                  </Label>
+                  <FilterSelect
+                    id="ace-agent-filter"
+                    className={cn(controlClass, "px-2")}
+                    emptyLabel="Все агенты"
+                    value={agentFilterId}
+                    onChange={(e) => setAgentFilterId(e.target.value)}
+                  >
+                    {(agentsQ.data ?? []).map((a) => (
+                      <option key={a.id} value={String(a.id)}>
+                        {a.fio}
+                        {a.code ? ` (${a.code})` : ""}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                </div>
+              </>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="ace-pay-type" className="text-sm font-medium text-foreground">
@@ -258,12 +339,12 @@ export function AddClientExpenseDialog({ open, onOpenChange, tenantSlug, onCreat
                 id="ace-pay-type"
                 className={cn(controlClass, "px-2")}
                 emptyLabel="—"
-                value={paymentType}
+                value={paymentType || defaultPayType}
                 onChange={(e) => setPaymentType(e.target.value)}
               >
-                {paymentTypeOptions.map((pt) => (
-                  <option key={pt} value={pt}>
-                    {pt}
+                {paySelectOpts.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </FilterSelect>

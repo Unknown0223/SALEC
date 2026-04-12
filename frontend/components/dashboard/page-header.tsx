@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
 type Props = {
-  title: string;
+  title: ReactNode;
   description?: string;
   /** O‘ng tomonda tugmalar / havolalar */
   actions?: ReactNode;

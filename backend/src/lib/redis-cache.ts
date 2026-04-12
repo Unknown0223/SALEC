@@ -89,6 +89,21 @@ export async function invalidatePrices(tenantId: number): Promise<void> {
   } catch {
     /* ignore */
   }
+  await invalidatePriceTypesCache(tenantId);
+}
+
+/** `listDistinctPriceTypesForTenant` Redis kalitlari */
+export async function invalidatePriceTypesCache(tenantId: number): Promise<void> {
+  try {
+    const redis = await getRedisForApp();
+    await Promise.all([
+      redis.del(`tenant:${tenantId}:price_types:sale`),
+      redis.del(`tenant:${tenantId}:price_types:purchase`),
+      redis.del(`tenant:${tenantId}:price_types:all`)
+    ]);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Stock cache invalidatsiya */

@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidateStock } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import { buildTransferPdf } from "./warehouse-transfers-pdf";
 
@@ -693,6 +694,8 @@ export async function startTransfer(
     action: "transfer_start",
     payload: { line_count: lines.length },
   });
+
+  void invalidateStock(tenantId, sourceWarehouseId);
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +796,8 @@ export async function receiveTransfer(
     action: "transfer_receive",
     payload: { adjustments_count: adjustments?.length ?? 0 },
   });
+
+  void invalidateStock(tenantId, destWarehouseId);
 }
 
 // ---------------------------------------------------------------------------
@@ -875,4 +880,8 @@ export async function cancelTransfer(
     action: "transfer_cancel",
     payload: { previous_status: currentStatus },
   });
+
+  if (currentStatus === "in_transit") {
+    void invalidateStock(tenantId, Number(existing.source_warehouse_id));
+  }
 }

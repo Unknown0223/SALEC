@@ -64,10 +64,10 @@ export async function getDashboardStats(tenantId: number): Promise<DashboardStat
       where: { tenant_id: tenantId, status: { in: activeStatuses } }
     }),
     prisma.payment.count({
-      where: { tenant_id: tenantId, created_at: { gte: start, lt: end } }
+      where: { tenant_id: tenantId, deleted_at: null, created_at: { gte: start, lt: end } }
     }),
     prisma.payment.aggregate({
-      where: { tenant_id: tenantId, created_at: { gte: start, lt: end } },
+      where: { tenant_id: tenantId, deleted_at: null, created_at: { gte: start, lt: end } },
       _sum: { amount: true }
     }),
     prisma.salesReturn.count({

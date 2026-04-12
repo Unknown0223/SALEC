@@ -896,6 +896,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const [polkiHeaderDate, setPolkiHeaderDate] = useState("");
   const [polkiTradeDirection, setPolkiTradeDirection] = useState("");
   const [polkiSkidkaType, setPolkiSkidkaType] = useState("none");
+  const [orderIsConsignment, setOrderIsConsignment] = useState(false);
+  const [consignmentDueDate, setConsignmentDueDate] = useState("");
+  /** Savdo zakazi uchun profil `payment_method_entries[].id` yoki erkin matn (backend `payment_method_ref`) */
+  const [paymentMethodRef, setPaymentMethodRef] = useState("");
 
   const polkiOrderIdsSortedKey = useMemo(
     () => [...polkiOrderIds].sort((a, b) => a - b).join(","),
@@ -916,51 +920,33 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     setPolkiBonusCash({});
   }, [isPolkiSheet, polkiDateFrom, polkiDateTo, clientId]);
 
-  const clientsQ = useQuery({
-    queryKey: ["clients", tenantSlug, "order-form"],
+  type OrderCreateContextResponse = {
+    clients: ClientRow[];
+    products: ProductRow[];
+    warehouses: { id: number; name: string; stock_purpose?: string; is_active?: boolean }[];
+    users: { id: number; login: string; name: string; role: string }[];
+    price_types: string[];
+    expeditors: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
+    settings_profile: {
+      references?: {
+        request_type_entries?: unknown;
+        order_note_entries?: unknown;
+        refusal_reason_entries?: unknown;
+        payment_method_entries?: { id: string; name: string; active?: boolean }[];
+      };
+    };
+    product_categories: { id: number; name: string }[];
+  };
+
+  const createCtxQ = useQuery({
+    queryKey: ["orders", "create-context", tenantSlug],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.list,
     queryFn: async () => {
-      const { data } = await api.get<{ data: ClientRow[] }>(
-        `/api/${tenantSlug}/clients?page=1&limit=200&is_active=true`
+      const { data } = await api.get<OrderCreateContextResponse>(
+        `/api/${tenantSlug}/orders/create-context`
       );
-      return data.data;
-    }
-  });
-
-  const productsQ = useQuery({
-    queryKey: ["products", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.list,
-    queryFn: async () => {
-      const { data } = await api.get<{ data: ProductRow[] }>(
-        `/api/${tenantSlug}/products?page=1&limit=200&is_active=true&include_prices=true`
-      );
-      return data.data;
-    }
-  });
-
-  const warehousesQ = useQuery({
-    queryKey: ["warehouses", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.reference,
-    queryFn: async () => {
-      const { data } = await api.get<{
-        data: { id: number; name: string; stock_purpose?: string; is_active?: boolean }[];
-      }>(`/api/${tenantSlug}/warehouses`);
-      return data.data;
-    }
-  });
-
-  const usersQ = useQuery({
-    queryKey: ["users", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.reference,
-    queryFn: async () => {
-      const { data } = await api.get<{ data: { id: number; login: string; name: string; role: string }[] }>(
-        `/api/${tenantSlug}/users`
-      );
-      return data.data;
+      return data;
     }
   });
 
@@ -973,28 +959,6 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         `/api/${tenantSlug}/stock?warehouse_id=${warehouseId}`
       );
       return data.data;
-    }
-  });
-
-  const priceTypesQ = useQuery({
-    queryKey: ["price-types", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.reference,
-    queryFn: async () => {
-      const { data } = await api.get<{ data: string[] }>(`/api/${tenantSlug}/price-types?kind=sale`);
-      return data.data.length ? data.data : ["retail"];
-    }
-  });
-
-  const expeditorsQ = useQuery({
-    queryKey: ["expeditors", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.reference,
-    queryFn: async () => {
-      const { data } = await api.get<{
-        data: Array<{ id: number; fio: string; login: string; is_active: boolean }>;
-      }>(`/api/${tenantSlug}/expeditors`);
-      return data.data.filter((r) => r.is_active);
     }
   });
 
@@ -1153,48 +1117,32 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     }
   });
 
-  const profileRefsQ = useQuery({
-    queryKey: ["settings", "profile", tenantSlug, "order-create-refs"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.profile,
-    queryFn: async () => {
-      const { data } = await api.get<{
-        references: {
-          request_type_entries?: unknown;
-          order_note_entries?: unknown;
-          refusal_reason_entries?: unknown;
-        };
-      }>(`/api/${tenantSlug}/settings/profile`);
-      return data;
-    }
-  });
+  const ctxProfile = createCtxQ.data?.settings_profile;
+
+  const requiresAgentAndPayment = !isPolkiSheet && normalizedType === "order";
+
+  const paymentMethodSelectOptions = useMemo(() => {
+    const raw = ctxProfile?.references?.payment_method_entries;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((e) => e && typeof e.id === "string" && e.id.trim() && e.active !== false);
+  }, [ctxProfile]);
+
+  const hasPaymentMethodCatalog = paymentMethodSelectOptions.length > 0;
 
   const requestTypeOptions = useMemo(
-    () => activeRefSelectOptions(profileRefsQ.data?.references?.request_type_entries),
-    [profileRefsQ.data]
+    () => activeRefSelectOptions(ctxProfile?.references?.request_type_entries),
+    [ctxProfile]
   );
   const orderNoteOptions = useMemo(
-    () => activeRefSelectOptions(profileRefsQ.data?.references?.order_note_entries),
-    [profileRefsQ.data]
+    () => activeRefSelectOptions(ctxProfile?.references?.order_note_entries),
+    [ctxProfile]
   );
   const refusalReasonPolkiOptions = useMemo(
-    () => activeRefSelectOptions(profileRefsQ.data?.references?.refusal_reason_entries),
-    [profileRefsQ.data]
+    () => activeRefSelectOptions(ctxProfile?.references?.refusal_reason_entries),
+    [ctxProfile]
   );
 
-  const categoriesQ = useQuery({
-    queryKey: ["product-categories", tenantSlug, "order-form"],
-    enabled: Boolean(tenantSlug),
-    staleTime: STALE.reference,
-    queryFn: async () => {
-      const { data } = await api.get<{ data: { id: number; name: string }[] }>(
-        `/api/${tenantSlug}/product-categories`
-      );
-      return data.data;
-    }
-  });
-
-  const clients = clientsQ.data ?? [];
+  const clients = createCtxQ.data?.clients ?? [];
   const polkiSelectedClientLabel = useMemo(() => {
     if (!clientId.trim()) return null;
     const id = Number.parseInt(clientId.trim(), 10);
@@ -1210,10 +1158,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     }
     return `Клиент #${id}`;
   }, [clientId, clients, clientSummaryQ.data, clientSummaryQ.isFetching]);
-  const products = productsQ.data ?? [];
-  const warehouses = warehousesQ.data ?? [];
-  const users = usersQ.data ?? [];
-  const categories = categoriesQ.data ?? [];
+  const products = createCtxQ.data?.products ?? [];
+  const warehouses = createCtxQ.data?.warehouses ?? [];
+  const users = createCtxQ.data?.users ?? [];
+  const categories = createCtxQ.data?.product_categories ?? [];
 
   useEffect(() => {
     if (!isPolkiSheet || warehouses.length === 0) return;
@@ -1502,13 +1450,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   }, [catalogProducts, qtyByProductId, priceType]);
 
   const loadingLists =
-    clientsQ.isLoading ||
-    productsQ.isLoading ||
-    warehousesQ.isLoading ||
-    usersQ.isLoading ||
-    categoriesQ.isLoading ||
-    priceTypesQ.isLoading ||
-    expeditorsQ.isLoading;
+    createCtxQ.isPending;
   const selectedItemsCount = catalogProducts.reduce((acc, p) => {
     const raw = qtyByProductId[p.id];
     const q = Number.parseFloat((raw ?? "").replace(",", "."));
@@ -1648,7 +1590,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         }
         if (orderNotePreset.trim()) {
           const presetLabel =
-            refEntryLabelByStored(profileRefsQ.data?.references?.order_note_entries, orderNotePreset) ??
+            refEntryLabelByStored(ctxProfile?.references?.order_note_entries, orderNotePreset) ??
             orderNotePreset;
           noteParts.push(presetLabel);
         }
@@ -1701,9 +1643,18 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       const wid = Number.parseInt(warehouseId, 10);
       if (!warehouseId.trim() || !Number.isFinite(wid) || wid < 1) throw new Error("warehouse");
 
+      const validatedOrderType =
+        orderType && (ORDER_TYPE_VALUES as readonly string[]).includes(orderType) ? orderType : "order";
+
       const agentParsed = agentId.trim() ? Number.parseInt(agentId, 10) : NaN;
       const agent_id =
         Number.isFinite(agentParsed) && agentParsed > 0 ? agentParsed : null;
+
+      if (validatedOrderType === "order") {
+        if (agent_id == null) throw new Error("agent");
+        const pm = paymentMethodRef.trim().slice(0, 64);
+        if (!pm) throw new Error("payment_method");
+      }
 
       const stockRows = stockQ.data ?? [];
       const stockMap = new Map(stockRows.map((s) => [s.product_id, s]));
@@ -1726,14 +1677,12 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }
       if (items.length === 0) throw new Error("nolines");
 
-      const validatedOrderType =
-        orderType && (ORDER_TYPE_VALUES as readonly string[]).includes(orderType) ? orderType : "order";
       const freeComment = orderComment.trim();
       const presetStored = orderNotePreset.trim();
       let commentOut: string | null = freeComment || null;
       if (presetStored) {
         const presetLabel =
-          refEntryLabelByStored(profileRefsQ.data?.references?.order_note_entries, presetStored) ??
+          refEntryLabelByStored(ctxProfile?.references?.order_note_entries, presetStored) ??
           presetStored;
         commentOut = freeComment ? `${presetLabel}\n${freeComment}` : presetLabel;
       }
@@ -1748,17 +1697,26 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         request_type_ref: requestTypeRef.trim() || null,
         items
       };
+      if (validatedOrderType === "order" && orderIsConsignment) {
+        body.is_consignment = true;
+        const due = consignmentDueDate.trim();
+        if (due) body.consignment_due_date = due;
+      }
       const expRaw = expeditorUserId.trim();
       if (expRaw === "__none__") body.expeditor_user_id = null;
       else if (expRaw !== "") {
         const eid = Number.parseInt(expRaw, 10);
         if (Number.isFinite(eid) && eid > 0) body.expeditor_user_id = eid;
       }
+      if (validatedOrderType === "order") {
+        body.payment_method_ref = paymentMethodRef.trim().slice(0, 64);
+      }
 
       await api.post(`/api/${tenantSlug}/orders`, body);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["orders", "create-context", tenantSlug] });
       if (isPolkiSheet) {
         void qc.invalidateQueries({ queryKey: ["returns", tenantSlug] });
         void qc.invalidateQueries({ queryKey: ["returns-client-data", tenantSlug] });
@@ -1766,6 +1724,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       setRequestTypeRef("");
       setOrderNotePreset("");
       setRefSelectKey((k) => k + 1);
+      setOrderIsConsignment(false);
+      setConsignmentDueDate("");
+      setPaymentMethodRef("");
       onCreated();
     },
     onError: (e: Error) => {
@@ -1813,6 +1774,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }
       if (e.message === "warehouse") {
         setLocalError("Omborni tanlash shart.");
+        return;
+      }
+      if (e.message === "agent") {
+        setLocalError("Savdo zakazi uchun agentni tanlang.");
+        return;
+      }
+      if (e.message === "payment_method") {
+        setLocalError("To‘lov usulini tanlang yoki kiriting.");
         return;
       }
       if (e.message === "client") {
@@ -1882,6 +1851,18 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       }
       if (code === "BadAgent") {
         setLocalError("Tanlangan agent topilmadi yoki faol emas.");
+        return;
+      }
+      if (code === "OrderRequiresAgent") {
+        setLocalError("Savdo zakazi uchun agent majburiy.");
+        return;
+      }
+      if (code === "OrderRequiresWarehouse") {
+        setLocalError("Savdo zakazi uchun ombor majburiy.");
+        return;
+      }
+      if (code === "OrderRequiresPaymentMethod") {
+        setLocalError("To‘lov usuli majburiy.");
         return;
       }
       if (code === "NoRetailPrice" || code === "NoPrice") {
@@ -1958,6 +1939,24 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         );
         return;
       }
+      if (code === "ConsignmentRequiresAgent") {
+        setLocalError("Konsignatsiya zakazi uchun agentni tanlang.");
+        return;
+      }
+      if (code === "ConsignmentAgentDisabled") {
+        setLocalError("Bu agent uchun konsignatsiya yoqilmagan (Пользователи → Консигнация).");
+        return;
+      }
+      if (code === "ConsignmentLimitExceeded" && d) {
+        setLocalError(
+          `Konsignatsiya limiti yetmaydi. Limit: ${(d as { consignment_limit?: string }).consignment_limit ?? "—"}, ochiq qarz: ${(d as { outstanding?: string }).outstanding ?? "—"}, bu zakaz: ${(d as { order_total?: string }).order_total ?? "—"}.`
+        );
+        return;
+      }
+      if (code === "BadConsignmentDueDate") {
+        setLocalError("Konsignatsiya muddatini tekshiring (YYYY-MM-DD yoki to‘liq sana).");
+        return;
+      }
       if (ax.response?.status === 403) {
         setLocalError("Zakaz yaratish huquqi yo‘q (faqat admin / operator).");
         return;
@@ -1997,7 +1996,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           !loadingLists &&
           stockReadyForLines &&
           !hasQtyOverStock &&
-          !hasMissingPriceForSelected
+          !hasMissingPriceForSelected &&
+          (!requiresAgentAndPayment || (Boolean(agentId.trim()) && Boolean(paymentMethodRef.trim())))
       );
 
   /** Nega «Возврат» o‘chiq — foydalanuvchiga aniq sabab (rus.). */
@@ -2053,6 +2053,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       setWarehouseId("");
       setAgentId("");
       setExpeditorUserId("");
+      setPaymentMethodRef("");
     }
   }, [hasClient]);
 
@@ -2075,7 +2076,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     polkiTradeDirection,
     polkiSkidkaType,
     refusalReasonRefPolki,
-    polkiOrderIdsSortedKey
+    polkiOrderIdsSortedKey,
+    paymentMethodRef
   ]);
 
   if (!tenantSlug) {
@@ -2145,15 +2147,19 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     ? "Avval klientni tanlang"
                     : !hasWarehouse
                       ? "Avval omborni tanlang"
-                      : selectedItemsCount === 0
-                        ? "Kamida bitta mahsulot miqdorini kiriting"
-                        : hasQtyOverStock
-                          ? "Miqdor qoldiqdan oshmasin"
-                          : hasMissingPriceForSelected
-                            ? "Tanlangan narx turi bo‘yicha narxi yo‘q mahsulotlar bor"
-                            : !stockReadyForLines
-                              ? "Qoldiqlar Загрузка…"
-                              : undefined
+                      : requiresAgentAndPayment && !agentId.trim()
+                        ? "Agentni tanlang (savdo zakazi)"
+                        : requiresAgentAndPayment && !paymentMethodRef.trim()
+                          ? "To‘lov usulini tanlang"
+                          : selectedItemsCount === 0
+                            ? "Kamida bitta mahsulot miqdorini kiriting"
+                            : hasQtyOverStock
+                              ? "Miqdor qoldiqdan oshmasin"
+                              : hasMissingPriceForSelected
+                                ? "Tanlangan narx turi bo‘yicha narxi yo‘q mahsulotlar bor"
+                                : !stockReadyForLines
+                                  ? "Qoldiqlar Загрузка…"
+                                  : undefined
               }
             >
               {mutation.isPending
@@ -2180,14 +2186,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           </p>
         ) : null}
 
-        {clientsQ.isError ? (
+        {createCtxQ.isError ? (
           <div
             role="alert"
             className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm"
           >
             <p className="font-semibold text-destructive">API bilan aloqa yo‘q</p>
             <p className="mt-1 text-muted-foreground">
-              {isApiUnreachable(clientsQ.error) ? (
+              {isApiUnreachable(createCtxQ.error) ? (
                 <>
                   So‘rov manzili:{" "}
                   <code className="rounded bg-muted px-1 py-0.5 text-xs text-foreground">
@@ -2208,7 +2214,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   da moslang.
                 </>
               ) : (
-                getUserFacingError(clientsQ.error, "Klientlar yuklanmadi.")
+                getUserFacingError(createCtxQ.error, "Zakaz formasi ma’lumotlari yuklanmadi.")
               )}
             </p>
             <Button
@@ -2216,7 +2222,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
               variant="outline"
               size="sm"
               className="mt-3"
-              onClick={() => void clientsQ.refetch()}
+              onClick={() => void createCtxQ.refetch()}
             >
               Qayta urinish
             </Button>
@@ -2357,11 +2363,11 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 </div>
               ) : null}
               <div className="space-y-2">
-                <Label htmlFor="oc-agent">Agent</Label>
+                <Label htmlFor="oc-agent">Agent{requiresAgentAndPayment ? " *" : ""}</Label>
                 <FilterSelect
                   id="oc-agent"
                   className={fieldClass}
-                  emptyLabel="Agent (ixtiyoriy)"
+                  emptyLabel={requiresAgentAndPayment ? "Agentni tanlang" : "Agent (ixtiyoriy)"}
                   aria-label="Agent"
                   value={agentId}
                   onChange={(e) => setAgentId(e.target.value)}
@@ -2374,6 +2380,49 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   ))}
                 </FilterSelect>
               </div>
+              {requiresAgentAndPayment ? (
+                <div className="space-y-2">
+                  <Label htmlFor="oc-pay-method">To‘lov usuli *</Label>
+                  {hasPaymentMethodCatalog ? (
+                    <FilterSelect
+                      id="oc-pay-method"
+                      data-testid="order-create-payment-method"
+                      className={fieldClass}
+                      emptyLabel="Usulni tanlang"
+                      aria-label="To‘lov usuli"
+                      value={paymentMethodRef}
+                      onChange={(e) => setPaymentMethodRef(e.target.value)}
+                      disabled={mutation.isPending || loadingLists || !canPickWarehouse}
+                    >
+                      {paymentMethodSelectOptions.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  ) : (
+                    <>
+                      <Input
+                        id="oc-pay-method"
+                        data-testid="order-create-payment-method"
+                        className={fieldClass}
+                        placeholder="Kod yoki qisqa nom (max 64)"
+                        maxLength={64}
+                        value={paymentMethodRef}
+                        onChange={(e) => setPaymentMethodRef(e.target.value)}
+                        disabled={mutation.isPending || loadingLists || !canPickWarehouse}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Sozlamalarda «To‘lov usullari» bo‘sh — qo‘lda kiriting yoki{" "}
+                        <Link className="underline" href="/settings">
+                          sozlamalar
+                        </Link>
+                        da katalog qo‘shing.
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : null}
               {!isPolkiSheet ? (
                 <div className="space-y-2">
                   <Label htmlFor="oc-exp">Ekspeditor</Label>
@@ -2384,11 +2433,11 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     aria-label="Ekspeditor"
                     value={expeditorUserId}
                     onChange={(e) => setExpeditorUserId(e.target.value)}
-                    disabled={mutation.isPending || expeditorsQ.isLoading || !canPickPricingAndExpeditor}
+                    disabled={mutation.isPending || createCtxQ.isPending || !canPickPricingAndExpeditor}
                   >
                     <option value="">Avtobog‘lash</option>
                     <option value="__none__">Ekspeditorsiz</option>
-                    {(expeditorsQ.data ?? []).map((r) => (
+                    {(createCtxQ.data?.expeditors ?? []).map((r) => (
                       <option key={r.id} value={String(r.id)}>
                         {r.login} · {r.fio}
                       </option>
@@ -2400,13 +2449,40 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 </div>
               ) : null}
 
-              <label className="flex cursor-not-allowed items-start gap-2 text-sm text-muted-foreground opacity-70">
-                <input type="checkbox" disabled className="mt-0.5 size-4 rounded border-input" />
-                <span>
-                  Konstigatsiya{" "}
-                  <span className="block text-[11px] text-destructive/90">Limit: rejalashtirilmoqda</span>
-                </span>
-              </label>
+              {!isPolkiSheet ? (
+                <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <label className="flex cursor-pointer items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 rounded border-input"
+                      checked={orderIsConsignment}
+                      onChange={(e) => setOrderIsConsignment(e.target.checked)}
+                      disabled={mutation.isPending}
+                    />
+                    <span>
+                      Konsignatsiya zakazi
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                        Agent limiti va «Консигнация» sozlamalariga bog‘liq. Agent majburiy.
+                      </span>
+                    </span>
+                  </label>
+                  {orderIsConsignment ? (
+                    <div className="space-y-1 pl-6">
+                      <Label htmlFor="oc-cons-due" className="text-xs text-muted-foreground">
+                        To‘lash muddati (ixtiyoriy)
+                      </Label>
+                      <Input
+                        id="oc-cons-due"
+                        type="date"
+                        className={fieldClass}
+                        value={consignmentDueDate}
+                        onChange={(e) => setConsignmentDueDate(e.target.value)}
+                        disabled={mutation.isPending}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {!isPolkiSheet ? (
                 <div className="space-y-2">
@@ -2504,7 +2580,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     role="radiogroup"
                     aria-label="Narx turi"
                   >
-                    {(priceTypesQ.data ?? ["retail"]).map((t) => (
+                    {(createCtxQ.data?.price_types?.length ? createCtxQ.data.price_types : ["retail"]).map((t) => (
                       <label
                         key={t}
                         className={cn(
@@ -2519,7 +2595,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                           checked={priceType === t}
                           onChange={() => setPriceType(t)}
                           disabled={
-                            mutation.isPending || priceTypesQ.isLoading || !canPickPricingAndExpeditor
+                            mutation.isPending || createCtxQ.isPending || !canPickPricingAndExpeditor
                           }
                         />
                         <span className="font-medium capitalize">{t}</span>
@@ -2585,7 +2661,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                     Тип цены
                   </p>
                   <div className="flex max-h-[5.5rem] flex-wrap gap-1.5 overflow-y-auto pr-0.5">
-                    {(priceTypesQ.data ?? ["retail"]).map((t) => (
+                    {(createCtxQ.data?.price_types?.length ? createCtxQ.data.price_types : ["retail"]).map((t) => (
                       <label
                         key={t}
                         className={cn(
@@ -2601,7 +2677,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                           className="sr-only"
                           checked={priceType === t}
                           onChange={() => setPriceType(t)}
-                          disabled={mutation.isPending || priceTypesQ.isLoading}
+                          disabled={mutation.isPending || createCtxQ.isPending}
                         />
                         <span>{POLKI_PRICE_TYPE_LABEL_RU[t] ?? t}</span>
                       </label>

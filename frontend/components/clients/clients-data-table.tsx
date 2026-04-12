@@ -343,7 +343,7 @@ export function ClientsDataTable({
           {rows.length === 0 ? (
             <tr>
               <td colSpan={colCount} className="px-3 py-8 text-center text-muted-foreground">
-                Mijoz topilmadi
+                Клиенты не найдены
               </td>
             </tr>
           ) : (
@@ -356,7 +356,7 @@ export function ClientsDataTable({
                       className="h-4 w-4 rounded border-input accent-primary"
                       checked={sel.has(row.id)}
                       onChange={(e) => onToggleRow?.(row.id, e.target.checked)}
-                      aria-label={`Mijoz #${row.id}`}
+                      aria-label={`Клиент №${row.id}`}
                     />
                   </td>
                 ) : null}
@@ -383,7 +383,7 @@ export function ClientsDataTable({
                           <Pencil className="size-3.5" aria-hidden />
                         </Button>
                         <Link
-                          href={`/clients/${row.id}`}
+                          href={`/clients/${row.id}/balances`}
                           className={cn(
                             buttonVariants({ variant: "ghost", size: "icon-sm" }),
                             "text-primary hover:bg-primary/10 hover:text-primary"

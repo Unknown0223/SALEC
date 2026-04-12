@@ -23,13 +23,22 @@ export const PAYMENT_TABLE_COLUMNS: ColumnDefItem[] = [
   { id: "expeditor", label: "Экспедитор" },
   { id: "cash_desk", label: "Касса" },
   { id: "note", label: "Комментарий" },
-  { id: "order", label: "Заказ" }
+  { id: "order", label: "Заказ" },
+  { id: "deleted_at", label: "Отменён (дата)" },
+  { id: "deleted_by", label: "Кто отменил" },
+  { id: "delete_reason", label: "Причина отмены" }
 ];
 
 export const DEFAULT_PAYMENT_COLUMN_ORDER = PAYMENT_TABLE_COLUMNS.map((c) => c.id);
 
 /** Dastlab yashirin — kerak bo‘lsa sozlamalardan yoqiladi */
-export const DEFAULT_HIDDEN_PAYMENT_COLUMNS = ["received_at", "confirmed_at"] as const;
+export const DEFAULT_HIDDEN_PAYMENT_COLUMNS = [
+  "received_at",
+  "confirmed_at",
+  "deleted_at",
+  "deleted_by",
+  "delete_reason"
+] as const;
 
 export const PAYMENT_COL_TH: Record<string, string> = {
   balance: "text-right",
@@ -40,5 +49,8 @@ export const PAYMENT_COL_TH: Record<string, string> = {
 export const PAYMENT_COL_TD: Record<string, string> = {
   balance: "text-right tabular-nums text-xs",
   amount: "text-right tabular-nums text-xs font-medium",
-  note: "max-w-[140px] truncate text-xs text-muted-foreground"
+  note: "max-w-[140px] truncate text-xs text-muted-foreground",
+  deleted_at: "text-xs text-muted-foreground whitespace-nowrap",
+  deleted_by: "text-xs text-muted-foreground",
+  delete_reason: "max-w-[160px] truncate text-xs text-muted-foreground"
 };

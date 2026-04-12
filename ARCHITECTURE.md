@@ -4,6 +4,8 @@ Future-proof | Scalable | Secure | Real-time | AI-ready
 ================================================================
 Maqsad: Bir marta to'g'ri qurish, keyinchalik faqat qo'shish
 ================================================================
+Hozirgi kod bilan tezkor solishtirish: docs/CODEBASE_REALITY.md
+================================================================
 ASOSIY 8 TA PRINSIP (o'zgarmaydi)
 
 MODULAR       — har bo'lim mustaqil, biri buzilsa boshqasi ishlaydi

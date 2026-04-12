@@ -25,9 +25,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableMultiSelectPanel } from "@/components/ui/searchable-multi-select-panel";
 import { api } from "@/lib/api";
-import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
+import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { getUserFacingError } from "@/lib/error-utils";
+import { paymentMethodSelectOptions, type ProfilePaymentMethodEntry } from "@/lib/payment-method-options";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { ClientRow } from "@/lib/client-types";
 import type { PaymentListApiResponse, PaymentListApiRow } from "@/lib/payment-list-types";
@@ -56,6 +57,7 @@ import {
   Printer,
   Receipt,
   RefreshCw,
+  RotateCcw,
   Search,
   Settings2,
   Table2,
@@ -355,6 +357,16 @@ function paymentDataCell(colId: string, r: PaymentListApiRow, ctx: CellCtx): Rea
       ) : (
         <span className="font-mono text-xs">—</span>
       );
+    case "deleted_at":
+      return <span className="text-xs text-muted-foreground">{ctx.formatDt(r.deleted_at ?? null)}</span>;
+    case "deleted_by":
+      return (
+        <span className="text-xs text-muted-foreground">
+          {r.deleted_by_name?.trim() ? r.deleted_by_name : r.deleted_by_user_id != null ? `#${r.deleted_by_user_id}` : "—"}
+        </span>
+      );
+    case "delete_reason":
+      return <span className="truncate text-xs text-muted-foreground">{r.delete_reason_ref?.trim() ? r.delete_reason_ref : "—"}</span>;
     default:
       return "—";
   }
@@ -378,7 +390,10 @@ const PAYMENT_TD_NOWRAP = new Set([
   "agent_code",
   "expeditor",
   "cash_desk",
-  "order"
+  "order",
+  "deleted_at",
+  "deleted_by",
+  "delete_reason"
 ]);
 
 export function ClientPaymentsWorkspace({
@@ -389,6 +404,8 @@ export function ClientPaymentsWorkspace({
   const isExpenses = variant === "client_expenses";
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
   const hydrated = useAuthStoreHydrated();
+  const effectiveRole = useEffectiveRole();
+  const canVoidPayments = effectiveRole === "admin";
   const qc = useQueryClient();
 
   const [draft, setDraft] = useState<FilterForm>(() => defaultForm());
@@ -536,12 +553,20 @@ export function ClientPaymentsWorkspace({
     enabled: Boolean(tenantSlug) && hydrated,
     staleTime: STALE.profile,
     queryFn: async () => {
-      const { data } = await api.get<{ references?: { payment_types?: string[] } }>(
-        `/api/${tenantSlug}/settings/profile`
-      );
-      return data.references?.payment_types ?? [];
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
     }
   });
+
+  const payFilterOpts = useMemo(
+    () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
+    [profileQ.data]
+  );
 
   const territoryOptions1 = filterOptQ.data?.territories ?? [];
   const territoryOptions2 = useMemo(() => {
@@ -614,13 +639,29 @@ export function ClientPaymentsWorkspace({
       void qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
       setDeleteFeedback(
         isExpenses
-          ? "Запись удалена, баланс клиента восстановлен."
-          : "Платёж удалён, баланс клиента скорректирован."
+          ? "Запись перенесена в архив (отмена), баланс восстановлен. История сохранена."
+          : "Платёж отменён и перенесён в архив; баланс скорректирован. Восстановление — фильтр «Архив» или карточка платежа."
       );
-      setTimeout(() => setDeleteFeedback(null), 4000);
+      setTimeout(() => setDeleteFeedback(null), 6000);
     },
     onError: () => {
-      setDeleteFeedback(isExpenses ? "Не удалось удалить запись." : "Не удалось удалить платёж.");
+      setDeleteFeedback(isExpenses ? "Не удалось отменить запись." : "Не удалось отменить платёж.");
+      setTimeout(() => setDeleteFeedback(null), 4000);
+    }
+  });
+
+  const restoreMut = useMutation({
+    mutationFn: async (id: number) => {
+      await api.post(`/api/${tenantSlug}/payments/${id}/restore`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
+      setDeleteFeedback("Платёж восстановлен, баланс снова учтён. При необходимости распределите по заказам.");
+      setTimeout(() => setDeleteFeedback(null), 6000);
+    },
+    onError: () => {
+      setDeleteFeedback("Не удалось восстановить платёж.");
       setTimeout(() => setDeleteFeedback(null), 4000);
     }
   });
@@ -820,7 +861,7 @@ export function ClientPaymentsWorkspace({
                       >
                         <option value="pending_confirmation">Ожидание подтверждения</option>
                         <option value="confirmed">Подтверждена</option>
-                        <option value="deleted">Удалено</option>
+                        <option value="deleted">Архив / отменённые</option>
                       </FilterSelect>
                     </div>
                   ) : null}
@@ -896,9 +937,9 @@ export function ClientPaymentsWorkspace({
                         value={draft.payment_type}
                         onChange={(e) => setDraft((d) => ({ ...d, payment_type: e.target.value }))}
                       >
-                        {(profileQ.data ?? []).map((pt) => (
-                          <option key={pt} value={pt}>
-                            {pt}
+                        {payFilterOpts.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
                           </option>
                         ))}
                       </FilterSelect>
@@ -1239,12 +1280,15 @@ export function ClientPaymentsWorkspace({
                     </tr>
                   </thead>
                   <tbody>
-                    {(listQ.data?.data ?? []).map((r, idx) => (
+                    {(listQ.data?.data ?? []).map((r, idx) => {
+                      const voided = Boolean(r.deleted_at);
+                      return (
                       <tr
                         key={r.id}
                         className={cn(
                           "border-b border-border/60 transition-colors hover:bg-muted/40",
-                          idx % 2 === 1 && "bg-muted/20"
+                          idx % 2 === 1 && "bg-muted/20",
+                          voided && "bg-muted/30 opacity-90"
                         )}
                       >
                         <td className="px-1 py-2 align-middle text-center">
@@ -1282,30 +1326,51 @@ export function ClientPaymentsWorkspace({
                             <Link
                               href={`/payments/${r.id}`}
                               className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              title="Редактировать"
+                              title="Карточка"
                             >
                               <Pencil className="h-4 w-4" />
                             </Link>
-                            <button
-                              type="button"
-                              className="rounded p-1.5 text-destructive hover:bg-destructive/10"
-                              title="Удалить"
-                              disabled={deleteMut.isPending}
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    isExpenses
-                                      ? `Удалить расход #${r.id} (${formatNumberGrouped(r.amount, { maxFractionDigits: 2 })} UZS)? Баланс клиента будет восстановлен.`
-                                      : `Удалить платёж #${r.id} (${formatNumberGrouped(r.amount, { maxFractionDigits: 2 })} UZS)? Баланс будет скорректирован.`
-                                  )
-                                ) {
-                                  deleteMut.mutate(r.id);
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                            {!isExpenses ? (
+                            {canVoidPayments && !voided ? (
+                              <button
+                                type="button"
+                                className="rounded p-1.5 text-destructive hover:bg-destructive/10"
+                                title="Отменить (в архив)"
+                                disabled={deleteMut.isPending}
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      isExpenses
+                                        ? `Отменить расход #${r.id} (${formatNumberGrouped(r.amount, { maxFractionDigits: 2 })} UZS)? Запись останется в архиве, баланс восстановится.`
+                                        : `Отменить платёж #${r.id} (${formatNumberGrouped(r.amount, { maxFractionDigits: 2 })} UZS)? Запись останется в архиве, баланс и распределения будут скорректированы.`
+                                    )
+                                  ) {
+                                    deleteMut.mutate(r.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                            {canVoidPayments && voided ? (
+                              <button
+                                type="button"
+                                className="rounded p-1.5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400"
+                                title="Восстановить платёж"
+                                disabled={restoreMut.isPending}
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `Восстановить платёж #${r.id}? Сумма снова попадёт на баланс клиента; распределение по заказам при необходимости сделайте вручную.`
+                                    )
+                                  ) {
+                                    restoreMut.mutate(r.id);
+                                  }
+                                }}
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                            {!isExpenses && !voided ? (
                               <button
                                 type="button"
                                 data-testid="payment-open-allocate"
@@ -1318,7 +1383,8 @@ export function ClientPaymentsWorkspace({
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
                 {(listQ.data?.data.length ?? 0) === 0 ? (

@@ -173,7 +173,7 @@ export default function NewClientPage() {
 
   const mut = useMutation({
     mutationFn: async () => {
-      if (!tenantSlug) throw new Error("Tenant yo‘q");
+      if (!tenantSlug) throw new Error("Нет tenant");
       const { data } = await api.post<{ id: number }>(`/api/${tenantSlug}/clients`, {
         name: name.trim(),
         phone: phone.trim() || null,
@@ -194,13 +194,13 @@ export default function NewClientPage() {
     onSuccess: (d) => {
       router.push(`/clients/${d.id}/edit`);
     },
-    onError: () => setErr("Qo‘shib bo‘lmadi (nom bo‘sh yoki ruxsat yo‘q).")
+    onError: () => setErr("Не удалось создать (пустое имя или нет доступа).")
   });
 
   if (!hydrated) {
     return (
       <PageShell>
-        <p className="text-sm text-muted-foreground">Sessiya…</p>
+        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       </PageShell>
     );
   }
@@ -210,7 +210,7 @@ export default function NewClientPage() {
       <PageShell>
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">
-            Kirish
+            Войти
           </Link>
         </p>
       </PageShell>
@@ -220,11 +220,11 @@ export default function NewClientPage() {
   return (
     <PageShell className="max-w-2xl">
       <PageHeader
-        title="Yangi mijoz"
-        description="Nom majburiy. Spravochnik maydonlari ixtiyoriy — ro‘yxatlar sozlamalardan to‘ldiriladi."
+        title="Новый клиент"
+        description="Название обязательно. Поля справочников необязательны — списки заполняются в настройках."
         actions={
           <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/clients">
-            Ro‘yxat
+            К списку
           </Link>
         }
       />
@@ -235,7 +235,7 @@ export default function NewClientPage() {
           e.preventDefault();
           setErr(null);
           if (!name.trim()) {
-            setErr("Nom majburiy.");
+            setErr("Укажите название.");
             return;
           }
           mut.mutate();
@@ -243,7 +243,7 @@ export default function NewClientPage() {
       >
         <div className="grid gap-4">
           <div className="grid gap-1.5">
-            <Label htmlFor="nc-name">Nomi *</Label>
+            <Label htmlFor="nc-name">Название *</Label>
             <Input
               id="nc-name"
               value={name}
@@ -253,7 +253,7 @@ export default function NewClientPage() {
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="nc-phone">Telefon (ixtiyoriy)</Label>
+            <Label htmlFor="nc-phone">Телефон (необязательно)</Label>
             <Input id="nc-phone" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={mut.isPending} />
           </div>
         </div>
@@ -512,13 +512,13 @@ export default function NewClientPage() {
         {err ? <p className="text-sm text-destructive">{err}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button type="submit" disabled={mut.isPending}>
-            {mut.isPending ? "Yaratilmoqda…" : "Yaratish va tahrirga"}
+            {mut.isPending ? "Создание…" : "Создать и перейти к редактированию"}
           </Button>
           <Link
             className={cn(buttonVariants({ variant: "outline" }), mut.isPending && "pointer-events-none opacity-50")}
             href="/clients"
           >
-            Bekor
+            Отмена
           </Link>
         </div>
       </form>

@@ -30,6 +30,8 @@ interface Expense {
   agent_name: string | null;
   warehouse_name: string | null;
   created_by_name: string | null;
+  deleted_at?: string | null;
+  deleted_by_name?: string | null;
 }
 
 interface PnlReport {
@@ -67,6 +69,7 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [pnl, setPnl] = useState<PnlReport | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [showArchive, setShowArchive] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [newAmount, setNewAmount] = useState("");
@@ -98,6 +101,7 @@ export default function ExpensesPage() {
       const params = new URLSearchParams({
         page: String(page), limit: "20",
         ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+        ...(showArchive ? { archive: "true" } : {})
       });
       const [data, pnlData] = await Promise.all([
         apiFetch<{ data?: Expense[]; total?: number }>(`/api/${tenant}/expenses?${params}`),
@@ -108,12 +112,24 @@ export default function ExpensesPage() {
       setPnl(pnlData);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [tenant, page, statusFilter]);
+  }, [tenant, page, statusFilter, showArchive]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
   const handleAction = async (id: number, action: string) => {
     await apiFetch(`/api/${tenant}/expenses/${id}/${action}`, { method: "POST", body: action === "reject" ? JSON.stringify({ note: "Rad etilgan" }) : undefined });
+    fetchAll();
+  };
+
+  const handleDeleteDraft = async (id: number) => {
+    if (!confirm(`Chiqim #${id} ni arxivga o‘tkazish?`)) return;
+    await apiFetch(`/api/${tenant}/expenses/${id}`, { method: "DELETE" });
+    fetchAll();
+  };
+
+  const handleRestoreExpense = async (id: number) => {
+    if (!confirm(`Chiqim #${id} ni tiklash?`)) return;
+    await apiFetch(`/api/${tenant}/expenses/${id}/restore`, { method: "POST" });
     fetchAll();
   };
 
@@ -158,6 +174,7 @@ export default function ExpensesPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Chiqimlar (Expenses)</h1>
 
+      {!showArchive ? (
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Yangi chiqim</CardTitle>
@@ -217,22 +234,37 @@ export default function ExpensesPage() {
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
       {/* PnL Summary */}
-      {pnl && (
+      {!showArchive && pnl ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Daromad</p><p className="text-2xl font-bold tabular-nums">{formatNumberGrouped(pnl.revenue, { maxFractionDigits: 2 })}</p></CardContent></Card>
           <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Tasdiqlangan chiqimlar</p><p className="text-2xl font-bold tabular-nums text-orange-600">{formatNumberGrouped(pnl.total_expenses_approved, { maxFractionDigits: 2 })}</p></CardContent></Card>
           <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Qoralama chiqimlar</p><p className="text-2xl font-bold tabular-nums text-gray-500">{formatNumberGrouped(pnl.total_expenses_draft, { maxFractionDigits: 2 })}</p></CardContent></Card>
           <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Sof foyda</p><p className="text-2xl font-bold tabular-nums text-green-600">{formatNumberGrouped(pnl.net_profit, { maxFractionDigits: 2 })}</p></CardContent></Card>
         </div>
-      )}
+      ) : null}
 
       {/* Filters */}
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Chiqimlar ro‘yxati</CardTitle>
+            <div className="flex flex-wrap gap-2">
+            <Select
+              value={showArchive ? "archive" : "active"}
+              onValueChange={(v: string) => {
+                setShowArchive(v === "archive");
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Faol</SelectItem>
+                <SelectItem value="archive">Arxiv</SelectItem>
+              </SelectContent>
+            </Select>
             <Select
               value={statusFilter}
               onValueChange={(v: string) => {
@@ -248,6 +280,7 @@ export default function ExpensesPage() {
                 <SelectItem value="rejected">Rad etilgan</SelectItem>
               </SelectContent>
             </Select>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -282,12 +315,17 @@ export default function ExpensesPage() {
                     <TableCell>{new Date(e.expense_date).toLocaleDateString()}</TableCell>
                     <TableCell>{e.warehouse_name || "—"}</TableCell>
                     <TableCell className="text-right">
-                      {e.status === "draft" && (
-                        <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="default" onClick={() => handleAction(e.id, "approve")}>Tasdiqlash</Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleAction(e.id, "reject")}>Rad etish</Button>
+                      {showArchive ? (
+                        <Button size="sm" variant="outline" onClick={() => void handleRestoreExpense(e.id)}>
+                          Tiklash
+                        </Button>
+                      ) : e.status === "draft" ? (
+                        <div className="flex flex-wrap gap-1 justify-end">
+                          <Button size="sm" variant="default" onClick={() => void handleAction(e.id, "approve")}>Tasdiqlash</Button>
+                          <Button size="sm" variant="destructive" onClick={() => void handleAction(e.id, "reject")}>Rad etish</Button>
+                          <Button size="sm" variant="outline" onClick={() => void handleDeleteDraft(e.id)}>Arxivga</Button>
                         </div>
-                      )}
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -3,8 +3,8 @@ import { Prisma } from "@prisma/client";
 import { getErrorCode } from "../../lib/app-error";
 import { prisma } from "../../config/database";
 import { emitOrderUpdated } from "../../lib/order-event-bus";
-import { invalidateDashboard } from "../../lib/redis-cache";
-import { notifyOrderParticipantsStatusChange } from "../notifications/notifications.service";
+import { invalidateDashboard, invalidateStock } from "../../lib/redis-cache";
+import { enqueueOrderStatusNotifyJob } from "../jobs/jobs.service";
 import { getProductPrice } from "../products/product-prices.service";
 import { parseBonusStackPolicy } from "./bonus-stack-policy";
 import {
@@ -23,6 +23,11 @@ import {
   isValidOrderStatus
 } from "./order-status";
 import { resolveAutoExpeditorUserId } from "./expeditor-auto-assign";
+import {
+  computeAgentConsignmentOutstanding,
+  parseYearMonth,
+  utcMonthStart
+} from "../consignment/consignment.service";
 import {
   buildNakladnoyXlsx,
   type NakladnoyBuildOptions,
@@ -44,6 +49,8 @@ export type CreateOrderInput = {
   /** Majburiy — qaysi ombordan jo’natiladi */
   warehouse_id: number;
   agent_id?: number | null;
+  /** Savdo zakazida majburiy: to‘lov usuli (spravochnik) */
+  payment_method_ref?: string | null;
   /** `null` — avto tanlov yo’q; `undefined` — avtobog’lash */
   expeditor_user_id?: number | null;
   /** Bo’sh bo’lsa `retail` */
@@ -56,6 +63,10 @@ export type CreateOrderInput = {
   comment?: string | null;
   /** Sozlamalar → request_type_entries (kod yoki nom, max 128) */
   request_type_ref?: string | null;
+  /** Konsignatsiya zakazi — agent limiti tekshiriladi */
+  is_consignment?: boolean;
+  /** ISO sana (ixtiyoriy) */
+  consignment_due_date?: string | null;
   items: OrderLineInput[];
 };
 
@@ -63,6 +74,8 @@ export type UpdateOrderLinesInput = {
   items: OrderLineInput[];
   warehouse_id?: number | null;
   agent_id?: number | null;
+  /** Savdo zakazida saqlangan to‘lov usulini yangilash (ixtiyoriy) */
+  payment_method_ref?: string | null;
   apply_bonus?: boolean;
   bonus_gift_overrides?: BonusGiftOverrideInput[];
 };
@@ -96,6 +109,8 @@ export type OrderListRow = {
   city: string | null;
   zone: string | null;
   consignment: boolean | null;
+  /** Zakaz konsignatsiyasi (order.is_consignment). */
+  is_consignment: boolean;
   day: string | null;
   created_by: string | null;
   created_by_role: string | null;
@@ -150,6 +165,10 @@ export type OrderDetailRow = OrderListRow & {
   agent_id: number | null;
   warehouse_name: string | null;
   agent_display: string | null;
+  /** Savdo zakazida tanlangan to‘lov usuli */
+  payment_method_ref: string | null;
+  is_consignment: boolean;
+  consignment_due_date: string | null;
   apply_bonus: boolean;
   items: OrderItemRow[];
   allowed_next_statuses: string[];
@@ -174,6 +193,7 @@ export type UpdateOrderMetaInput = {
   /** Qo‘lda biriktirish yoki `null` — avto tanlovni bekor qilish */
   expeditor_user_id?: number | null;
   comment?: string | null;
+  payment_method_ref?: string | null;
 };
 
 const orderDetailInclude: Prisma.OrderInclude = {
@@ -215,6 +235,9 @@ export type OrderDetailLoaded = {
   comment: string | null;
   request_type_ref: string | null;
   order_type: string;
+  is_consignment: boolean;
+  consignment_due_date: Date | null;
+  payment_method_ref: string | null;
   created_at: Date;
   client: { name: string };
   warehouse: { id: number; name: string } | null;
@@ -388,6 +411,9 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
       .toString(),
     agent_id: o.agent_id,
     agent_display: agentDisplay,
+    payment_method_ref: o.payment_method_ref?.trim() || null,
+    is_consignment: o.is_consignment ?? false,
+    consignment_due_date: o.consignment_due_date ? o.consignment_due_date.toISOString() : null,
     apply_bonus: o.applied_auto_bonus_rule_ids.length > 0,
     status: o.status,
     total_sum: o.total_sum.toString(),
@@ -569,6 +595,16 @@ export async function createOrder(
   /** Vozvrat s polki (yoki qo‘lda «возврат») — sotuv emas: klientdan omborga, logistika zanjiri «new…delivered» shart emas. */
   const isInboundShelfReturn = orderType === "return" || orderType === "return_by_order";
 
+  if (orderType === "order") {
+    if (input.agent_id == null || !Number.isFinite(input.agent_id) || input.agent_id < 1) {
+      throw new Error("ORDER_REQUIRES_AGENT");
+    }
+    const pm = (input.payment_method_ref ?? "").trim();
+    if (!pm) {
+      throw new Error("ORDER_REQUIRES_PAYMENT_METHOD");
+    }
+  }
+
   const tenantRow = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { settings: true }
@@ -660,6 +696,64 @@ export async function createOrder(
         err.outstanding = outstanding.toString();
         err.order_total = paidTotal.toString();
         throw err;
+      }
+    }
+
+    const isConsignmentOrder = !isInboundShelfReturn && (input.is_consignment ?? false);
+    let consignmentDueDate: Date | null = null;
+    if (isConsignmentOrder && input.consignment_due_date?.trim()) {
+      const d = new Date(input.consignment_due_date.trim());
+      if (Number.isNaN(d.getTime())) {
+        throw new Error("BAD_CONSIGNMENT_DUE_DATE");
+      }
+      consignmentDueDate = d;
+    }
+
+    if (isConsignmentOrder) {
+      if (input.agent_id == null || input.agent_id <= 0) {
+        throw new Error("CONSIGNMENT_REQUIRES_AGENT");
+      }
+      const ag = await tx.user.findFirst({
+        where: {
+          id: input.agent_id,
+          tenant_id: tenantId,
+          role: "agent",
+          is_active: true
+        },
+        select: {
+          consignment: true,
+          consignment_limit_amount: true,
+          consignment_ignore_previous_months_debt: true
+        }
+      });
+      if (!ag) {
+        throw new Error("BAD_AGENT");
+      }
+      if (!ag.consignment) {
+        throw new Error("CONSIGNMENT_AGENT_DISABLED");
+      }
+      const lim = ag.consignment_limit_amount;
+      if (lim != null) {
+        const { year, month } = parseYearMonth(undefined);
+        const monthStartsAt = utcMonthStart(year, month);
+        const ignorePrev =
+          lim != null && ag.consignment_ignore_previous_months_debt === true;
+        const outstanding = await computeAgentConsignmentOutstanding(tx, tenantId, input.agent_id, {
+          ignorePreviousMonthsDebt: ignorePrev,
+          monthStartsAt
+        });
+        const projected = outstanding.add(paidTotal);
+        if (projected.gt(lim)) {
+          const err = new Error("CONSIGNMENT_LIMIT_EXCEEDED") as Error & {
+            consignment_limit?: string;
+            outstanding?: string;
+            order_total?: string;
+          };
+          err.consignment_limit = lim.toString();
+          err.outstanding = outstanding.toString();
+          err.order_total = paidTotal.toString();
+          throw err;
+        }
       }
     }
 
@@ -796,6 +890,12 @@ export async function createOrder(
         bonus_gift_selections: bonusGiftMapToJson(new Map(validatedGiftOverrides)),
         comment: commentTrim,
         request_type_ref: requestTypeRefTrim,
+        is_consignment: isConsignmentOrder,
+        consignment_due_date: isConsignmentOrder ? consignmentDueDate : null,
+        payment_method_ref:
+          orderType === "order"
+            ? (input.payment_method_ref ?? "").trim().slice(0, 64) || null
+            : null,
         items: {
           create: [
             ...paidAfterDisc.map((l) => ({
@@ -854,6 +954,7 @@ export async function createOrder(
 
   emitOrderUpdated(tenantId, order.id);
   void invalidateDashboard(tenantId);
+  void invalidateStock(tenantId, input.warehouse_id);
   const detail = await enrichOrderDetailRow(tenantId, order as unknown as OrderDetailLoaded, viewerRole);
 
   // Finance — post-commit hisoblash (yangi zakaz kiritilgan joriy holatni qaytarish)
@@ -950,6 +1051,28 @@ export async function updateOrderLines(
   const warehouseId =
     input.warehouse_id !== undefined ? input.warehouse_id : existing.warehouse_id;
   const agentId = input.agent_id !== undefined ? input.agent_id : existing.agent_id;
+
+  const existingOrderType = normalizeOrderType(existing.order_type ?? "order");
+  const existingPm =
+    (existing as { payment_method_ref?: string | null }).payment_method_ref?.trim() || null;
+  const mergedPaymentMethodRef =
+    input.payment_method_ref !== undefined
+      ? input.payment_method_ref === null
+        ? null
+        : input.payment_method_ref.trim().slice(0, 64) || null
+      : existingPm;
+
+  if (existingOrderType === "order") {
+    if (warehouseId == null || warehouseId < 1) {
+      throw new Error("ORDER_REQUIRES_WAREHOUSE");
+    }
+    if (agentId == null || agentId < 1) {
+      throw new Error("ORDER_REQUIRES_AGENT");
+    }
+    if (!mergedPaymentMethodRef) {
+      throw new Error("ORDER_REQUIRES_PAYMENT_METHOD");
+    }
+  }
 
   if (warehouseId != null) {
     const wh = await prisma.warehouse.findFirst({
@@ -1126,6 +1249,9 @@ export async function updateOrderLines(
       data: {
         warehouse_id: warehouseId,
         agent_id: agentId,
+        ...(input.payment_method_ref !== undefined
+          ? { payment_method_ref: mergedPaymentMethodRef }
+          : {}),
         total_sum: paidTotal,
         bonus_sum: bonusSum,
         discount_sum: discountSum,
@@ -1183,6 +1309,12 @@ export async function updateOrderLines(
   });
 
   emitOrderUpdated(tenantId, orderId);
+  if (warehouseId != null) {
+    void invalidateStock(tenantId, warehouseId);
+  }
+  if (existing.warehouse_id != null && existing.warehouse_id !== warehouseId) {
+    void invalidateStock(tenantId, existing.warehouse_id);
+  }
   return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
 }
 
@@ -1201,7 +1333,8 @@ export async function updateOrderMeta(
   const patchAg = input.agent_id !== undefined;
   const patchEx = input.expeditor_user_id !== undefined;
   const patchComment = input.comment !== undefined;
-  if (!patchWh && !patchAg && !patchEx && !patchComment) {
+  const patchPm = input.payment_method_ref !== undefined;
+  if (!patchWh && !patchAg && !patchEx && !patchComment && !patchPm) {
     throw new Error("EMPTY_META_PATCH");
   }
 
@@ -1227,7 +1360,52 @@ export async function updateOrderMeta(
     throw new Error("NOT_FOUND");
   }
 
-  const commentOnly = patchComment && !patchWh && !patchAg && !patchEx;
+  const commentOnly = patchComment && !patchWh && !patchAg && !patchEx && !patchPm;
+  const paymentMethodOnly = patchPm && !patchWh && !patchAg && !patchEx && !patchComment;
+
+  if (paymentMethodOnly) {
+    if (existing.status === "cancelled") {
+      throw new Error("ORDER_NOT_EDITABLE");
+    }
+    if (!ORDER_LINES_EDITABLE_STATUSES.has(existing.status)) {
+      throw new Error("ORDER_NOT_EDITABLE");
+    }
+    const ot = normalizeOrderType(existing.order_type ?? "order");
+    const pmNext =
+      input.payment_method_ref === null
+        ? null
+        : (input.payment_method_ref ?? "").trim().slice(0, 64) || null;
+    if (ot === "order" && !pmNext) {
+      throw new Error("ORDER_REQUIRES_PAYMENT_METHOD");
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { payment_method_ref: pmNext }
+      });
+      await tx.orderChangeLog.create({
+        data: {
+          order_id: orderId,
+          user_id:
+            actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null,
+          action: "meta",
+          payload: {
+            payment_method_ref: {
+              from: (existing as { payment_method_ref?: string | null }).payment_method_ref ?? null,
+              to: pmNext
+            }
+          } as Prisma.InputJsonObject
+        }
+      });
+      return tx.order.findFirstOrThrow({
+        where: { id: orderId, tenant_id: tenantId },
+        include: orderDetailInclude
+      });
+    });
+    emitOrderUpdated(tenantId, orderId);
+    return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
+  }
+
   if (commentOnly) {
     if (existing.status === "cancelled") {
       throw new Error("ORDER_NOT_EDITABLE");
@@ -1250,6 +1428,27 @@ export async function updateOrderMeta(
   const nextAgentId = patchAg ? input.agent_id! : existing.agent_id;
   const whChanged = nextWarehouseId !== existing.warehouse_id;
   const agChanged = nextAgentId !== existing.agent_id;
+
+  const existingOtMeta = normalizeOrderType(existing.order_type ?? "order");
+  const nextPaymentMethodRef = patchPm
+    ? input.payment_method_ref === null
+      ? null
+      : (input.payment_method_ref ?? "").trim().slice(0, 64) || null
+    : ((existing as { payment_method_ref?: string | null }).payment_method_ref ?? null);
+  const pmChanged =
+    patchPm && String(nextPaymentMethodRef ?? "") !== String((existing as { payment_method_ref?: string | null }).payment_method_ref ?? "");
+
+  if (existingOtMeta === "order") {
+    if (nextWarehouseId == null || nextWarehouseId < 1) {
+      throw new Error("ORDER_REQUIRES_WAREHOUSE");
+    }
+    if (nextAgentId == null || nextAgentId < 1) {
+      throw new Error("ORDER_REQUIRES_AGENT");
+    }
+    if (!nextPaymentMethodRef || !String(nextPaymentMethodRef).trim()) {
+      throw new Error("ORDER_REQUIRES_PAYMENT_METHOD");
+    }
+  }
 
   let commentNext: string | null | undefined;
   if (patchComment) {
@@ -1320,7 +1519,7 @@ export async function updateOrderMeta(
     }
 
     const exChanged = expeditorResolved !== existing.expeditor_user_id;
-    if (!whChanged && !agChanged && !exChanged && !commentChanged) {
+    if (!whChanged && !agChanged && !exChanged && !commentChanged && !pmChanged) {
       return tx.order.findFirstOrThrow({
         where: { id: orderId, tenant_id: tenantId },
         include: orderDetailInclude
@@ -1347,6 +1546,14 @@ export async function updateOrderMeta(
               to: commentNext ?? null
             }
           }
+        : {}),
+      ...(pmChanged
+        ? {
+            payment_method_ref: {
+              from: (existing as { payment_method_ref?: string | null }).payment_method_ref ?? null,
+              to: nextPaymentMethodRef
+            }
+          }
         : {})
     } as Prisma.InputJsonObject;
 
@@ -1356,7 +1563,8 @@ export async function updateOrderMeta(
         warehouse_id: nextWarehouseId,
         agent_id: nextAgentId,
         expeditor_user_id: expeditorResolved,
-        ...(commentNext !== undefined ? { comment: commentNext } : {})
+        ...(commentNext !== undefined ? { comment: commentNext } : {}),
+        ...(patchPm ? { payment_method_ref: nextPaymentMethodRef } : {})
       }
     });
 
@@ -1378,6 +1586,14 @@ export async function updateOrderMeta(
   });
 
   emitOrderUpdated(tenantId, orderId);
+  if (whChanged) {
+    if (existing.warehouse_id != null) {
+      void invalidateStock(tenantId, existing.warehouse_id);
+    }
+    if (nextWarehouseId != null) {
+      void invalidateStock(tenantId, nextWarehouseId);
+    }
+  }
   return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, viewerRole);
 }
 
@@ -1529,7 +1745,7 @@ export async function updateOrderStatus(
   });
 
   emitOrderUpdated(tenantId, orderId);
-  void notifyOrderParticipantsStatusChange({
+  void enqueueOrderStatusNotifyJob({
     tenant_id: tenantId,
     order_id: orderId,
     order_number: o.number,
@@ -1540,6 +1756,9 @@ export async function updateOrderStatus(
     agent_id: o.agent_id,
     expeditor_user_id: o.expeditor_user_id
   });
+  if (o.warehouse_id != null) {
+    void invalidateStock(tenantId, o.warehouse_id);
+  }
   return enrichOrderDetailRow(tenantId, updated as unknown as OrderDetailLoaded, actorRole);
 }
 
@@ -1618,6 +1837,10 @@ export type ListOrdersQuery = {
   search?: string;
   warehouse_id?: number;
   agent_id?: number;
+  /** Bir nechta agent (klient profili); `agent_id` bilan bir vaqtda — bu ustun. */
+  agent_ids?: number[];
+  /** Zakazda agent yo‘q (agent_id IS NULL) */
+  include_no_agent?: boolean;
   expeditor_user_id?: number;
   /** Mijoz `category` maydoni bilan to‘liq mos (trim) */
   client_category?: string;
@@ -1628,6 +1851,12 @@ export type ListOrdersQuery = {
   date_to?: string;
   /** Hujjat tipi bo’yicha filter */
   order_type?: string;
+  /** Konsignatsiya zakazlari */
+  is_consignment?: boolean;
+  /** product.category_id — zakazda shu kategoriyadan mahsulot qatori bo‘lsa */
+  product_category_id?: number;
+  /** Shu payment_type bo‘lgan to‘lovi bor zakazlar */
+  payment_type?: string;
 };
 
 function parseListOrderLocalDayStart(isoDate: string): Date | null {
@@ -1668,7 +1897,25 @@ export async function listOrdersPaged(
   if (q.warehouse_id != null && Number.isFinite(q.warehouse_id) && q.warehouse_id > 0) {
     andClauses.push({ warehouse_id: q.warehouse_id });
   }
-  if (q.agent_id != null && Number.isFinite(q.agent_id) && q.agent_id > 0) {
+  const multiAgent =
+    Array.isArray(q.agent_ids) && q.agent_ids.length > 0
+      ? q.agent_ids.filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+  const hasMultiAgent = multiAgent.length > 0 || q.include_no_agent === true;
+  if (hasMultiAgent) {
+    const ors: Prisma.OrderWhereInput[] = [];
+    if (multiAgent.length > 0) {
+      ors.push({ agent_id: { in: multiAgent } });
+    }
+    if (q.include_no_agent === true) {
+      ors.push({ agent_id: null });
+    }
+    if (ors.length === 1) {
+      andClauses.push(ors[0]!);
+    } else if (ors.length > 1) {
+      andClauses.push({ OR: ors });
+    }
+  } else if (q.agent_id != null && Number.isFinite(q.agent_id) && q.agent_id > 0) {
     andClauses.push({ agent_id: q.agent_id });
   }
   if (q.expeditor_user_id != null && Number.isFinite(q.expeditor_user_id) && q.expeditor_user_id > 0) {
@@ -1683,6 +1930,25 @@ export async function listOrdersPaged(
   }
   if (q.order_type?.trim()) {
     andClauses.push({ order_type: q.order_type.trim() });
+  }
+  if (q.is_consignment === true) {
+    andClauses.push({ is_consignment: true });
+  } else if (q.is_consignment === false) {
+    andClauses.push({ is_consignment: false });
+  }
+  if (q.product_category_id != null && Number.isFinite(q.product_category_id) && q.product_category_id > 0) {
+    andClauses.push({
+      items: {
+        some: {
+          is_bonus: false,
+          product: { tenant_id: tenantId, category_id: q.product_category_id }
+        }
+      }
+    });
+  }
+  const payT = q.payment_type?.trim();
+  if (payT) {
+    andClauses.push({ payments: { some: { payment_type: payT } } });
   }
 
   const fromD = q.date_from?.trim() ? parseListOrderLocalDayStart(q.date_from.trim()) : null;
@@ -1758,6 +2024,7 @@ export async function listOrdersPaged(
       city: o.client.city ?? o.client.district ?? null,
       zone: o.client.neighborhood ?? null,
       consignment: o.agent?.consignment ?? null,
+      is_consignment: o.is_consignment ?? false,
       day: null,
       created_by: null,
       created_by_role: null,

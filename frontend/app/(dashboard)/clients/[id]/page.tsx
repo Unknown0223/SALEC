@@ -1,10 +1,7 @@
 "use client";
 
-import { ClientDetailView } from "@/components/clients/client-detail-view";
-import { PageHeader } from "@/components/dashboard/page-header";
+import { ClientProfileHub } from "@/components/clients/client-profile-hub";
 import { PageShell } from "@/components/dashboard/page-shell";
-import { buttonVariants } from "@/components/ui/button-variants";
-import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -21,30 +18,6 @@ export default function ClientDetailPage() {
 
   return (
     <PageShell className="pb-12">
-      <Link
-        href="/clients"
-        className={cn(
-          buttonVariants({ variant: "ghost", size: "sm" }),
-          "h-8 w-fit -ml-2 text-muted-foreground"
-        )}
-      >
-        ← Klientlar ro‘yxati
-      </Link>
-      <PageHeader
-        title="Klient kartochkasi"
-        description={!invalid ? `id #${clientId}` : undefined}
-        actions={
-          <>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/dashboard">
-              Панель управления
-            </Link>
-            <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/orders">
-              Zakazlar
-            </Link>
-          </>
-        }
-      />
-
       {!hydrated ? (
         <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
       ) : !tenantSlug ? (
@@ -54,9 +27,9 @@ export default function ClientDetailPage() {
           </Link>
         </p>
       ) : invalid ? (
-        <p className="text-sm text-destructive">Klient identifikatori noto‘g‘ri.</p>
+        <p className="text-sm text-destructive">Некорректный идентификатор клиента.</p>
       ) : (
-        <ClientDetailView tenantSlug={tenantSlug} clientId={clientId} />
+        <ClientProfileHub tenantSlug={tenantSlug} clientId={clientId} />
       )}
     </PageShell>
   );

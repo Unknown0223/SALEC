@@ -1,5 +1,28 @@
 # Docker Postgres ma’lumoti (infrastructure/docker-compose bind mount)
 SALES/postgres-data/
+**/postgres-data/
+
+# Next.js (ildiz yoki boshqa joyda build bo‘lsa)
+**/.next/
+out/
+
+# Test / coverage
+coverage/
+**/coverage/
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+blob-report/
+**/blob-report/
+
+# Postgres / lokal PID
+**/postmaster.pid
+*.pid
+
+# OS
+Thumbs.db
+Desktop.ini
 
 .git copy/
 

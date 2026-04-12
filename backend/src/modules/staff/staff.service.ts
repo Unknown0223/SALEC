@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
 import { createCashDeskUserLink } from "../cash-desks/cash-desks.service";
 import { listActiveTradeDirectionLabels } from "../sales-directions/sales-directions.service";
@@ -38,6 +38,9 @@ export type StaffRow = {
   code: string | null;
   pinfl: string | null;
   consignment: boolean;
+  consignment_limit_amount: string | null;
+  consignment_ignore_previous_months_debt: boolean;
+  consignment_updated_at: string | null;
   apk_version: string | null;
   device_name: string | null;
   last_sync_at: string | null;
@@ -89,6 +92,8 @@ export type CreateStaffInput = {
   code?: string | null;
   pinfl?: string | null;
   consignment?: boolean;
+  consignment_limit_amount?: string | null;
+  consignment_ignore_previous_months_debt?: boolean;
   apk_version?: string | null;
   device_name?: string | null;
   can_authorize?: boolean;
@@ -678,6 +683,9 @@ export async function listStaff(
     code: u.code,
     pinfl: u.pinfl,
     consignment: u.consignment,
+    consignment_limit_amount: u.consignment_limit_amount?.toString() ?? null,
+    consignment_ignore_previous_months_debt: u.consignment_ignore_previous_months_debt ?? false,
+    consignment_updated_at: u.consignment_updated_at?.toISOString() ?? null,
     apk_version: u.apk_version,
     device_name: u.device_name,
     last_sync_at: u.last_sync_at ? u.last_sync_at.toISOString() : null,
@@ -899,6 +907,18 @@ export async function createStaff(
       code: input.code?.trim() || null,
       pinfl: input.pinfl?.trim() || null,
       consignment: input.consignment ?? false,
+      consignment_limit_amount:
+        input.consignment_limit_amount != null && String(input.consignment_limit_amount).trim() !== ""
+          ? new Prisma.Decimal(input.consignment_limit_amount)
+          : null,
+      consignment_ignore_previous_months_debt: input.consignment_ignore_previous_months_debt ?? false,
+      consignment_updated_at: (() => {
+        const lim =
+          input.consignment_limit_amount != null && String(input.consignment_limit_amount).trim() !== "";
+        const ign = input.consignment_ignore_previous_months_debt === true;
+        const on = input.consignment === true;
+        return lim || ign || on ? new Date() : null;
+      })(),
       apk_version: input.apk_version?.trim() || null,
       device_name: input.device_name?.trim() || null,
       can_authorize: input.can_authorize ?? true,
@@ -961,6 +981,8 @@ export type PatchAgentInput = {
   code?: string | null;
   pinfl?: string | null;
   consignment?: boolean;
+  consignment_limit_amount?: string | null;
+  consignment_ignore_previous_months_debt?: boolean;
   apk_version?: string | null;
   device_name?: string | null;
   can_authorize?: boolean;
@@ -1032,7 +1054,40 @@ export async function patchAgent(
   if (input.agent_type !== undefined) data.agent_type = input.agent_type?.trim() || null;
   if (input.code !== undefined) data.code = input.code?.trim() || null;
   if (input.pinfl !== undefined) data.pinfl = input.pinfl?.trim() || null;
-  if (input.consignment !== undefined) data.consignment = input.consignment;
+  let touchConsignmentSettings = false;
+  if (input.consignment !== undefined) {
+    data.consignment = input.consignment;
+    touchConsignmentSettings = true;
+  }
+  if (input.consignment_limit_amount !== undefined) {
+    if (input.consignment_limit_amount == null || String(input.consignment_limit_amount).trim() === "") {
+      data.consignment_limit_amount = null;
+    } else {
+      const d = new Prisma.Decimal(input.consignment_limit_amount);
+      if (d.lt(0)) throw new Error("BAD_LIMIT");
+      data.consignment_limit_amount = d;
+    }
+    touchConsignmentSettings = true;
+  }
+  if (input.consignment_ignore_previous_months_debt !== undefined) {
+    data.consignment_ignore_previous_months_debt = input.consignment_ignore_previous_months_debt;
+    touchConsignmentSettings = true;
+  }
+  if (touchConsignmentSettings) {
+    let effectiveLimit: Prisma.Decimal | null = existing.consignment_limit_amount;
+    if (input.consignment_limit_amount !== undefined) {
+      if (input.consignment_limit_amount == null || String(input.consignment_limit_amount).trim() === "") {
+        effectiveLimit = null;
+      } else {
+        effectiveLimit = data.consignment_limit_amount as Prisma.Decimal;
+      }
+    }
+    /** «Без долгов прошлых месяцев» действует только при установленном лимите */
+    if (effectiveLimit == null) {
+      data.consignment_ignore_previous_months_debt = false;
+    }
+    data.consignment_updated_at = new Date();
+  }
   if (input.apk_version !== undefined) data.apk_version = input.apk_version?.trim() || null;
   if (input.device_name !== undefined) data.device_name = input.device_name?.trim() || null;
   if (input.can_authorize !== undefined) data.can_authorize = input.can_authorize;

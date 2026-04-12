@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumberGrouped } from "@/lib/format-numbers";
@@ -27,6 +27,11 @@ type PaymentDetailRow = {
   created_at: string;
   created_by_user_id: number | null;
   created_by_name: string | null;
+  workflow_status?: string;
+  deleted_at?: string | null;
+  deleted_by_user_id?: number | null;
+  deleted_by_name?: string | null;
+  delete_reason_ref?: string | null;
 };
 
 type AllocationRow = {
@@ -46,7 +51,6 @@ type DetailPayload = {
 };
 
 export default function PaymentDetailPage() {
-  const router = useRouter();
   const params = useParams();
   const raw = params.id;
   const idStr = Array.isArray(raw) ? raw[0] : raw;
@@ -96,11 +100,23 @@ export default function PaymentDetailPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
       void qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
-      router.replace("/payments");
+      void qc.invalidateQueries({ queryKey: ["payment-detail", tenantSlug, paymentId] });
+    }
+  });
+
+  const restoreMut = useMutation({
+    mutationFn: async () => {
+      await api.post(`/api/${tenantSlug}/payments/${paymentId}/restore`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["payments", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["dashboard-stats", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["payment-detail", tenantSlug, paymentId] });
     }
   });
 
   const p = detailQ.data?.payment;
+  const isVoided = Boolean(p?.deleted_at);
   const data = detailQ.data;
 
   return (
@@ -136,14 +152,16 @@ export default function PaymentDetailPage() {
             description={`${p.payment_type} · ${new Date(p.created_at).toLocaleString("ru-RU")}`}
             actions={
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                  onClick={() => setAllocateOpen(true)}
-                >
-                  Распределить по заказам
-                </button>
-                {canDelete ? (
+                {!isVoided ? (
+                  <button
+                    type="button"
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    onClick={() => setAllocateOpen(true)}
+                  >
+                    Распределить по заказам
+                  </button>
+                ) : null}
+                {canDelete && !isVoided ? (
                   <>
                     {cancelReasonOptions.length > 0 ? (
                       <select
@@ -168,23 +186,56 @@ export default function PaymentDetailPage() {
                       onClick={() => {
                         if (
                           confirm(
-                            `Удалить платёж #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })})? Баланс и распределения будут скорректированы.`
+                            `Отменить платёж #${p.id} (${formatNumberGrouped(p.amount, { maxFractionDigits: 2 })})? Запись останется в архиве; баланс и распределения будут скорректированы.`
                           )
                         ) {
                           deleteMut.mutate();
                         }
                       }}
                     >
-                      Удалить
+                      В архив (отмена)
                     </button>
                   </>
+                ) : null}
+                {canDelete && isVoided ? (
+                  <button
+                    type="button"
+                    className={cn(buttonVariants({ variant: "default", size: "sm" }), "bg-emerald-600 hover:bg-emerald-700")}
+                    disabled={restoreMut.isPending}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `Восстановить платёж #${p.id}? Сумма снова учтётся на балансе; при необходимости заново распределите по заказам.`
+                        )
+                      ) {
+                        restoreMut.mutate();
+                      }
+                    }}
+                  >
+                    Восстановить
+                  </button>
                 ) : null}
               </div>
             }
           />
 
+          {isVoided ? (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+              <p className="font-medium text-amber-900 dark:text-amber-100">Платёж в архиве (отменён)</p>
+              <p className="mt-1 text-muted-foreground">
+                Дата отмены:{" "}
+                {p.deleted_at ? new Date(p.deleted_at).toLocaleString("ru-RU") : "—"}
+                {p.deleted_by_name ? ` · Кто: ${p.deleted_by_name}` : ""}
+                {p.delete_reason_ref ? ` · Причина: ${p.delete_reason_ref}` : ""}
+              </p>
+            </div>
+          ) : null}
+
           {deleteMut.isError ? (
-            <p className="mb-4 text-sm text-destructive">Не удалось удалить.</p>
+            <p className="mb-4 text-sm text-destructive">Не удалось отменить платёж.</p>
+          ) : null}
+          {restoreMut.isError ? (
+            <p className="mb-4 text-sm text-destructive">Не удалось восстановить платёж.</p>
           ) : null}
 
           <div className="mb-6 grid gap-4 rounded-lg border p-4 sm:grid-cols-2">

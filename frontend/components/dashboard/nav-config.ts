@@ -101,6 +101,7 @@ export const dashboardUsersNav: { sectionTitle: string; items: NavItem[] } = {
   sectionTitle: "Пользователи",
   items: [
     { href: "/settings/spravochnik/agents", label: "Агент" },
+    { href: "/settings/spravochnik/consignment", label: "Консигнация" },
     { href: "/settings/spravochnik/expeditors", label: "Экспедиторы" },
     { href: "/settings/spravochnik/supervisors", label: "Супервайзер" },
     { href: "/settings/spravochnik/operators", label: "Веб-сотрудники", roles: ["admin"] }

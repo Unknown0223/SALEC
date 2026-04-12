@@ -8,23 +8,23 @@ function cell(v: string): string {
 
 const COLS: { h: string; v: (r: ClientRow) => string }[] = [
   { h: "ID", v: (r) => String(r.id) },
-  { h: "Nomi", v: (r) => r.name ?? "" },
-  { h: "Firma", v: (r) => r.legal_name ?? "" },
-  { h: "Telefon", v: (r) => r.phone ?? "" },
-  { h: "INN", v: (r) => r.inn ?? "" },
-  { h: "Viloyat", v: (r) => r.region ?? "" },
-  { h: "Tuman", v: (r) => r.district ?? "" },
-  { h: "Zona", v: (r) => r.zone ?? "" },
-  { h: "Toifa", v: (r) => r.category ?? "" },
-  { h: "Tur", v: (r) => r.client_type_code ?? "" },
-  { h: "Format", v: (r) => r.client_format ?? "" },
-  { h: "Savdo kanali", v: (r) => r.sales_channel ?? "" },
-  { h: "Faol", v: (r) => (r.is_active ? "ha" : "yo‘q") },
-  { h: "Yaratilgan", v: (r) => (r.created_at ? r.created_at.slice(0, 10) : "") }
+  { h: "Название", v: (r) => r.name ?? "" },
+  { h: "Фирма", v: (r) => r.legal_name ?? "" },
+  { h: "Телефон", v: (r) => r.phone ?? "" },
+  { h: "ИНН", v: (r) => r.inn ?? "" },
+  { h: "Область", v: (r) => r.region ?? "" },
+  { h: "Район", v: (r) => r.district ?? "" },
+  { h: "Зона", v: (r) => r.zone ?? "" },
+  { h: "Категория", v: (r) => r.category ?? "" },
+  { h: "Тип", v: (r) => r.client_type_code ?? "" },
+  { h: "Формат", v: (r) => r.client_format ?? "" },
+  { h: "Канал продаж", v: (r) => r.sales_channel ?? "" },
+  { h: "Активный", v: (r) => (r.is_active ? "да" : "нет") },
+  { h: "Создан", v: (r) => (r.created_at ? r.created_at.slice(0, 10) : "") }
 ];
 
-/** Joriy sahifa qatorlari — Excel uchun `;` ajratuvchi, UTF-8 BOM. */
-export function downloadClientsCsvPage(rows: ClientRow[], filename = "mijozlar_sahifa.csv"): void {
+/** Строки текущей страницы — разделитель `;` для Excel, UTF-8 BOM. */
+export function downloadClientsCsvPage(rows: ClientRow[], filename = "clients_page.csv"): void {
   if (rows.length === 0) return;
   const sep = ";";
   const head = COLS.map((c) => cell(c.h)).join(sep);

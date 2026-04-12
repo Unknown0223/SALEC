@@ -86,7 +86,7 @@ export function ClientImportMappingDialog({
           const buf = reader.result as ArrayBuffer;
           const wb = XLSX.read(buf, { type: "array", cellDates: true, sheetRows: 120 });
           if (!wb.SheetNames.length) {
-            setParseError("Faylda varaq yo‘q.");
+            setParseError("В файле нет листов.");
             setWorkbook(null);
             return;
           }
@@ -94,13 +94,13 @@ export function ClientImportMappingDialog({
           setSheetName(wb.SheetNames[0] ?? "");
           setHeaderRowOneBased(1);
         } catch {
-          setParseError("Excel faylini o‘qib bo‘lmadi.");
+          setParseError("Не удалось прочитать файл Excel.");
           setWorkbook(null);
         }
       })();
     };
     reader.onerror = () => {
-      setParseError("Fayl o‘qilmadi.");
+      setParseError("Файл не прочитан.");
       setWorkbook(null);
     };
     reader.readAsArrayBuffer(file);
@@ -160,7 +160,7 @@ export function ClientImportMappingDialog({
       if (Number.isFinite(n) && n >= 0) columnMap[key] = n;
     }
     if (columnMap.name === undefined) {
-      setLocalErr("«Наименование» (name) ustunini tanlang — majburiy.");
+      setLocalErr("Укажите столбец «Наименование» (name) — обязательно.");
       return;
     }
     onConfirm({
@@ -178,14 +178,14 @@ export function ClientImportMappingDialog({
       >
         <div className="border-b border-border/80 p-4">
           <DialogHeader>
-            <DialogTitle>Excel import — ustunlarni moslash</DialogTitle>
+            <DialogTitle>Импорт Excel — сопоставление столбцов</DialogTitle>
             <DialogDescription>
               {file ? (
                 <span className="break-all">
-                  Fayl: <strong>{file.name}</strong> — har bir tizim maydoni uchun fayldagi ustunni tanlang.
+                  Файл: <strong>{file.name}</strong> — для каждого поля системы выберите столбец в файле.
                 </span>
               ) : (
-                "Fayl tanlanmagan."
+                "Файл не выбран."
               )}
             </DialogDescription>
           </DialogHeader>
@@ -195,12 +195,12 @@ export function ClientImportMappingDialog({
           {parseError ? (
             <p className="text-sm text-destructive">{parseError}</p>
           ) : !workbook ? (
-            <p className="text-muted-foreground text-sm">Fayl o‘qilmoqda…</p>
+            <p className="text-muted-foreground text-sm">Чтение файла…</p>
           ) : (
             <div className="space-y-4">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[10rem] flex-1 space-y-1.5">
-                  <Label htmlFor="import-sheet">Varaq</Label>
+                  <Label htmlFor="import-sheet">Лист</Label>
                   <select
                     id="import-sheet"
                     className={selectClass}
@@ -216,7 +216,7 @@ export function ClientImportMappingDialog({
                   </select>
                 </div>
                 <div className="w-36 space-y-1.5">
-                  <Label htmlFor="import-header-row">Sarlavha qatori (Excel)</Label>
+                  <Label htmlFor="import-header-row">Строка заголовков (Excel)</Label>
                   <input
                     id="import-header-row"
                     type="number"
@@ -238,13 +238,13 @@ export function ClientImportMappingDialog({
                   disabled={isSubmitting || matrix.length === 0}
                   onClick={() => applyAutoMap()}
                 >
-                  Avtomatik moslash
+                  Автосопоставление
                 </Button>
               </div>
 
               {headerRowIdx >= matrix.length ? (
                 <p className="text-sm text-amber-700 dark:text-amber-400">
-                  Sarlavha qatori jadvaldan tashqari. Raqamni {1}…{Math.max(1, matrix.length)} orasida kiriting.
+                  Строка заголовков вне таблицы. Введите номер от {1} до {Math.max(1, matrix.length)}.
                 </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:gap-x-4">
@@ -264,7 +264,7 @@ export function ClientImportMappingDialog({
                           }))
                         }
                       >
-                        <option value="">— tanlanmagan —</option>
+                        <option value="">— не выбрано —</option>
                         {fileColumnLabels.map((colLabel, idx) => (
                           <option key={`${key}-${idx}`} value={String(idx)}>
                             {idx + 1}. {colLabel}
@@ -288,7 +288,7 @@ export function ClientImportMappingDialog({
               disabled={isSubmitting}
               onClick={() => onOpenChange(false)}
             >
-              Bekor qilish
+              Отмена
             </Button>
             <Button
               type="button"
@@ -297,7 +297,7 @@ export function ClientImportMappingDialog({
               }
               onClick={() => handleConfirm()}
             >
-              {isSubmitting ? "Import…" : "Importni boshlash"}
+              {isSubmitting ? "Импорт…" : "Начать импорт"}
             </Button>
           </div>
         </DialogFooter>

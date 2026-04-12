@@ -8,6 +8,7 @@ export type PaymentListApiRow = {
   client_balance: string;
   order_id: number | null;
   order_number: string | null;
+  cash_desk_id?: number | null;
   amount: string;
   payment_type: string;
   note: string | null;
@@ -31,6 +32,11 @@ export type PaymentListApiRow = {
   client_region?: string | null;
   client_city?: string | null;
   client_district?: string | null;
+  /** Yumshoq bekor (arxiv) */
+  deleted_at?: string | null;
+  deleted_by_user_id?: number | null;
+  deleted_by_name?: string | null;
+  delete_reason_ref?: string | null;
 };
 
 export type PaymentListApiResponse = {

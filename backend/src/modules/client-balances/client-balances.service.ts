@@ -267,6 +267,7 @@ async function loadPaymentNetNormByClient(
       FROM client_payments p
       WHERE p.tenant_id = ${tenantId}
         AND p.client_id IN (${Prisma.join(chunk)})
+        AND p.deleted_at IS NULL
         ${dateClause}
       GROUP BY p.client_id, p.payment_type
     `;
@@ -337,6 +338,7 @@ async function loadPaymentNetTotalsByTypeGlobally(
       FROM client_payments p
       WHERE p.tenant_id = ${tenantId}
         AND p.client_id IN (${Prisma.join(chunk)})
+        AND p.deleted_at IS NULL
         ${dateClause}
       GROUP BY p.payment_type
     `;
@@ -420,6 +422,7 @@ async function loadLastPaymentByClient(
       FROM client_payments
       WHERE tenant_id = ${tenantId}
         AND entry_kind = 'payment'
+        AND deleted_at IS NULL
         AND client_id IN (${Prisma.join(chunk)})
         ${dateClause}
       GROUP BY client_id

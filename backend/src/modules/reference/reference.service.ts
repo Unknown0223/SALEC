@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { getRedisForApp } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import {
   priceTypeEntriesFromUnknown,
@@ -535,7 +536,9 @@ export async function listProductCategoriesForTenant(tenantId: number): Promise<
   });
 }
 
-export async function listDistinctPriceTypesForTenant(
+const PRICE_TYPES_CACHE_TTL_SEC = 45;
+
+async function computeDistinctPriceTypesForTenant(
   tenantId: number,
   kind?: "sale" | "purchase"
 ): Promise<string[]> {
@@ -551,6 +554,31 @@ export async function listDistinctPriceTypesForTenant(
   const filtered = kind ? entries.filter((e) => e.kind === kind) : entries;
   const fromCatalog = filtered.map((e) => priceTypeKey(e));
   return uniqueSortedPriceTypeKeys([...fromDb, ...fromCatalog]);
+}
+
+export async function listDistinctPriceTypesForTenant(
+  tenantId: number,
+  kind?: "sale" | "purchase"
+): Promise<string[]> {
+  const suffix = kind === "sale" ? "sale" : kind === "purchase" ? "purchase" : "all";
+  const cacheKey = `tenant:${tenantId}:price_types:${suffix}`;
+  try {
+    const redis = await getRedisForApp();
+    const hit = await redis.get(cacheKey);
+    if (hit) {
+      return JSON.parse(hit) as string[];
+    }
+  } catch {
+    /* Redis yo‘q yoki xato — hisoblash */
+  }
+  const out = await computeDistinctPriceTypesForTenant(tenantId, kind);
+  try {
+    const redis = await getRedisForApp();
+    await redis.set(cacheKey, JSON.stringify(out), "EX", PRICE_TYPES_CACHE_TTL_SEC);
+  } catch {
+    /* ignore */
+  }
+  return out;
 }
 
 export type FinancePriceOverviewRow = {

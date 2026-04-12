@@ -1185,3 +1185,55 @@ export async function importProductsFromXlsx(
 
   return { created, updated, errors };
 }
+
+/** Yangi zakaz formasi: faol mahsulotlar + narxlar (API `include_prices` bilan bir xil JSON). */
+export async function listProductsForOrderCreateForm(tenantId: number) {
+  const limitNum = 100;
+  const rows = await prisma.product.findMany({
+    where: { tenant_id: tenantId, is_active: true },
+    take: limitNum,
+    orderBy: [{ sort_order: "asc" }, { name: "asc" }, { id: "asc" }],
+    include: {
+      ...productListInclude,
+      prices: { select: { id: true, price_type: true, price: true, currency: true } }
+    }
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    sku: r.sku,
+    name: r.name,
+    unit: r.unit,
+    barcode: r.barcode,
+    is_active: r.is_active,
+    category_id: r.category_id,
+    product_group_id: r.product_group_id,
+    brand_id: r.brand_id,
+    manufacturer_id: r.manufacturer_id,
+    segment_id: r.segment_id,
+    weight_kg: r.weight_kg != null ? r.weight_kg.toString() : null,
+    volume_m3: r.volume_m3 != null ? r.volume_m3.toString() : null,
+    qty_per_block: r.qty_per_block,
+    dimension_unit: r.dimension_unit,
+    width_cm: r.width_cm != null ? r.width_cm.toString() : null,
+    height_cm: r.height_cm != null ? r.height_cm.toString() : null,
+    length_cm: r.length_cm != null ? r.length_cm.toString() : null,
+    ikpu_code: r.ikpu_code,
+    hs_code: r.hs_code,
+    sell_code: r.sell_code,
+    comment: r.comment,
+    sort_order: r.sort_order,
+    is_blocked: r.is_blocked,
+    created_at: r.created_at.toISOString(),
+    category: r.category ?? null,
+    product_group: r.product_group ?? null,
+    brand: r.brand ?? null,
+    manufacturer: r.manufacturer ?? null,
+    segment: r.segment ?? null,
+    prices: r.prices.map((p) => ({
+      id: p.id,
+      price_type: p.price_type,
+      price: p.price.toString(),
+      currency: p.currency
+    }))
+  }));
+}

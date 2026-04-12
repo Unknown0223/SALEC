@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidatePriceTypesCache } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import {
   bonusPolicyToJson,
@@ -16,7 +17,7 @@ import type {
 import {
   defaultCurrencyCodeFromEntries,
   normalizeCurrencyDefaults,
-  paymentTypesFromMethodEntries,
+  paymentTypeStorageKeysFromMethodEntries,
   priceTypeEntriesFromUnknown,
   resolveCurrencyEntries,
   resolvePaymentMethodEntries
@@ -842,7 +843,10 @@ export async function getTenantProfile(tenantId: number): Promise<TenantProfileD
     logo_url: row.logo_url,
     feature_flags: ff,
     references: {
-      payment_types: stringArrayFromUnknown(ref.payment_types),
+      payment_types:
+        payment_method_entries.length > 0
+          ? paymentTypeStorageKeysFromMethodEntries(payment_method_entries)
+          : stringArrayFromUnknown(ref.payment_types),
       return_reasons: activeValuesFromClientRefEntries(refusal_reason_entries),
       regions:
         territory_nodes.length > 0
@@ -1088,7 +1092,7 @@ export async function patchTenantProfile(
           };
         });
         merged.payment_method_entries = asDto;
-        merged.payment_types = paymentTypesFromMethodEntries(asDto);
+        merged.payment_types = paymentTypeStorageKeysFromMethodEntries(asDto);
       }
       if (patch.references.price_type_entries != null) {
         merged.price_type_entries = patch.references.price_type_entries.map((e) => ({
@@ -1133,6 +1137,9 @@ export async function patchTenantProfile(
         ...(referencesKeys?.length ? { references_keys: referencesKeys } : {})
       }
     });
+    if (patch.references?.price_type_entries != null) {
+      void invalidatePriceTypesCache(tenantId);
+    }
   }
 
   return getTenantProfile(tenantId);

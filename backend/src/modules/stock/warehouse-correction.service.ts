@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidateStock } from "../../lib/redis-cache";
 import { logger } from "../../config/logger";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import { applyStockAdjustmentInTx, type StockAdjustmentInput } from "./stock.service";
@@ -404,6 +405,8 @@ export async function createWarehouseCorrectionBulk(
       price_type: input.price_type ?? null
     }
   });
+
+  void invalidateStock(tenantId, input.warehouse_id);
 
   return { id: docId };
 }

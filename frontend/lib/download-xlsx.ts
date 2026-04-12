@@ -37,3 +37,31 @@ export async function downloadXlsxSheet(
   const out = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
   XLSX.writeFile(wb, out, { bookType: "xlsx", compression: true });
 }
+
+export type DownloadXlsxSheetSpec = {
+  name: string;
+  headers: string[];
+  rows: (string | number | boolean | null | undefined)[][];
+} & DownloadXlsxOptions;
+
+/**
+ * Bir nechta varaqli .xlsx (masalan «Общий» + «Подробно»).
+ */
+export async function downloadXlsxWorkbook(filename: string, sheets: DownloadXlsxSheetSpec[]): Promise<void> {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+  for (const sh of sheets) {
+    const safeName = sh.name.replace(/[:\\/?*[\]]/g, "_").slice(0, 31) || "Sheet1";
+    const aoa: (string | number | boolean)[][] = [
+      sh.headers.map((h) => normalizeCell(h) as string),
+      ...sh.rows.map((line) => line.map((cell) => normalizeCell(cell)))
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    if (sh.colWidths?.length) {
+      ws["!cols"] = sh.colWidths.map((wch) => ({ wch: Math.min(Math.max(wch, 6), 60) }));
+    }
+    XLSX.utils.book_append_sheet(wb, ws, safeName);
+  }
+  const out = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, out, { bookType: "xlsx", compression: true });
+}

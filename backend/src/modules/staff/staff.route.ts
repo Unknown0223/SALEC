@@ -59,6 +59,8 @@ const createBodySchema = z.object({
   code: z.string().nullable().optional(),
   pinfl: z.string().nullable().optional(),
   consignment: z.boolean().optional(),
+  consignment_limit_amount: z.union([z.string(), z.null()]).optional(),
+  consignment_ignore_previous_months_debt: z.boolean().optional(),
   apk_version: z.string().nullable().optional(),
   device_name: z.string().nullable().optional(),
   can_authorize: z.boolean().optional(),
@@ -89,6 +91,8 @@ const patchStaffMutableBody = z.object({
   code: z.string().nullable().optional(),
   pinfl: z.string().nullable().optional(),
   consignment: z.boolean().optional(),
+  consignment_limit_amount: z.union([z.string(), z.null()]).optional(),
+  consignment_ignore_previous_months_debt: z.boolean().optional(),
   apk_version: z.string().nullable().optional(),
   device_name: z.string().nullable().optional(),
   can_authorize: z.boolean().optional(),
@@ -393,6 +397,7 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
         if (msg === "BAD_PASSWORD") return reply.status(400).send({ error: "BadPassword" });
         if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
+        if (msg === "BAD_LIMIT") return reply.status(400).send({ error: "BadLimit" });
         if (msg === "BAD_ENTITLEMENT_CATEGORY" || msg === "BAD_ENTITLEMENT_PRODUCT") {
           return reply.status(400).send({ error: "BadEntitlements" });
         }

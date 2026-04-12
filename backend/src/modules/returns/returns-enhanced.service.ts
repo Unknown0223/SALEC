@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../../config/database";
 import { emitOrderUpdated } from "../../lib/order-event-bus";
-import { invalidateDashboard } from "../../lib/redis-cache";
+import { invalidateDashboard, invalidateStock } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 import { getProductPrice } from "../products/product-prices.service";
 import { canTransitionOrderStatus, normalizeOrderType } from "../orders/order-status";
@@ -1246,6 +1246,7 @@ export async function createPeriodReturn(
 
   emitOrderUpdated(tenantId, mirrorOrderId);
   void invalidateDashboard(tenantId);
+  void invalidateStock(tenantId, warehouseId);
 
   await autoMarkReturnedOrders(
     tenantId,
@@ -1645,6 +1646,7 @@ export async function createPeriodReturnBatch(
     emitOrderUpdated(tenantId, mid);
   }
   void invalidateDashboard(tenantId);
+  void invalidateStock(tenantId, warehouseId);
 
   await autoMarkReturnedOrders(tenantId, input.client_id, undefined, undefined, uid);
 
@@ -1936,6 +1938,8 @@ export async function createFullReturnFromOrder(
 
     return ret;
   });
+
+  void invalidateStock(tenantId, warehouseId);
 
   await appendTenantAuditEvent({
     tenantId, actorUserId, entityType: AuditEntityType.stock,

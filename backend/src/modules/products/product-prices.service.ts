@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidatePriceTypesCache } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 const DEFAULT_PRICE_TYPE = "retail";
@@ -106,6 +107,7 @@ export async function syncProductPrices(
     }
   });
 
+  void invalidatePriceTypesCache(tenantId);
   return listProductPrices(tenantId, productId);
 }
 
@@ -208,6 +210,7 @@ export async function importProductPricesFromXlsx(
       action: "import.xlsx",
       payload: { upserted, error_count: errors.length }
     });
+    void invalidatePriceTypesCache(tenantId);
   }
 
   return { upserted, errors };
@@ -321,4 +324,5 @@ export async function bulkUpsertPricesForType(
     action: "bulk.matrix",
     payload: { price_type: t, count: items.length }
   });
+  void invalidatePriceTypesCache(tenantId);
 }

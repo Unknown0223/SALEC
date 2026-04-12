@@ -21,4 +21,4 @@ API batafsil ro‘yxati: [API-reference.md](./API-reference.md). Kod: `backend/s
 | 18 Notifications | `notifications/` | `notifications.route.ts` |
 | 19 Settings UI | — | Frontend: `frontend/app/(dashboard)/settings/` |
 
-Qo‘shimcha: `products/`, `clients/`, `auth/`, `users/user-ui.route.ts`.
+Qo‘shimcha: `products/`, `products/product-prices.route.ts` (`/products/prices/import/async`), `clients/`, `auth/`, `users/user-ui.route.ts`, `jobs/` (`jobs.route.ts`).

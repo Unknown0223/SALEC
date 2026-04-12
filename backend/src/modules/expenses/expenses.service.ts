@@ -13,6 +13,8 @@ export type ExpenseListQuery = {
   warehouse_id?: number | null;
   from?: Date | string;
   to?: Date | string;
+  /** true — faqat arxiv (deleted_at bor) */
+  archive?: boolean;
 };
 
 export type ExpenseListRow = {
@@ -33,6 +35,10 @@ export type ExpenseListRow = {
   approved_by_name: string | null;
   rejection_note: string | null;
   created_at: string;
+  deleted_at: string | null;
+  deleted_by_user_id: number | null;
+  deleted_by_name: string | null;
+  delete_reason_ref: string | null;
 };
 
 export type CreateExpenseInput = {
@@ -80,6 +86,7 @@ async function assertTenantAccess(tenantId: number) {
 async function resolveNames(expenses: Array<{
   id: number; agent_id: number | null; warehouse_id: number | null;
   created_by_user_id: number | null; approved_by_user_id: number | null;
+  deleted_by_user_id?: number | null;
 }>) {
   const userIds = new Set<number>();
   const warehouseIds = new Set<number>();
@@ -87,6 +94,7 @@ async function resolveNames(expenses: Array<{
     if (e.agent_id) userIds.add(e.agent_id);
     if (e.created_by_user_id) userIds.add(e.created_by_user_id);
     if (e.approved_by_user_id) userIds.add(e.approved_by_user_id);
+    if (e.deleted_by_user_id) userIds.add(e.deleted_by_user_id);
     if (e.warehouse_id) warehouseIds.add(e.warehouse_id);
   }
 
@@ -101,10 +109,28 @@ async function resolveNames(expenses: Array<{
 }
 
 function enrichExpense(
-  expense: { id: number; expense_type: string; agent_id: number | null; amount: Prisma.Decimal; currency: string; warehouse_id: number | null; status: string; note: string | null; expense_date: Date; created_by_user_id: number | null; approved_by_user_id: number | null; rejection_note: string | null; created_at: Date },
+  expense: {
+    id: number;
+    expense_type: string;
+    agent_id: number | null;
+    amount: Prisma.Decimal;
+    currency: string;
+    warehouse_id: number | null;
+    status: string;
+    note: string | null;
+    expense_date: Date;
+    created_by_user_id: number | null;
+    approved_by_user_id: number | null;
+    rejection_note: string | null;
+    created_at: Date;
+    deleted_at?: Date | null;
+    deleted_by_user_id?: number | null;
+    delete_reason_ref?: string | null;
+  },
   userMap: Map<number, string>,
   whMap: Map<number, string>
 ): ExpenseListRow {
+  const dbid = expense.deleted_by_user_id ?? null;
   return {
     id: expense.id,
     expense_type: expense.expense_type,
@@ -122,7 +148,11 @@ function enrichExpense(
     approved_by_user_id: expense.approved_by_user_id,
     approved_by_name: expense.approved_by_user_id != null ? (userMap.get(expense.approved_by_user_id) ?? null) : null,
     rejection_note: expense.rejection_note,
-    created_at: expense.created_at.toISOString()
+    created_at: expense.created_at.toISOString(),
+    deleted_at: expense.deleted_at ? expense.deleted_at.toISOString() : null,
+    deleted_by_user_id: dbid,
+    deleted_by_name: dbid != null ? (userMap.get(dbid) ?? null) : null,
+    delete_reason_ref: expense.delete_reason_ref?.trim() || null
   };
 }
 
@@ -135,6 +165,12 @@ export async function listExpenses(
   await assertTenantAccess(tenantId);
 
   const where: Prisma.ExpenseWhereInput = { tenant_id: tenantId };
+
+  if (q.archive) {
+    where.deleted_at = { not: null };
+  } else {
+    where.deleted_at = null;
+  }
 
   if (q.status) where.status = q.status;
   if (q.expense_type) where.expense_type = q.expense_type;
@@ -226,8 +262,12 @@ export async function createExpense(
   });
 
   const { userMap, whMap } = await resolveNames([{
-    id: expense.id, agent_id: expense.agent_id, warehouse_id: expense.warehouse_id,
-    created_by_user_id: expense.created_by_user_id, approved_by_user_id: expense.approved_by_user_id
+    id: expense.id,
+    agent_id: expense.agent_id,
+    warehouse_id: expense.warehouse_id,
+    created_by_user_id: expense.created_by_user_id,
+    approved_by_user_id: expense.approved_by_user_id,
+    deleted_by_user_id: expense.deleted_by_user_id
   }]);
   return enrichExpense(expense, userMap, whMap);
 }
@@ -246,6 +286,7 @@ export async function updateExpense(
     where: { id: expenseId, tenant_id: tenantId }
   });
   if (!existing) throw new Error("NOT_FOUND");
+  if (existing.deleted_at != null) throw new Error("VOIDED");
   if (existing.status !== "draft") throw new Error("CANNOT_EDIT_NON_DRAFT");
 
   if (input.amount != null && (!Number.isFinite(input.amount) || input.amount <= 0)) {
@@ -283,8 +324,12 @@ export async function updateExpense(
   });
 
   const { userMap, whMap } = await resolveNames([{
-    id: expense.id, agent_id: expense.agent_id, warehouse_id: expense.warehouse_id,
-    created_by_user_id: expense.created_by_user_id, approved_by_user_id: expense.approved_by_user_id
+    id: expense.id,
+    agent_id: expense.agent_id,
+    warehouse_id: expense.warehouse_id,
+    created_by_user_id: expense.created_by_user_id,
+    approved_by_user_id: expense.approved_by_user_id,
+    deleted_by_user_id: expense.deleted_by_user_id
   }]);
   return enrichExpense(expense, userMap, whMap);
 }
@@ -294,7 +339,8 @@ export async function updateExpense(
 export async function deleteExpense(
   tenantId: number,
   expenseId: number,
-  actorUserId: number | null
+  actorUserId: number | null,
+  reasonRef?: string | null
 ): Promise<void> {
   await assertTenantAccess(tenantId);
 
@@ -302,16 +348,58 @@ export async function deleteExpense(
     where: { id: expenseId, tenant_id: tenantId }
   });
   if (!existing) throw new Error("NOT_FOUND");
+  if (existing.deleted_at != null) throw new Error("ALREADY_VOIDED");
   if (existing.status !== "draft") throw new Error("CANNOT_DELETE_NON_DRAFT");
 
-  await prisma.expense.delete({ where: { id: expenseId } });
+  const note =
+    reasonRef != null && String(reasonRef).trim() ? String(reasonRef).trim().slice(0, 128) : null;
+  const now = new Date();
+  const uid =
+    actorUserId != null && Number.isFinite(actorUserId) && actorUserId > 0 ? actorUserId : null;
+
+  await prisma.expense.update({
+    where: { id: expenseId },
+    data: {
+      deleted_at: now,
+      deleted_by_user_id: uid,
+      delete_reason_ref: note
+    }
+  });
 
   await appendTenantAuditEvent({
     tenantId,
-    actorUserId,
+    actorUserId: uid,
     entityType: AuditEntityType.finance,
     entityId: String(expenseId),
-    action: "expense.delete",
+    action: "expense.void",
+    payload: { expense_id: expenseId, soft: true, ...(note ? { reason: note } : {}) }
+  });
+}
+
+export async function restoreExpense(
+  tenantId: number,
+  expenseId: number,
+  actorUserId: number | null
+): Promise<void> {
+  await assertTenantAccess(tenantId);
+  const existing = await prisma.expense.findFirst({
+    where: { id: expenseId, tenant_id: tenantId }
+  });
+  if (!existing) throw new Error("NOT_FOUND");
+  if (existing.deleted_at == null) throw new Error("NOT_VOIDED");
+  if (existing.status !== "draft") throw new Error("CANNOT_RESTORE_NON_DRAFT");
+
+  await prisma.expense.update({
+    where: { id: expenseId },
+    data: { deleted_at: null, deleted_by_user_id: null, delete_reason_ref: null }
+  });
+
+  await appendTenantAuditEvent({
+    tenantId,
+    actorUserId: actorUserId != null && actorUserId > 0 ? actorUserId : null,
+    entityType: AuditEntityType.finance,
+    entityId: String(expenseId),
+    action: "expense.restore",
     payload: { expense_id: expenseId }
   });
 }
@@ -330,6 +418,7 @@ export async function approveExpense(
       where: { id: expenseId, tenant_id: tenantId }
     });
     if (!existing) throw new Error("NOT_FOUND");
+    if (existing.deleted_at != null) throw new Error("VOIDED");
     if (existing.status !== "draft") throw new Error("ALREADY_PROCESSED");
 
     return tx.expense.update({
@@ -351,8 +440,12 @@ export async function approveExpense(
   });
 
   const { userMap, whMap } = await resolveNames([{
-    id: expense.id, agent_id: expense.agent_id, warehouse_id: expense.warehouse_id,
-    created_by_user_id: expense.created_by_user_id, approved_by_user_id: expense.approved_by_user_id
+    id: expense.id,
+    agent_id: expense.agent_id,
+    warehouse_id: expense.warehouse_id,
+    created_by_user_id: expense.created_by_user_id,
+    approved_by_user_id: expense.approved_by_user_id,
+    deleted_by_user_id: expense.deleted_by_user_id
   }]);
   return enrichExpense(expense, userMap, whMap);
 }
@@ -374,6 +467,7 @@ export async function rejectExpense(
       where: { id: expenseId, tenant_id: tenantId }
     });
     if (!existing) throw new Error("NOT_FOUND");
+    if (existing.deleted_at != null) throw new Error("VOIDED");
     if (existing.status !== "draft") throw new Error("ALREADY_PROCESSED");
 
     return tx.expense.update({
@@ -396,8 +490,12 @@ export async function rejectExpense(
   });
 
   const { userMap, whMap } = await resolveNames([{
-    id: expense.id, agent_id: expense.agent_id, warehouse_id: expense.warehouse_id,
-    created_by_user_id: expense.created_by_user_id, approved_by_user_id: expense.approved_by_user_id
+    id: expense.id,
+    agent_id: expense.agent_id,
+    warehouse_id: expense.warehouse_id,
+    created_by_user_id: expense.created_by_user_id,
+    approved_by_user_id: expense.approved_by_user_id,
+    deleted_by_user_id: expense.deleted_by_user_id
   }]);
   return enrichExpense(expense, userMap, whMap);
 }
@@ -416,8 +514,12 @@ export async function getExpense(
   if (!row) throw new Error("NOT_FOUND");
 
   const { userMap, whMap } = await resolveNames([{
-    id: row.id, agent_id: row.agent_id, warehouse_id: row.warehouse_id,
-    created_by_user_id: row.created_by_user_id, approved_by_user_id: row.approved_by_user_id
+    id: row.id,
+    agent_id: row.agent_id,
+    warehouse_id: row.warehouse_id,
+    created_by_user_id: row.created_by_user_id,
+    approved_by_user_id: row.approved_by_user_id,
+    deleted_by_user_id: row.deleted_by_user_id
   }]);
   return enrichExpense(row, userMap, whMap);
 }
@@ -437,6 +539,7 @@ export async function getExpenseSummary(
 
   const where: Prisma.ExpenseWhereInput = {
     tenant_id: tenantId,
+    deleted_at: null,
     ...(Object.keys(dateFilter).length > 0 ? { expense_date: dateFilter } : {})
   };
 
@@ -528,6 +631,7 @@ export async function getPnlReport(
 
   const expensesWhere: Prisma.ExpenseWhereInput = {
     tenant_id: tenantId,
+    deleted_at: null,
     ...(Object.keys(dateFilter).length > 0 ? { expense_date: dateFilter } : {})
   };
 

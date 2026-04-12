@@ -25,6 +25,7 @@ import { registerProductRoutes } from "./modules/products/products.route";
 import { registerAuditEventRoutes } from "./modules/audit-events/audit-events.route";
 import { registerUserUiRoutes } from "./modules/users/user-ui.route";
 import { registerStaffRoutes } from "./modules/staff/staff.route";
+import { registerConsignmentRoutes } from "./modules/consignment/consignment.route";
 import { registerSalesDirectionRoutes } from "./modules/sales-directions/sales-directions.route";
 import { registerReportRoutes } from "./modules/reports/reports.route";
 import { registerStockTakeRoutes } from "./modules/stock/stock-takes.route";
@@ -35,6 +36,7 @@ import { registerTerritoryRoutes } from "./modules/territory/territory.route";
 import { registerPriceMatrixRoutes } from "./modules/products/price-matrix.route";
 import { registerNotificationRoutes } from "./modules/notifications/notifications.route";
 import { registerMobileRoutes } from "./modules/mobile/mobile.route";
+import { registerJobRoutes } from "./modules/jobs/jobs.route";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
 import { loggerOptions } from "./config/logger";
@@ -61,6 +63,7 @@ export function buildApp() {
   app.register(registerProductCatalogRoutes);
   app.register(registerProductRoutes);
   app.register(registerStaffRoutes);
+  app.register(registerConsignmentRoutes);
   app.register(registerSalesDirectionRoutes);
   app.register(registerBonusRuleRoutes);
   app.register(registerOrderRoutes);
@@ -86,6 +89,7 @@ export function buildApp() {
   app.register(registerFieldRoutes);
   app.register(registerNotificationRoutes);
   app.register(registerMobileRoutes);
+  app.register(registerJobRoutes);
 
   app.get("/health", async () => ({
     status: "ok",

@@ -37,9 +37,9 @@ export default function ClientEditPage() {
   if (!Number.isFinite(clientId) || clientId < 1) {
     return (
       <PageShell>
-        <p className="text-sm text-destructive">Noto‘g‘ri mijoz identifikatori.</p>
+        <p className="text-sm text-destructive">Некорректный идентификатор клиента.</p>
         <Link href="/clients" className="text-sm text-primary underline">
-          Ro‘yxatga qaytish
+          К списку клиентов
         </Link>
       </PageShell>
     );

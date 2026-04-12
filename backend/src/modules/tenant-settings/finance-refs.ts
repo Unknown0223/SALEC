@@ -145,6 +145,25 @@ export function paymentMethodsFromUnknown(v: unknown): PaymentMethodEntryDto[] {
   return v.map(parsePaymentMethodEntry).filter((x): x is PaymentMethodEntryDto => x != null);
 }
 
+/**
+ * `client_payments.payment_type` va filtrlarda ishlatiladigan qiymat: kod bo‘lsa kod, aks holda nom.
+ * Frontend «Способ оплаты» tanlovi shu qiymatni yuboradi.
+ */
+export function paymentMethodStorageKey(e: Pick<PaymentMethodEntryDto, "code" | "name">): string {
+  const c = e.code?.trim();
+  if (c) return c.slice(0, 64);
+  return e.name.trim().slice(0, 64);
+}
+
+/** Faol usullar bo‘yicha saqlash kalitlari (takrorlarsiz, tartiblangan). */
+export function paymentTypeStorageKeysFromMethodEntries(entries: PaymentMethodEntryDto[]): string[] {
+  const keys = entries
+    .filter((e) => e.active !== false)
+    .map((e) => paymentMethodStorageKey(e))
+    .filter((k) => k.length > 0);
+  return [...new Set(keys)].sort((a, b) => a.localeCompare(b, "uz"));
+}
+
 function sortPaymentMethods(a: PaymentMethodEntryDto, b: PaymentMethodEntryDto): number {
   const ao = a.sort_order ?? 1_000_000;
   const bo = b.sort_order ?? 1_000_000;

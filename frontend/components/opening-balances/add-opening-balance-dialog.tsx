@@ -16,6 +16,11 @@ import { api } from "@/lib/api";
 import { useAuthStoreHydrated } from "@/lib/auth-store";
 import type { ClientRow } from "@/lib/client-types";
 import { getUserFacingError } from "@/lib/error-utils";
+import {
+  defaultPaymentTypeValue,
+  paymentMethodSelectOptions,
+  type ProfilePaymentMethodEntry
+} from "@/lib/payment-method-options";
 import type { OpeningBalanceListRow } from "@/lib/opening-balance-types";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
@@ -34,8 +39,6 @@ type Props = {
   tenantSlug: string;
   onCreated?: () => void;
 };
-
-const FALLBACK_PAY_TYPES = ["naqd", "plastik", "o‘tkazma", "boshqa"] as const;
 
 export function AddOpeningBalanceDialog({ open, onOpenChange, tenantSlug, onCreated }: Props) {
   const hydrated = useAuthStoreHydrated();
@@ -91,14 +94,17 @@ export function AddOpeningBalanceDialog({ open, onOpenChange, tenantSlug, onCrea
   });
 
   const profileQ = useQuery({
-    queryKey: ["settings", "profile", tenantSlug, "add-opening-balance-types"],
+    queryKey: ["settings", "profile", tenantSlug, "add-opening-balance-refs"],
     enabled: Boolean(tenantSlug) && hydrated && open,
     staleTime: STALE.profile,
     queryFn: async () => {
-      const { data } = await api.get<{ references?: { payment_types?: string[] } }>(
-        `/api/${tenantSlug}/settings/profile`
-      );
-      return data.references?.payment_types?.length ? data.references.payment_types : [...FALLBACK_PAY_TYPES];
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
     }
   });
 
@@ -124,7 +130,11 @@ export function AddOpeningBalanceDialog({ open, onOpenChange, tenantSlug, onCrea
     return `${a.fio}${a.code ? ` (${a.code})` : ""}`;
   }, [selectedClient, agentsQ.data]);
 
-  const paymentTypeOptions = profileQ.data ?? [...FALLBACK_PAY_TYPES];
+  const paySelectOpts = useMemo(
+    () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
+    [profileQ.data]
+  );
+  const defaultPayType = useMemo(() => defaultPaymentTypeValue(paySelectOpts), [paySelectOpts]);
 
   const submitMut = useMutation({
     mutationFn: async () => {
@@ -133,7 +143,7 @@ export function AddOpeningBalanceDialog({ open, onOpenChange, tenantSlug, onCrea
       const raw = amount.replace(/\s/g, "").replace(",", ".");
       const amt = Number.parseFloat(raw);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("NO_AMOUNT");
-      const pt = (paymentType || paymentTypeOptions[0] || "naqd").trim();
+      const pt = (paymentType || defaultPayType).trim();
       const deskRaw = cashDeskId.trim();
       const deskParsed = deskRaw ? Number.parseInt(deskRaw, 10) : NaN;
       const cash_desk_id = Number.isFinite(deskParsed) && deskParsed > 0 ? deskParsed : null;
@@ -251,12 +261,12 @@ export function AddOpeningBalanceDialog({ open, onOpenChange, tenantSlug, onCrea
                 id="aob-pay-type"
                 className={cn(controlClass, "px-2")}
                 emptyLabel="—"
-                value={paymentType}
+                value={paymentType || defaultPayType}
                 onChange={(e) => setPaymentType(e.target.value)}
               >
-                {paymentTypeOptions.map((pt) => (
-                  <option key={pt} value={pt}>
-                    {pt}
+                {paySelectOpts.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </FilterSelect>

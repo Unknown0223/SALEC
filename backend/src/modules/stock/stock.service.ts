@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { getRedisForApp, invalidateStock } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
 export type StockRow = {
@@ -64,10 +65,27 @@ export async function listLowStockForTenant(tenantId: number, threshold: number)
   return out;
 }
 
+const STOCK_LIST_BY_WH_TTL_SEC = 20;
+
 export async function listStockForTenant(
   tenantId: number,
   warehouseId?: number | null
 ): Promise<StockRow[]> {
+  const wh = warehouseId != null && warehouseId > 0 ? warehouseId : null;
+  const cacheKey = wh != null ? `tenant:${tenantId}:stock:${wh}` : null;
+
+  if (cacheKey) {
+    try {
+      const redis = await getRedisForApp();
+      const hit = await redis.get(cacheKey);
+      if (hit) {
+        return JSON.parse(hit) as StockRow[];
+      }
+    } catch {
+      /* Redis yo‘q */
+    }
+  }
+
   const rows = await prisma.stock.findMany({
     where: {
       tenant_id: tenantId,
@@ -80,7 +98,7 @@ export async function listStockForTenant(
     orderBy: [{ warehouse_id: "asc" }, { product_id: "asc" }]
   });
 
-  return rows.map((r) => ({
+  const out = rows.map((r) => ({
     id: r.id,
     warehouse_id: r.warehouse_id,
     warehouse_name: r.warehouse.name,
@@ -90,6 +108,17 @@ export async function listStockForTenant(
     qty: r.qty.toString(),
     reserved_qty: r.reserved_qty.toString()
   }));
+
+  if (cacheKey) {
+    try {
+      const redis = await getRedisForApp();
+      await redis.set(cacheKey, JSON.stringify(out), "EX", STOCK_LIST_BY_WH_TTL_SEC);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return out;
 }
 
 export const WAREHOUSE_STOCK_PURPOSES = ["sales", "return", "reserve"] as const;
@@ -721,6 +750,8 @@ export async function applyStockReceipt(
     }
   });
 
+  void invalidateStock(tenantId, input.warehouse_id);
+
   if (!options?.skipAudit) {
     await appendTenantAuditEvent({
       tenantId,
@@ -835,6 +866,8 @@ export async function applyStockAdjustment(
       note: input.note ?? null
     }
   });
+
+  void invalidateStock(tenantId, input.warehouse_id);
 
   return { qty_before, qty_after };
 }

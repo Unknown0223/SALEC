@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
+import { invalidateStock } from "../../lib/redis-cache";
 import { appendClientAuditLog } from "../clients/clients.service";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
 
@@ -222,6 +223,8 @@ export async function createSalesReturn(
       }
     });
   });
+
+  void invalidateStock(tenantId, input.warehouse_id);
 
   await appendTenantAuditEvent({
     tenantId,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getErrorCode } from "../../lib/app-error";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { getOrderCreateContextBundle } from "./order-create-context.service";
 import {
   bulkUpdateOrderExpeditor,
   bulkUpdateOrderStatus,
@@ -15,7 +16,8 @@ import {
   updateOrderStatus
 } from "./orders.service";
 
-const createBodySchema = z.object({
+const createBodySchema = z
+  .object({
   client_id: z.number().int().positive(),
   /** Majburiy — qaysi ombordan jo'natiladi */
   warehouse_id: z.number().int().positive(),
@@ -35,6 +37,9 @@ const createBodySchema = z.object({
     .optional(),
   comment: z.string().max(4000).optional().nullable(),
   request_type_ref: z.string().trim().max(128).optional().nullable(),
+  is_consignment: z.boolean().optional(),
+  /** ISO sana yoki `YYYY-MM-DD` */
+  consignment_due_date: z.string().max(40).optional().nullable(),
   items: z
     .array(
       z.object({
@@ -42,8 +47,28 @@ const createBodySchema = z.object({
         qty: z.number().positive()
       })
     )
-    .min(1)
-});
+    .min(1),
+  payment_method_ref: z.string().trim().max(64).optional().nullable()
+})
+  .superRefine((data, ctx) => {
+    const ot = data.order_type ?? "order";
+    if (ot !== "order") return;
+    if (data.agent_id == null || data.agent_id < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Agent majburiy",
+        path: ["agent_id"]
+      });
+    }
+    const pm = (data.payment_method_ref ?? "").trim();
+    if (!pm) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "To‘lov usuli majburiy",
+        path: ["payment_method_ref"]
+      });
+    }
+  });
 
 const catalogRoles = ["admin", "operator"] as const;
 
@@ -74,6 +99,7 @@ const bulkExpeditorBodySchema = z.object({
 const patchOrderLinesBodySchema = z.object({
   warehouse_id: z.number().int().positive().nullable().optional(),
   agent_id: z.number().int().positive().nullable().optional(),
+  payment_method_ref: z.string().trim().max(64).optional().nullable(),
   apply_bonus: z.boolean().optional(),
   bonus_gift_overrides: z
     .array(
@@ -98,16 +124,18 @@ const patchOrderMetaBodySchema = z
     warehouse_id: z.number().int().positive().nullable().optional(),
     agent_id: z.number().int().positive().nullable().optional(),
     expeditor_user_id: z.number().int().positive().nullable().optional(),
-    comment: z.string().max(4000).optional().nullable()
+    comment: z.string().max(4000).optional().nullable(),
+    payment_method_ref: z.string().trim().max(64).optional().nullable()
   })
   .refine(
     (b) =>
       b.warehouse_id !== undefined ||
       b.agent_id !== undefined ||
       b.expeditor_user_id !== undefined ||
-      b.comment !== undefined,
+      b.comment !== undefined ||
+      b.payment_method_ref !== undefined,
     {
-      message: "At least one of warehouse_id, agent_id, expeditor_user_id, comment"
+      message: "At least one of warehouse_id, agent_id, expeditor_user_id, comment, payment_method_ref"
     }
   );
 
@@ -135,12 +163,27 @@ export async function registerOrderRoutes(app: FastifyInstance) {
       };
       const warehouse_id = parseOptId(q.warehouse_id);
       const agent_id = parseOptId(q.agent_id);
+      let agent_ids: number[] | undefined;
+      const agentIdsRaw = q.agent_ids?.trim();
+      if (agentIdsRaw) {
+        const parts = agentIdsRaw.split(/[,;\s]+/).map((s) => Number.parseInt(s.trim(), 10));
+        const ids = parts.filter((n) => Number.isFinite(n) && n > 0);
+        if (ids.length > 0) agent_ids = ids;
+      }
+      const noAgentRaw = q.no_agent?.trim().toLowerCase();
+      const include_no_agent = noAgentRaw === "1" || noAgentRaw === "true" || noAgentRaw === "yes";
       const expeditor_user_id = parseOptId(q.expeditor_id ?? q.expeditor_user_id);
       const product_id = parseOptId(q.product_id);
       const client_category = q.client_category?.trim() || undefined;
       const date_from = q.date_from?.trim() || q.from?.trim() || undefined;
       const date_to = q.date_to?.trim() || q.to?.trim() || undefined;
       const order_type = q.order_type?.trim() || undefined;
+      const icRaw = q.is_consignment?.trim().toLowerCase();
+      let is_consignment: boolean | undefined;
+      if (icRaw === "true" || icRaw === "1" || icRaw === "yes") is_consignment = true;
+      else if (icRaw === "false" || icRaw === "0" || icRaw === "no") is_consignment = false;
+      const product_category_id = parseOptId(q.product_category_id);
+      const payment_type = q.payment_type?.trim() || undefined;
       const viewer = getAccessUser(request);
       const result = await listOrdersPaged(
         request.tenant!.id,
@@ -151,17 +194,32 @@ export async function registerOrderRoutes(app: FastifyInstance) {
           client_id,
           search,
           warehouse_id,
-          agent_id,
+          agent_id: agent_ids?.length ? undefined : agent_id,
+          agent_ids,
+          include_no_agent: include_no_agent || undefined,
           expeditor_user_id,
           client_category,
           product_id,
           date_from,
           date_to,
-          order_type
+          order_type,
+          is_consignment,
+          product_category_id,
+          payment_type
         },
         viewer.role ?? ""
       );
       return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/api/:slug/orders/create-context",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const bundle = await getOrderCreateContextBundle(request.tenant!.id);
+      return reply.send(bundle);
     }
   );
 
@@ -220,6 +278,15 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         }
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_AGENT") return reply.status(400).send({ error: "BadAgent" });
+        if (msg === "ORDER_REQUIRES_AGENT") {
+          return reply.status(400).send({ error: "OrderRequiresAgent" });
+        }
+        if (msg === "ORDER_REQUIRES_WAREHOUSE") {
+          return reply.status(400).send({ error: "OrderRequiresWarehouse" });
+        }
+        if (msg === "ORDER_REQUIRES_PAYMENT_METHOD") {
+          return reply.status(400).send({ error: "OrderRequiresPaymentMethod" });
+        }
         if (msg === "BAD_EXPEDITOR") return reply.status(400).send({ error: "BadExpeditor" });
         if (msg === "EMPTY_META_PATCH") {
           return reply.status(400).send({ error: "ValidationError" });
@@ -266,6 +333,15 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         if (msg === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
         if (msg === "BAD_WAREHOUSE") return reply.status(400).send({ error: "BadWarehouse" });
         if (msg === "BAD_AGENT") return reply.status(400).send({ error: "BadAgent" });
+        if (msg === "ORDER_REQUIRES_AGENT") {
+          return reply.status(400).send({ error: "OrderRequiresAgent" });
+        }
+        if (msg === "ORDER_REQUIRES_WAREHOUSE") {
+          return reply.status(400).send({ error: "OrderRequiresWarehouse" });
+        }
+        if (msg === "ORDER_REQUIRES_PAYMENT_METHOD") {
+          return reply.status(400).send({ error: "OrderRequiresPaymentMethod" });
+        }
         if (msg === "BAD_PRODUCT") return reply.status(400).send({ error: "BadProduct" });
         if (msg === "BAD_QTY") return reply.status(400).send({ error: "BadQty" });
         if (msg === "DUPLICATE_PRODUCT") return reply.status(400).send({ error: "DuplicateProduct" });
@@ -501,6 +577,37 @@ export async function registerOrderRoutes(app: FastifyInstance) {
             outstanding: ex.outstanding,
             order_total: ex.order_total
           });
+        }
+        if (msg === "ORDER_REQUIRES_AGENT") {
+          return reply.status(400).send({ error: "OrderRequiresAgent" });
+        }
+        if (msg === "ORDER_REQUIRES_WAREHOUSE") {
+          return reply.status(400).send({ error: "OrderRequiresWarehouse" });
+        }
+        if (msg === "ORDER_REQUIRES_PAYMENT_METHOD") {
+          return reply.status(400).send({ error: "OrderRequiresPaymentMethod" });
+        }
+        if (msg === "CONSIGNMENT_REQUIRES_AGENT") {
+          return reply.status(400).send({ error: "ConsignmentRequiresAgent" });
+        }
+        if (msg === "CONSIGNMENT_AGENT_DISABLED") {
+          return reply.status(400).send({ error: "ConsignmentAgentDisabled" });
+        }
+        if (msg === "CONSIGNMENT_LIMIT_EXCEEDED") {
+          const ex = e as Error & {
+            consignment_limit?: string;
+            outstanding?: string;
+            order_total?: string;
+          };
+          return reply.status(400).send({
+            error: "ConsignmentLimitExceeded",
+            consignment_limit: ex.consignment_limit,
+            outstanding: ex.outstanding,
+            order_total: ex.order_total
+          });
+        }
+        if (msg === "BAD_CONSIGNMENT_DUE_DATE") {
+          return reply.status(400).send({ error: "BadConsignmentDueDate" });
         }
         if (msg === "BAD_BONUS_GIFT_OVERRIDE") {
           return reply.status(400).send({ error: "BadBonusGiftOverride" });

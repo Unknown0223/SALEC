@@ -7,7 +7,8 @@ import {
   createGoodsReceipt,
   deleteGoodsReceiptDraft,
   getGoodsReceiptDetail,
-  listGoodsReceipts
+  listGoodsReceipts,
+  restoreGoodsReceiptDraft
 } from "./goods-receipt.service";
 
 const catalogRoles = ["admin", "operator", "supervisor", "agent", "expeditor"] as const;
@@ -21,7 +22,15 @@ const listQuerySchema = z.object({
   date_to: z.string().optional(),
   q: z.string().optional().default(""),
   page: z.coerce.number().int().min(1).optional().default(1),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(25)
+  limit: z.coerce.number().int().min(1).max(200).optional().default(25),
+  archive: z
+    .preprocess(
+      (val) =>
+        val === true || val === "true" || val === "1" || val === "yes",
+      z.boolean()
+    )
+    .optional()
+    .default(false)
 });
 
 const lineSchema = z.object({
@@ -61,7 +70,8 @@ export async function registerGoodsReceiptRoutes(app: FastifyInstance) {
         date_to: q.date_to,
         search: q.q,
         page: q.page,
-        limit: q.limit
+        limit: q.limit,
+        archive: q.archive
       });
       return reply.send(result);
     }
@@ -120,12 +130,43 @@ export async function registerGoodsReceiptRoutes(app: FastifyInstance) {
       if (!Number.isFinite(id) || id <= 0) {
         return reply.status(400).send({ error: "InvalidId" });
       }
+      const dq = z
+        .object({ delete_reason_ref: z.string().max(128).optional() })
+        .parse((request.query as Record<string, unknown>) ?? {});
       try {
-        await deleteGoodsReceiptDraft(request.tenant!.id, id);
+        await deleteGoodsReceiptDraft(
+          request.tenant!.id,
+          id,
+          actorUserIdOrNull(request),
+          dq.delete_reason_ref?.trim() || null
+        );
         return reply.status(204).send();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "NOT_DRAFT") return reply.status(409).send({ error: "NotDraft" });
+        if (msg === "ALREADY_VOIDED") return reply.status(409).send({ error: "AlreadyVoided" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/goods-receipts/:id/restore",
+    { preHandler: [jwtAccessVerify, requireRoles(...writeRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (!Number.isFinite(id) || id <= 0) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        await restoreGoodsReceiptDraft(request.tenant!.id, id, actorUserIdOrNull(request));
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "NOT_VOIDED") return reply.status(409).send({ error: "NotVoided" });
         if (msg === "NOT_DRAFT") return reply.status(409).send({ error: "NotDraft" });
         throw e;
       }

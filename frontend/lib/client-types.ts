@@ -9,6 +9,8 @@ export type ClientAgentAssignmentRow = {
   slot: number;
   agent_id: number | null;
   agent_name: string | null;
+  /** Kod agenta (`User.code`), masalan GGTR006 */
+  agent_code?: string | null;
   visit_date: string | null;
   expeditor_phone: string | null;
   /** 1=Du … 7=Ya */

@@ -20,6 +20,7 @@ import type {
 } from "@/lib/client-balances-types";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { getUserFacingError } from "@/lib/error-utils";
+import { paymentMethodSelectOptions, type ProfilePaymentMethodEntry } from "@/lib/payment-method-options";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
@@ -164,11 +165,14 @@ function buildQuery(
 function MoneyCell({
   value,
   align = "right",
-  className
+  className,
+  /** Svodka-kartochkalar: nol ham «NAQD» kabi qalin, kulrang emas */
+  summaryKpi = false
 }: {
   value: string;
   align?: "left" | "right" | "center";
   className?: string;
+  summaryKpi?: boolean;
 }) {
   const n = parseAmount(value);
   const debt = n < 0;
@@ -182,7 +186,11 @@ function MoneyCell({
         align === "left" && "block text-left",
         debt && "font-medium text-destructive",
         credit && "font-medium text-emerald-700 dark:text-emerald-400",
-        !debt && !credit && "font-medium text-muted-foreground",
+        !debt &&
+          !credit &&
+          (summaryKpi
+            ? "font-semibold text-foreground"
+            : "font-medium text-muted-foreground"),
         className
       )}
     >
@@ -194,30 +202,36 @@ function MoneyCell({
 function SummaryKpiCard({ title, value }: { title: string; value: string }) {
   const n = parseAmount(value);
   const debt = n < 0;
-  const credit = n > 0;
-  const border = debt ? "border-t-red-500" : credit ? "border-t-emerald-500" : "border-t-muted-foreground/40";
+  /** Qarzdan boshqa barcha kartochkalar — «ОБЩИЙ» / «NAQD» bilan bir xil yashil ramka */
+  const positiveFrame = !debt;
   return (
     <Card
       className={cn(
-        "flex min-h-[7.25rem] min-w-[160px] flex-1 flex-col overflow-hidden border border-border bg-card shadow-sm sm:min-h-[7.75rem] sm:min-w-[168px] lg:min-w-[12rem] xl:min-w-0",
-        border,
-        "border-t-[5px]",
-        debt && "ring-1 ring-destructive/25"
+        "flex h-[6rem] w-[11.5rem] shrink-0 flex-col overflow-hidden bg-card shadow-sm sm:h-[6.5rem] sm:w-[13.5rem]",
+        "border border-t-[4px]",
+        positiveFrame &&
+          "border-emerald-200/90 border-t-emerald-500 dark:border-emerald-900/55 dark:border-t-emerald-500",
+        debt && "border border-t-[4px] border-red-200/90 border-t-red-500 ring-1 ring-destructive/20 dark:border-red-900/50 dark:border-t-red-500"
       )}
     >
-      <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-5 text-center sm:px-5 sm:py-6">
+      <CardContent className="flex h-full min-h-0 max-w-full flex-1 flex-col items-center justify-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 py-3 text-center sm:gap-2 sm:px-3 sm:py-3.5">
         <p
           className={cn(
-            "line-clamp-3 text-[11px] font-semibold uppercase leading-snug tracking-wide sm:text-xs",
-            debt && "text-destructive",
-            credit && "text-emerald-800 dark:text-emerald-400",
-            !debt && !credit && "text-muted-foreground"
+            "line-clamp-2 w-full max-w-full px-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground sm:text-[11px]",
+            debt && "text-destructive"
           )}
           title={title}
         >
           {title}
         </p>
-        <MoneyCell value={value} align="center" className="text-sm font-semibold sm:text-base" />
+        <div className="w-full min-w-0 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:thin]">
+          <MoneyCell
+            value={value}
+            align="center"
+            summaryKpi
+            className="inline-block min-w-0 whitespace-nowrap px-0.5 text-[11px] font-semibold tabular-nums sm:text-sm"
+          />
+        </div>
       </CardContent>
     </Card>
   );
@@ -402,10 +416,13 @@ export function ClientBalancesWorkspace() {
     enabled: Boolean(tenantSlug) && hydrated,
     staleTime: STALE.profile,
     queryFn: async () => {
-      const { data } = await api.get<{ references?: { payment_types?: string[] } }>(
-        `/api/${tenantSlug}/settings/profile`
-      );
-      return data.references?.payment_types ?? [];
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
     }
   });
 
@@ -480,10 +497,10 @@ export function ClientBalancesWorkspace() {
     }
   }, [tenantSlug, applied, view, debouncedSearch]);
 
-  const paymentTypeOptions =
-    (profileQ.data?.length ?? 0) > 0
-      ? profileQ.data!
-      : (["naqd", "plastik", "o'tkazma", "terminal"] as const);
+  const paymentTypeFilterOpts = useMemo(
+    () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
+    [profileQ.data]
+  );
 
   const to = territoryQ.data;
 
@@ -632,9 +649,9 @@ export function ClientBalancesWorkspace() {
                         value={draft.agent_payment_type}
                         onChange={(e) => setDraft((d) => ({ ...d, agent_payment_type: e.target.value }))}
                       >
-                        {paymentTypeOptions.map((pt) => (
-                          <option key={pt} value={pt}>
-                            {pt}
+                        {paymentTypeFilterOpts.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
                           </option>
                         ))}
                       </FilterSelect>
@@ -842,14 +859,14 @@ export function ClientBalancesWorkspace() {
 
         {summary ? (
           <Card className="border border-border bg-card shadow-sm">
-            <CardContent className="space-y-4 p-4 sm:p-5">
-              <p className="text-xs leading-relaxed text-muted-foreground">
+            <CardContent className="space-y-3 p-3 sm:space-y-3 sm:p-4">
+              <p className="text-[11px] leading-relaxed text-muted-foreground sm:text-xs">
                 <span className="font-medium text-foreground">Общий</span> — баланс по фильтру. Остальные карточки —
                 только способы оплаты из <span className="font-medium">Настройки → способы оплаты</span> (суммы по{" "}
                 <code className="rounded bg-muted px-1">payment_type</code>). Красный — долг, зелёный — ноль или
                 плюс. Суммы по способам могут не совпадать с «Общий».
               </p>
-              <div className="flex w-full flex-wrap gap-4 sm:gap-5">
+              <div className="flex flex-wrap content-start items-start justify-start gap-2 sm:gap-3">
                 <SummaryKpiCard
                   title={isDeliveryView ? "Долг по доставленным" : "Общий"}
                   value={summary.balance}
@@ -1197,7 +1214,12 @@ function ClientLikeTable({
                   </td>
                   <td className="px-2 py-2 font-mono text-xs">
                     <div className="flex items-center gap-1">
-                      <span>{clientDisplayId(r)}</span>
+                      <Link
+                        className="text-primary underline-offset-2 hover:underline"
+                        href={`/clients/${r.client_id}/balances`}
+                      >
+                        {clientDisplayId(r)}
+                      </Link>
                       <button
                         type="button"
                         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -1211,7 +1233,7 @@ function ClientLikeTable({
                   <td className="px-2 py-2">
                     <Link
                       className="text-primary underline-offset-2 hover:underline"
-                      href={`/clients/${r.client_id}`}
+                      href={`/clients/${r.client_id}/balances`}
                     >
                       {r.name}
                     </Link>

@@ -9,6 +9,7 @@
 | [ROADMAP.md](./ROADMAP.md) | Katta funksiyalar (20.2) epiklari |
 | [MODULES.md](./MODULES.md) | Modul ↔ route fayl xaritasi |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Qisqa eslatma + root `ARCHITECTURE.md` havolasi |
+| [CODEBASE_REALITY.md](./CODEBASE_REALITY.md) | Hujjatdagi stack vs hozirgi kod (qisqa jadval) |
 | [SETTINGS_STRUCTURE_PLAN.md](./SETTINGS_STRUCTURE_PLAN.md) | Sozlamalar katalogi: kod bilan tahlil, prioritet holati, ochiq ishlar |
 | [PHASE_GATES.md](./PHASE_GATES.md) | Reliz gate checklist (faza 0–10) |
 | [PHASE_PROGRESS.md](./PHASE_PROGRESS.md) | Faza foizi, keyingi qadam, kod vs reja jadvali |

@@ -24,7 +24,7 @@ const ClientsLeafletMapDynamic = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-[520px] items-center justify-center rounded-lg border bg-muted/20">
-        <p className="text-sm text-muted-foreground">Xarita (Leaflet) yuklanmoqda…</p>
+        <p className="text-sm text-muted-foreground">Карта (Leaflet) загружается…</p>
       </div>
     )
   }
@@ -94,11 +94,11 @@ export default function ClientsMapPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Klientlar xaritasi"
+        title="Карта клиентов"
         description={
           tenantSlug
-            ? `OpenStreetMap + Leaflet. GPS-li klientlar (server): ${gpsClientsTotal ?? totalWithCoords}.`
-            : "GPS koordinatali klientlar"
+            ? `OpenStreetMap + Leaflet. Клиенты с GPS (сервер): ${gpsClientsTotal ?? totalWithCoords}.`
+            : "Клиенты с GPS-координатами"
         }
         actions={
           <>
@@ -106,13 +106,13 @@ export default function ClientsMapPage() {
               className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
               href="/clients"
             >
-              Ro‘yxatga qaytish
+              К списку клиентов
             </Link>
             <Link
               className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
               href="/clients/new"
             >
-              Yangi mijoz
+              Новый клиент
             </Link>
           </>
         }
@@ -120,13 +120,13 @@ export default function ClientsMapPage() {
 
       <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle>Filtrlar</CardTitle>
+          <CardTitle>Фильтры</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <input
               type="text"
-              placeholder="Klient nomi, manzil, viloyat..."
+              placeholder="Название клиента, адрес, область…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -139,7 +139,7 @@ export default function ClientsMapPage() {
                   onChange={(e) => setHasLocationOnly(e.target.checked)}
                   className="accent-primary"
                 />
-                Faqat koordinatalilar
+                Только с координатами
               </label>
               <Button
                 type="button"
@@ -148,16 +148,16 @@ export default function ClientsMapPage() {
                 onClick={fetchClients}
                 disabled={loading || !tenantSlug}
               >
-                {loading ? "Yangilanmoqda..." : "Yangilash"}
+                {loading ? "Обновление…" : "Обновить"}
               </Button>
             </div>
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            Ko‘rsatilmoqda: {mapClients.length} / {allClients.length}
-            {" | "}Nuqtalar: {clientsWithCoords.length}
+            Показано: {mapClients.length} / {allClients.length}
+            {" | "}Точек: {clientsWithCoords.length}
             {gpsClientsTotal != null && allClients.length < gpsClientsTotal ? (
               <span className="ms-2 text-amber-600 dark:text-amber-400">
-                (GPS-li jami {gpsClientsTotal} ta; bir so‘rovda max 3500 yuklanadi)
+                (всего с GPS {gpsClientsTotal}; за один запрос загружается до 3500)
               </span>
             ) : null}
           </div>
@@ -170,19 +170,19 @@ export default function ClientsMapPage() {
         </div>
       ) : !tenantSlug ? (
         <div className="flex items-center justify-center py-24">
-          <p className="text-sm text-destructive">Tenant topilmadi.</p>
+          <p className="text-sm text-destructive">Tenant не найден.</p>
         </div>
       ) : loading ? (
         <div className="flex items-center justify-center py-24">
-          <p className="text-sm text-muted-foreground">Klientlar yuklanmoqda…</p>
+          <p className="text-sm text-muted-foreground">Загрузка клиентов…</p>
         </div>
       ) : (
         <Card className="shadow-panel">
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
-              <CardTitle>Klient joylashuvlari</CardTitle>
+              <CardTitle>Расположение клиентов</CardTitle>
               <span className="text-xs text-muted-foreground">
-                {clientsWithCoords.length} nuqta · OSM
+                {clientsWithCoords.length} точек · OSM
               </span>
             </div>
           </CardHeader>
@@ -191,8 +191,8 @@ export default function ClientsMapPage() {
               <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/30">
                 <p className="text-sm text-muted-foreground">
                   {allClients.length === 0
-                    ? "Klientlar topilmadi."
-                    : "Koordinatasi bor klientlar topilmadi."}
+                    ? "Клиенты не найдены."
+                    : "Нет клиентов с координатами."}
                 </p>
               </div>
             ) : (
@@ -204,26 +204,26 @@ export default function ClientsMapPage() {
 
       <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle>Koordinatali klientlar</CardTitle>
+          <CardTitle>Клиенты с координатами</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {clientsWithCoords.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-muted-foreground">Ma’lumot yo‘q.</div>
+            <div className="px-4 py-6 text-sm text-muted-foreground">Нет данных.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="app-table-thead">
                   <tr className="border-b border-border/60">
                     <th className="px-4 py-2 text-left font-medium text-muted-foreground">#</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Klient</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Viloyat</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Tuman</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Manzil</th>
+                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Клиент</th>
+                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Область</th>
+                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Район</th>
+                    <th className="px-4 py-2 text-left font-medium text-muted-foreground">Адрес</th>
                     <th className="px-4 py-2 text-right font-medium text-muted-foreground">
-                      Kenglik (Lat)
+                      Широта (Lat)
                     </th>
                     <th className="px-4 py-2 text-right font-medium text-muted-foreground">
-                      Uzunlik (Lon)
+                      Долгота (Lon)
                     </th>
                   </tr>
                 </thead>

@@ -13,6 +13,10 @@ export type OpeningBalanceListRow = {
   amount: string;
   note: string | null;
   paid_at: string | null;
+  deleted_at?: string | null;
+  deleted_by_user_id?: number | null;
+  deleted_by_name?: string | null;
+  delete_reason_ref?: string | null;
 };
 
 export type OpeningBalanceListResponse = {

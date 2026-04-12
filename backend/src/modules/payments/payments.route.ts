@@ -11,6 +11,8 @@ import {
   listPayments,
   listPaymentsForClient,
   listPaymentsForOrder,
+  restorePayment,
+  updatePayment,
   type PaymentListQuery
 } from "./payments.service";
 import { allocatePayment, getPaymentAllocations } from "./payment-allocations.service";
@@ -26,8 +28,33 @@ const createBody = z.object({
   cash_desk_id: z.number().int().positive().nullable().optional(),
   paid_at: z.string().max(40).optional().nullable(),
   entry_kind: z.enum(["payment", "client_expense"]).optional(),
-  expeditor_user_id: z.number().int().positive().nullable().optional()
+  expeditor_user_id: z.number().int().positive().nullable().optional(),
+  ledger_agent_id: z.number().int().positive().nullable().optional()
 });
+
+const patchPaymentBodySchema = z
+  .object({
+    amount: z.number().positive().optional(),
+    payment_type: z.string().min(1).max(64).optional(),
+    note: z.string().max(2000).optional().nullable(),
+    cash_desk_id: z.number().int().positive().nullable().optional(),
+    paid_at: z.string().max(48).optional().nullable(),
+    order_id: z.number().int().positive().nullable().optional(),
+    expeditor_user_id: z.number().int().positive().nullable().optional(),
+    ledger_agent_id: z.number().int().positive().nullable().optional()
+  })
+  .refine(
+    (b) =>
+      b.amount !== undefined ||
+      b.payment_type !== undefined ||
+      b.note !== undefined ||
+      b.cash_desk_id !== undefined ||
+      b.paid_at !== undefined ||
+      b.order_id !== undefined ||
+      b.expeditor_user_id !== undefined ||
+      b.ledger_agent_id !== undefined,
+    { message: "empty" }
+  );
 
 function parseOptPositiveInt(raw: string | undefined): number | undefined {
   if (raw == null || raw.trim() === "") return undefined;
@@ -191,6 +218,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         if (msg === "BAD_PAYMENT_TYPE") return reply.status(400).send({ error: "BadPaymentType" });
         if (msg === "BAD_CASH_DESK") return reply.status(400).send({ error: "BadCashDesk" });
         if (msg === "BAD_EXPEDITOR") return reply.status(400).send({ error: "BadExpeditor" });
+        if (msg === "BAD_LEDGER_AGENT") return reply.status(400).send({ error: "BadLedgerAgent" });
         throw e;
       }
     }
@@ -229,6 +257,47 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     }
   );
 
+  app.patch(
+    "/api/:slug/payments/:id",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const tenantId = request.tenant!.id;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const parsed = patchPaymentBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const payload = await updatePayment(tenantId, id, parsed.data, actorUserIdOrNull(request));
+        return reply.send(payload);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "PAYMENT_VOIDED") return reply.status(409).send({ error: "PaymentVoided" });
+        if (msg === "EMPTY_PATCH") return reply.status(400).send({ error: "ValidationError" });
+        if (msg === "BAD_AMOUNT") return reply.status(400).send({ error: "BadAmount" });
+        if (msg === "BAD_PAYMENT_TYPE") return reply.status(400).send({ error: "BadPaymentType" });
+        if (msg === "BAD_CASH_DESK") return reply.status(400).send({ error: "BadCashDesk" });
+        if (msg === "BAD_PAID_AT") return reply.status(400).send({ error: "BadPaidAt" });
+        if (msg === "BAD_ORDER") return reply.status(400).send({ error: "BadOrder" });
+        if (msg === "BAD_EXPEDITOR") return reply.status(400).send({ error: "BadExpeditor" });
+        if (msg === "BAD_EXPEDITOR_SCOPE") return reply.status(400).send({ error: "BadExpeditorScope" });
+        if (msg === "BAD_LEDGER_AGENT") return reply.status(400).send({ error: "BadLedgerAgent" });
+        if (msg === "AMOUNT_BELOW_ALLOCATED") {
+          return reply.status(400).send({ error: "AmountBelowAllocated" });
+        }
+        if (msg === "ORDER_LOCKED_BY_ALLOCATIONS") {
+          return reply.status(400).send({ error: "OrderLockedByAllocations" });
+        }
+        throw e;
+      }
+    }
+  );
+
   app.post(
     "/api/:slug/payments/:id/allocate",
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
@@ -251,6 +320,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "PAYMENT_NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "PAYMENT_VOIDED") return reply.status(409).send({ error: "PaymentVoided" });
         if (msg === "TENANT_NOT_FOUND") return reply.status(404).send({ error: "TenantNotFound" });
         throw e;
       }
@@ -280,6 +350,28 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "";
         if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "ALREADY_VOIDED") return reply.status(409).send({ error: "AlreadyVoided" });
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/payments/:id/restore",
+    { preHandler: [jwtAccessVerify, requireRoles("admin")] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const id = Number.parseInt((request.params as { id: string }).id, 10);
+      if (Number.isNaN(id) || id < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      try {
+        await restorePayment(request.tenant!.id, id, actorUserIdOrNull(request));
+        return reply.status(204).send();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
+        if (msg === "NOT_VOIDED") return reply.status(409).send({ error: "NotVoided" });
         throw e;
       }
     }

@@ -60,6 +60,8 @@ model Tenant {
   payment_allocations            PaymentAllocation[]
   territories                    Territory[]
   warehouse_corrections          WarehouseCorrection[]
+  client_equipment               ClientEquipment[]
+  client_photo_reports           ClientPhotoReport[]
 
   @@map("tenants")
 }
@@ -82,6 +84,11 @@ model User {
   code                       String?
   pinfl                      String?
   consignment                Boolean                 @default(false)
+  /// Konsignatsiya limiti (so‘m); `null` — cheklov tekshiruvi qo‘llanmaydi (faqat `consignment` yoqilganligi)
+  consignment_limit_amount   Decimal?                @db.Decimal(15, 2)
+  /// `true` bo‘lsa limit iste’moli faqat hisobot oyi ichidagi konsignatsiya zakazlari qarzi
+  consignment_ignore_previous_months_debt Boolean    @default(false)
+  consignment_updated_at     DateTime?
   apk_version                String?
   device_name                String?
   last_sync_at               DateTime?
@@ -121,7 +128,9 @@ model User {
   client_audit_logs          ClientAuditLog[]
   balance_movements          ClientBalanceMovement[]
   payments_created           Payment[]               @relation("PaymentCreator")
+  payments_voided            Payment[]               @relation("PaymentVoidedBy")
   payments_as_expeditor      Payment[]               @relation("PaymentExpeditor")
+  payments_ledger_agent      Payment[]               @relation("PaymentLedgerAgent")
   opening_balances_created   ClientOpeningBalanceEntry[] @relation("OpeningBalanceCreator")
   clients_as_agent           Client[]                @relation("UserAgents")
   goods_receipts_created     GoodsReceipt[]          @relation("GoodsReceiptCreator")
@@ -146,8 +155,13 @@ model User {
   warehouse_links            WarehouseUserLink[]
   expenses_created           Expense[]               @relation("ExpenseCreator")
   expenses_approved          Expense[]               @relation("ExpenseApprover")
+  expenses_voided            Expense[]               @relation("ExpenseVoidedBy")
+  opening_balances_voided    ClientOpeningBalanceEntry[] @relation("OpeningBalanceVoidedBy")
+  goods_receipts_voided      GoodsReceipt[]          @relation("GoodsReceiptVoidedBy")
+  territories_voided         Territory[]             @relation("TerritoryVoidedBy")
   territory_assignments      TerritoryUserLink[]     @relation("TerritoryAssigner")
   warehouse_corrections_created WarehouseCorrection[] @relation("WarehouseCorrectionCreator")
+  client_photo_reports_created  ClientPhotoReport[]   @relation("ClientPhotoReportCreator")
 
   @@unique([tenant_id, login])
   @@index([tenant_id, role])
@@ -450,11 +464,55 @@ model Client {
   tenant                Tenant                  @relation(fields: [tenant_id], references: [id])
   orders                Order[]
   sales_returns         SalesReturn[]
+  client_equipment      ClientEquipment[]
+  client_photo_reports  ClientPhotoReport[]
 
   @@index([tenant_id])
   @@index([tenant_id, name])
   @@index([tenant_id, phone_normalized])
   @@map("clients")
+}
+
+/// Klientga berilgan jihoz / inventar (qaytarilganda removed_at)
+model ClientEquipment {
+  id               Int       @id @default(autoincrement())
+  tenant_id        Int
+  client_id        Int
+  inventory_type   String    @db.VarChar(256)
+  equipment_kind   String?   @db.VarChar(256)
+  serial_number    String?   @db.VarChar(128)
+  inventory_number String?   @db.VarChar(128)
+  assigned_at      DateTime  @default(now())
+  removed_at       DateTime?
+  note             String?   @db.VarChar(2000)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  client           Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tenant           Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, client_id])
+  @@index([tenant_id, client_id, removed_at])
+  @@map("client_equipment")
+}
+
+/// Klient foto hisoboti (URL yoki tashqi storage)
+model ClientPhotoReport {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  client_id          Int
+  image_url          String    @db.VarChar(4000)
+  caption            String?   @db.VarChar(1000)
+  order_id           Int?
+  created_by_user_id Int?
+  created_at         DateTime  @default(now())
+  client             Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  order              Order?    @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  created_by         User?     @relation("ClientPhotoReportCreator", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([tenant_id, client_id])
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@map("client_photo_reports")
 }
 
 /// Mijozga 1..10 gacha agent slotlari (tashrif sanasi + ekspeditor telefoni).
@@ -527,13 +585,18 @@ model ClientOpeningBalanceEntry {
   paid_at            DateTime?
   created_at         DateTime  @default(now())
   created_by_user_id Int?
+  deleted_at         DateTime?
+  deleted_by_user_id Int?
+  delete_reason_ref  String?   @db.VarChar(128)
   client             Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
   tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   cash_desk          CashDesk? @relation(fields: [cash_desk_id], references: [id], onDelete: SetNull)
   created_by         User?     @relation("OpeningBalanceCreator", fields: [created_by_user_id], references: [id])
+  deleted_by         User?     @relation("OpeningBalanceVoidedBy", fields: [deleted_by_user_id], references: [id], onDelete: SetNull)
 
   @@index([tenant_id, created_at(sort: Desc)])
   @@index([tenant_id, client_id])
+  @@index([tenant_id, deleted_at])
   @@map("client_opening_balance_entries")
 }
 
@@ -722,8 +785,12 @@ model GoodsReceipt {
   created_by_user_id Int?
   created_at         DateTime           @default(now())
   updated_at         DateTime           @updatedAt
+  deleted_at         DateTime?
+  deleted_by_user_id Int?
+  delete_reason_ref  String?            @db.VarChar(128)
   lines              GoodsReceiptLine[]
   created_by         User?              @relation("GoodsReceiptCreator", fields: [created_by_user_id], references: [id])
+  deleted_by         User?              @relation("GoodsReceiptVoidedBy", fields: [deleted_by_user_id], references: [id], onDelete: SetNull)
   supplier           Supplier?          @relation(fields: [supplier_id], references: [id])
   tenant             Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   warehouse          Warehouse          @relation(fields: [warehouse_id], references: [id])
@@ -733,6 +800,7 @@ model GoodsReceipt {
   @@index([tenant_id, supplier_id])
   @@index([tenant_id, status])
   @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, deleted_at])
   @@map("goods_receipts")
 }
 
@@ -780,6 +848,12 @@ model Order {
   comment                     String?
   /// Sozlamalar → «Причины заявок» dan tanlangan kod/nom (test / filtr)
   request_type_ref            String?          @db.VarChar(128)
+  /// Konsignatsiya (qarzga berilgan) savdo — agent limiti hisobiga kiradi
+  is_consignment              Boolean          @default(false)
+  /// Konsignatsiya to‘lash muddati (ixtiyoriy)
+  consignment_due_date      DateTime?
+  /// Savdo zakazida majburiy: reja / tanlangan to‘lov usuli (spravochnik, masalan naqd)
+  payment_method_ref        String?          @db.VarChar(64)
   payments                    Payment[]
   change_logs                 OrderChangeLog[]
   items                       OrderItem[]
@@ -790,6 +864,7 @@ model Order {
   tenant                      Tenant           @relation(fields: [tenant_id], references: [id])
   warehouse                   Warehouse?       @relation(fields: [warehouse_id], references: [id])
   sales_returns               SalesReturn[]
+  client_photo_reports        ClientPhotoReport[]
 
   @@unique([tenant_id, number])
   @@index([tenant_id, status])
@@ -849,9 +924,17 @@ model Payment {
   entry_kind         String    @default("payment") @db.VarChar(24)
   /// Zakazsiz rasxod qatorida ekskpeditor (order.expeditor o‘rniga)
   expeditor_user_id  Int?
+  /// Vedoma: `COALESCE(ledger_agent_id, zakaz.agent_id, mijoz.agent_id)`
+  ledger_agent_id    Int?
+  /// Yumshoq bekor (arxiv): NULL = faol
+  deleted_at         DateTime?
+  deleted_by_user_id Int?
+  delete_reason_ref  String?   @db.VarChar(128)
   client             Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
   created_by         User?     @relation("PaymentCreator", fields: [created_by_user_id], references: [id])
+  deleted_by         User?     @relation("PaymentVoidedBy", fields: [deleted_by_user_id], references: [id], onDelete: SetNull)
   expeditor_user     User?     @relation("PaymentExpeditor", fields: [expeditor_user_id], references: [id], onDelete: SetNull)
+  ledger_agent       User?     @relation("PaymentLedgerAgent", fields: [ledger_agent_id], references: [id], onDelete: SetNull)
   order              Order?    @relation(fields: [order_id], references: [id])
   tenant             Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   cash_desk          CashDesk? @relation(fields: [cash_desk_id], references: [id], onDelete: SetNull)
@@ -860,9 +943,11 @@ model Payment {
   @@index([tenant_id, created_at(sort: Desc)])
   @@index([tenant_id, order_id])
   @@index([tenant_id, workflow_status])
+  @@index([tenant_id, deleted_at])
   @@index([cash_desk_id])
   @@index([tenant_id, entry_kind])
   @@index([expeditor_user_id])
+  @@index([ledger_agent_id])
   @@map("client_payments")
 }
 
@@ -1324,11 +1409,15 @@ model Territory {
   is_active   Boolean             @default(true)
   created_at  DateTime            @default(now())
   updated_at  DateTime            @updatedAt
+  deleted_at  DateTime?
+  deleted_by_user_id Int?
   tenant      Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  deleted_by  User?               @relation("TerritoryVoidedBy", fields: [deleted_by_user_id], references: [id], onDelete: SetNull)
   userLinks   TerritoryUserLink[]
 
   @@unique([tenant_id, code])
   @@index([tenant_id])
+  @@index([tenant_id, deleted_at])
   @@map("territories")
 }
 
@@ -1364,15 +1453,20 @@ model Expense {
   rejection_note      String?
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
+  deleted_at          DateTime?
+  deleted_by_user_id  Int?
+  delete_reason_ref   String?  @db.VarChar(128)
   tenant              Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   created_by          User?    @relation("ExpenseCreator", fields: [created_by_user_id], references: [id])
   approved_by         User?    @relation("ExpenseApprover", fields: [approved_by_user_id], references: [id])
+  deleted_by          User?    @relation("ExpenseVoidedBy", fields: [deleted_by_user_id], references: [id], onDelete: SetNull)
 
   @@index([tenant_id, status])
   @@index([tenant_id, expense_date(sort: Desc)])
   @@index([tenant_id, expense_type])
   @@index([tenant_id, agent_id])
   @@index([tenant_id, warehouse_id])
+  @@index([tenant_id, deleted_at])
   @@map("expenses")
 }
 

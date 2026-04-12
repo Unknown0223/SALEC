@@ -42,6 +42,9 @@ export type AgentRow = {
   code: string | null;
   pinfl: string | null;
   consignment: boolean;
+  consignment_limit_amount?: string | null;
+  consignment_ignore_previous_months_debt?: boolean;
+  consignment_updated_at?: string | null;
   apk_version: string | null;
   device_name: string | null;
   last_sync_at: string | null;
