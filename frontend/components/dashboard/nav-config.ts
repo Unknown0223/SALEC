@@ -66,7 +66,7 @@ export const dashboardKassaNav: {
         { href: "/client-expenses", label: "Расходы клиента" },
         { href: "/initial-client-balances", label: "Начальные балансы клиентов" },
         { href: "/client-balances", label: "Балансы клиентов (оплата и долги)" },
-        { href: "#", label: "Балансы клиентов по консигнации", disabled: true }
+        { href: "/client-balances/consignment", label: "Балансы клиентов по консигнации" }
       ]
     },
     {

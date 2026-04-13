@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
-import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 import { getRedisForApp } from "../../lib/redis-cache";
+import { ORDER_STATUSES_OUTSTANDING_RECEIVABLE } from "../orders/order-status";
 
 const DASHBOARD_CACHE_TTL = 30; // sekund
 
@@ -28,7 +28,7 @@ export type DashboardStatsRow = {
   returns_today: number;
   clients_total: number;
   products_active: number;
-  /** Kredit eksponiyasidagi zakazlar yig‘indisi */
+  /** Yetkazilgan savdo zakazlari bo‘yicha to‘lanmagan qoldiq (taqsimlar bilan) */
   open_orders_total: string;
 };
 
@@ -79,13 +79,23 @@ export async function getDashboardStats(tenantId: number): Promise<DashboardStat
     prisma.product.count({ where: { tenant_id: tenantId, is_active: true } })
   ]);
 
-  const creditAgg = await prisma.order.aggregate({
-    where: {
-      tenant_id: tenantId,
-      status: { notIn: [...ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE] }
-    },
-    _sum: { total_sum: true }
-  });
+  const [deliveredUnpaidRow] = await prisma.$queryRaw<Array<{ s: Prisma.Decimal }>>`
+    WITH alloc AS (
+      SELECT pa.order_id, SUM(pa.amount)::decimal(15,2) AS sum_amt
+      FROM payment_allocations pa
+      WHERE pa.tenant_id = ${tenantId}
+      GROUP BY pa.order_id
+    )
+    SELECT COALESCE(
+      SUM(GREATEST(o.total_sum - COALESCE(a.sum_amt, 0), 0)),
+      0
+    )::decimal(15,2) AS s
+    FROM orders o
+    LEFT JOIN alloc a ON a.order_id = o.id
+    WHERE o.tenant_id = ${tenantId}
+      AND o.order_type = 'order'
+      AND o.status IN (${Prisma.join([...ORDER_STATUSES_OUTSTANDING_RECEIVABLE])})
+  `;
 
   const result: DashboardStatsRow = {
     day_utc: start.toISOString().slice(0, 10),
@@ -96,7 +106,7 @@ export async function getDashboardStats(tenantId: number): Promise<DashboardStat
     returns_today,
     clients_total,
     products_active,
-    open_orders_total: (creditAgg._sum.total_sum ?? new Prisma.Decimal(0)).toString()
+    open_orders_total: (deliveredUnpaidRow?.s ?? new Prisma.Decimal(0)).toString()
   };
 
   // ✅ Redis cache saqlash

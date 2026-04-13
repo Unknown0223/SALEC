@@ -107,6 +107,17 @@ function formatPayTypeLower(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase();
 }
 
+/** Jadval va Excel: o‘zi to‘lov kanali; zakazga bog‘langan bo‘lsa va farq qilsa — «· заказ: …». */
+function formatLedgerPaymentMethodCell(r: ClientLedgerRow): string {
+  const pay = (r.payment_type ?? "").trim();
+  const ord = (r.order_payment_method_label ?? "").trim();
+  if (r.row_kind === "payment" && ord) {
+    if (!pay) return ord;
+    if (pay !== ord) return `${pay} · заказ: ${ord}`;
+  }
+  return pay;
+}
+
 function formatLedgerExcelDate(iso: string): string {
   try {
     return new Date(iso).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -121,7 +132,7 @@ function buildLedgerExcelGeneralRow(r: ClientLedgerRow): (string | number)[] {
     r.type_code,
     generalDebtPositive(r) || "",
     generalPaymentPositive(r) || "",
-    r.payment_type ?? "",
+    formatLedgerPaymentMethodCell(r),
     r.agent_name ?? "",
     r.expeditor_name ?? "",
     consignmentDaNet(r.is_consignment),
@@ -141,7 +152,7 @@ function buildLedgerExcelDetailedRow(r: ClientLedgerRow): (string | number)[] {
     parseAmount(r.debt_amount ?? "0") || "",
     parseAmount(r.payment_amount ?? "0") || "",
     r.balance_after != null && r.balance_after !== "" ? parseAmount(r.balance_after) : "",
-    (r.payment_type ?? "").trim().toLowerCase(),
+    formatPayTypeLower(formatLedgerPaymentMethodCell(r)),
     r.agent_name ?? "",
     r.expeditor_name ?? "",
     r.comment_primary ?? "",
@@ -802,10 +813,13 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
 
             <TabsContent value="general" className="mt-3 space-y-3 outline-none">
               <p className="text-xs leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">Общий</span> — как в Excel: тип{" "}
-                <span className="font-medium text-foreground">1</span> — заказ (долг),{" "}
-                <span className="font-medium text-foreground">2</span> — оплата/расход; суммы в «Долг» и «Оплата» —
-                положительные; консигнация «Да»/«Нет».
+                <span className="font-medium text-foreground">Общий</span> — в таблице колонка{" "}
+                <span className="font-medium text-foreground">«Тип»</span> — это название документа (как в шаблоне:{" "}
+                <span className="font-medium text-foreground">Заказ (№)</span>, <span className="font-medium text-foreground">Оплата (id)</span>
+                ); код <span className="font-medium text-foreground">1</span> / <span className="font-medium text-foreground">2</span> для
+                Excel — в колонке <span className="font-medium text-foreground">«Операция»</span> (и во втором столбце файла Excel). Суммы в
+                «Долг» и «Оплата» — положительные. «Способ оплаты»: у заказа — способ из заказа; у оплаты, привязанной к заказу, при
+                расхождении дополнительно показывается способ из заказа.
               </p>
               <Card className="overflow-hidden border border-border/90 shadow-panel">
                 <CardContent className="p-0">
@@ -814,8 +828,18 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                   <thead>
                     <tr className="border-b border-border bg-muted/60 dark:bg-muted/40">
                       <th className={ledgerTableTh}>Дата</th>
-                      <th className={cn(ledgerTableTh, "text-center")}>Тип</th>
-                      <th className={ledgerTableTh}>Операция</th>
+                      <th
+                        className={ledgerTableTh}
+                        title="Документ: Заказ (номер) или Оплата / Расход (id). Ссылка ведёт в карточку."
+                      >
+                        Тип
+                      </th>
+                      <th
+                        className={cn(ledgerTableTh, "text-center")}
+                        title="Код строки по шаблону Excel «Общий» (2-й столбец): 1 — заказ (долг), 2 — оплата или расход."
+                      >
+                        Операция
+                      </th>
                       <th className={cn(ledgerTableTh, "text-right")}>Долг</th>
                       <th className={cn(ledgerTableTh, "text-right")}>Оплата</th>
                       <th className={ledgerTableTh}>Способ оплаты</th>
@@ -855,12 +879,9 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                           >
                             <td className={cn(ledgerTableTd, "whitespace-nowrap")}>{formatLedgerDt(r.sort_at)}</td>
                             <td
-                              className={cn(ledgerTableTd, "text-center text-muted-foreground")}
-                              title={r.type_label}
+                              className={cn(ledgerTableTd, "max-w-[12rem]")}
+                              title={`${r.type_label} · код Excel (общий): ${r.type_code}`}
                             >
-                              {r.type_code}
-                            </td>
-                            <td className={cn(ledgerTableTd, "max-w-[12rem]")}>
                               {r.row_kind === "order" && r.order_id != null ? (
                                 <Link
                                   className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
@@ -884,6 +905,12 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                                 r.type_label
                               )}
                             </td>
+                            <td
+                              className={cn(ledgerTableTd, "text-center text-muted-foreground tabular-nums")}
+                              title={r.type_label}
+                            >
+                              {r.type_code}
+                            </td>
                             <td className={cn(ledgerTableTd, "text-right")}>
                               {gd > 0 ? (
                                 <span className="font-medium text-destructive">
@@ -902,7 +929,9 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                                 <span className="text-muted-foreground">—</span>
                               )}
                             </td>
-                            <td className={ledgerTableTd}>{r.payment_type ?? "—"}</td>
+                            <td className={ledgerTableTd} title={formatLedgerPaymentMethodCell(r) || undefined}>
+                              {formatLedgerPaymentMethodCell(r) || "—"}
+                            </td>
                             <td className={cn(ledgerTableTd, "max-w-[9rem] truncate")}>{r.agent_name ?? "—"}</td>
                             <td className={cn(ledgerTableTd, "max-w-[7rem] truncate")}>{r.expeditor_name ?? "—"}</td>
                             <td className={ledgerTableTd}>{consignmentDaNet(r.is_consignment)}</td>
@@ -979,7 +1008,12 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                   <thead>
                     <tr className="border-b border-border bg-muted/60 dark:bg-muted/40">
                       <th className={ledgerTableTh}>Дата</th>
-                      <th className={cn(ledgerTableTh, "text-center")}>Тип</th>
+                      <th
+                        className={ledgerTableTh}
+                        title="Документ (как в колонке «Тип» на вкладке «Общий»). В подсказке — коды для Excel и вида операции."
+                      >
+                        Тип
+                      </th>
                       <th className={cn(ledgerTableTh, "text-center")}>Название типа операции</th>
                       <th className={ledgerTableTh}>Тип заказ</th>
                       <th className={ledgerTableTh}>Консигнация</th>
@@ -1018,7 +1052,33 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                           )}
                         >
                           <td className={cn(ledgerTableTd, "whitespace-nowrap")}>{formatLedgerDt(r.sort_at)}</td>
-                          <td className={cn(ledgerTableTd, "text-center text-muted-foreground")}>{r.type_code}</td>
+                          <td
+                            className={cn(ledgerTableTd, "max-w-[12rem]")}
+                            title={`Код Excel (общий): ${r.type_code} · вид операции: ${r.operation_type_code}`}
+                          >
+                            {r.row_kind === "order" && r.order_id != null ? (
+                              <Link
+                                className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                                href={`/orders/${r.order_id}`}
+                              >
+                                {r.type_label}
+                              </Link>
+                            ) : r.row_kind === "payment" && r.payment_id != null ? (
+                              <Link
+                                className={cn(
+                                  "font-medium underline-offset-2 hover:underline",
+                                  r.entry_kind === "client_expense"
+                                    ? "text-amber-600 dark:text-amber-500"
+                                    : "text-teal-600 dark:text-teal-400"
+                                )}
+                                href={`/payments/${r.payment_id}`}
+                              >
+                                {r.type_label}
+                              </Link>
+                            ) : (
+                              r.type_label
+                            )}
+                          </td>
                           <td className={cn(ledgerTableTd, "text-center font-mono")}>{r.operation_type_code}</td>
                           <td className={ledgerTableTd}>{r.order_kind_label ?? "—"}</td>
                           <td className={ledgerTableTd}>{consignmentDaNet(r.is_consignment)}</td>
@@ -1031,7 +1091,9 @@ export function ClientBalanceLedgerView({ clientId, embedded = false, pageShellC
                           <td className={cn(ledgerTableTd, "text-right")}>
                             <LedgerMoney value={r.balance_after} column="signed" />
                           </td>
-                          <td className={cn(ledgerTableTd, "lowercase")}>{formatPayTypeLower(r.payment_type) || "—"}</td>
+                          <td className={cn(ledgerTableTd, "lowercase")}>
+                            {formatPayTypeLower(formatLedgerPaymentMethodCell(r)) || "—"}
+                          </td>
                           <td className={cn(ledgerTableTd, "max-w-[8rem] truncate")}>{r.agent_name ?? "—"}</td>
                           <td className={cn(ledgerTableTd, "max-w-[7rem] truncate")}>{r.expeditor_name ?? "—"}</td>
                           <td className={cn(ledgerTableTd, "max-w-[9rem] truncate text-muted-foreground")}>

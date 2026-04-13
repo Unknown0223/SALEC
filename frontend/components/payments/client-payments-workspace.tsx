@@ -31,10 +31,19 @@ import { getUserFacingError } from "@/lib/error-utils";
 import { paymentMethodSelectOptions, type ProfilePaymentMethodEntry } from "@/lib/payment-method-options";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import type { ClientRow } from "@/lib/client-types";
+import type { ClientBalanceTerritoryOptions } from "@/lib/client-balances-types";
 import type { PaymentListApiResponse, PaymentListApiRow } from "@/lib/payment-list-types";
+import type { TerritoryNode } from "@/lib/territory-tree";
 import {
+  buildClientTerritoryFilterLevels,
+  buildPaymentTerritorySelectOptions,
+  type ClientTerritoryFilterField
+} from "@/lib/territory-client-filters";
+import {
+  clampPaymentFilterVisibilityToTerritoryLevels,
   DEFAULT_PAYMENT_FILTER_VISIBILITY,
   loadPaymentFilterVisibility,
+  savePaymentFilterVisibility,
   type PaymentFilterVisibility
 } from "@/lib/payment-filters-visibility";
 import {
@@ -89,9 +98,11 @@ type FilterForm = {
   expeditor_user_id: string;
   payment_type: string;
   trade_direction: string;
+  territory_zone: string;
   territory_region: string;
   territory_city: string;
   territory_district: string;
+  territory_neighborhood: string;
   amount_min: string;
   amount_max: string;
   search: string;
@@ -125,9 +136,11 @@ const defaultForm = (): FilterForm => {
     expeditor_user_id: "",
     payment_type: "",
     trade_direction: "",
+    territory_zone: "",
     territory_region: "",
     territory_city: "",
     territory_district: "",
+    territory_neighborhood: "",
     amount_min: "",
     amount_max: "",
     search: ""
@@ -157,13 +170,55 @@ function buildPaymentsQuery(
   if (form.expeditor_user_id.trim()) p.set("expeditor_user_id", form.expeditor_user_id.trim());
   if (form.payment_type.trim()) p.set("payment_type", form.payment_type.trim());
   if (form.trade_direction.trim()) p.set("trade_direction", form.trade_direction.trim());
+  if (form.territory_zone.trim()) p.set("territory_zone", form.territory_zone.trim());
   if (form.territory_region.trim()) p.set("territory_region", form.territory_region.trim());
   if (form.territory_city.trim()) p.set("territory_city", form.territory_city.trim());
   if (form.territory_district.trim()) p.set("territory_district", form.territory_district.trim());
+  if (form.territory_neighborhood.trim()) {
+    p.set("territory_neighborhood", form.territory_neighborhood.trim());
+  }
   if (form.deal_type !== "both") p.set("deal_type", form.deal_type);
   if (form.payment_status) p.set("payment_status", form.payment_status);
   if (form.cash_desk_ids.length > 0) p.set("cash_desk_ids", form.cash_desk_ids.join(","));
   return p.toString();
+}
+
+function readTerritoryFormField(form: FilterForm, field: ClientTerritoryFilterField): string {
+  switch (field) {
+    case "zone":
+      return form.territory_zone;
+    case "region":
+      return form.territory_region;
+    case "city":
+      return form.territory_city;
+    case "district":
+      return form.territory_district;
+    case "neighborhood":
+      return form.territory_neighborhood;
+    default:
+      return "";
+  }
+}
+
+function patchTerritoryFormField(
+  form: FilterForm,
+  field: ClientTerritoryFilterField,
+  value: string
+): FilterForm {
+  switch (field) {
+    case "zone":
+      return { ...form, territory_zone: value };
+    case "region":
+      return { ...form, territory_region: value };
+    case "city":
+      return { ...form, territory_city: value };
+    case "district":
+      return { ...form, territory_district: value };
+    case "neighborhood":
+      return { ...form, territory_neighborhood: value };
+    default:
+      return form;
+  }
 }
 
 function downloadPaymentsExcel(rows: PaymentListApiRow[]) {
@@ -542,9 +597,39 @@ export function ClientPaymentsWorkspace({
     staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{
-        data: { trade_directions: string[]; territories: string[]; territory_tokens: string[] };
+        data: { trade_directions: string[] };
       }>(`/api/${tenantSlug}/agents/filter-options`);
       return data.data;
+    }
+  });
+
+  const territoryOptsQ = useQuery({
+    queryKey: ["client-balances-territory", tenantSlug, "payments-filters"],
+    enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data } = await api.get<{ data: ClientBalanceTerritoryOptions }>(
+        `/api/${tenantSlug}/client-balances/territory-options`
+      );
+      return data.data;
+    }
+  });
+
+  const clientRefsQ = useQuery({
+    queryKey: ["clients-references", tenantSlug, "payments-filters"],
+    enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data } = await api.get<{
+        regions?: string[];
+        cities?: string[];
+        districts?: string[];
+        zones?: string[];
+        neighborhoods?: string[];
+        region_options?: { value: string; label: string }[];
+        city_options?: { value: string; label: string }[];
+      }>(`/api/${tenantSlug}/clients/references`);
+      return data;
     }
   });
 
@@ -557,6 +642,9 @@ export function ClientPaymentsWorkspace({
         references?: {
           payment_types?: string[];
           payment_method_entries?: ProfilePaymentMethodEntry[];
+          territory_levels?: string[];
+          territory_nodes?: TerritoryNode[];
+          trade_directions?: string[];
         };
       }>(`/api/${tenantSlug}/settings/profile`);
       return data.references ?? {};
@@ -568,12 +656,48 @@ export function ClientPaymentsWorkspace({
     [profileQ.data]
   );
 
-  const territoryOptions1 = filterOptQ.data?.territories ?? [];
-  const territoryOptions2 = useMemo(() => {
-    const a = filterOptQ.data?.territories ?? [];
-    const b = filterOptQ.data?.territory_tokens ?? [];
-    return Array.from(new Set([...a, ...b])).sort((x, y) => x.localeCompare(y, "ru"));
-  }, [filterOptQ.data]);
+  const territoryFilterSpecs = useMemo(
+    () => buildClientTerritoryFilterLevels(profileQ.data?.territory_levels),
+    [profileQ.data?.territory_levels]
+  );
+
+  const paymentFilterTerritoryVisibilityRows = useMemo(
+    () =>
+      territoryFilterSpecs.map((s) => ({
+        key: `territory${s.visIndex}` as keyof PaymentFilterVisibility,
+        label: s.label
+      })),
+    [territoryFilterSpecs]
+  );
+
+  useEffect(() => {
+    if (!profileQ.isSuccess) return;
+    setFilterVis((prev) => {
+      const next = clampPaymentFilterVisibilityToTerritoryLevels(prev, territoryFilterSpecs.length);
+      for (const k of ["territory1", "territory2", "territory3", "territory4", "territory5"] as const) {
+        if (prev[k] !== next[k]) {
+          savePaymentFilterVisibility(next);
+          return next;
+        }
+      }
+      return prev;
+    });
+  }, [profileQ.isSuccess, territoryFilterSpecs.length]);
+
+  const tradeDirectionSelectValues = useMemo(() => {
+    const fromAgents = filterOptQ.data?.trade_directions ?? [];
+    const fromProfile = profileQ.data?.trade_directions ?? [];
+    const s = new Set<string>();
+    for (const x of fromAgents) {
+      const t = x.trim();
+      if (t) s.add(t);
+    }
+    for (const x of fromProfile) {
+      const t = x.trim();
+      if (t) s.add(t);
+    }
+    return [...s].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [filterOptQ.data?.trade_directions, profileQ.data?.trade_directions]);
 
   const sliderCeiling = useMemo(() => {
     const rows = listQ.data?.data ?? [];
@@ -806,8 +930,10 @@ export function ClientPaymentsWorkspace({
               filterVis.trade_direction ||
               filterVis.territory1 ||
               filterVis.territory2 ||
-              filterVis.territory3 ? (
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
+              filterVis.territory3 ||
+              filterVis.territory4 ||
+              filterVis.territory5 ? (
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(12rem,1fr))]">
                   {isExpenses ? (
                     <>
                       <div className="space-y-1">
@@ -957,7 +1083,7 @@ export function ClientPaymentsWorkspace({
                         value={draft.trade_direction}
                         onChange={(e) => setDraft((d) => ({ ...d, trade_direction: e.target.value }))}
                       >
-                        {(filterOptQ.data?.trade_directions ?? []).map((td) => (
+                        {tradeDirectionSelectValues.map((td) => (
                           <option key={td} value={td}>
                             {td}
                           </option>
@@ -966,70 +1092,49 @@ export function ClientPaymentsWorkspace({
                     </div>
                   ) : null}
 
-                  {filterVis.territory1 ? (
-                    <div className="space-y-1">
-                      <Label className="text-[0.65rem] text-muted-foreground sm:text-xs">Территория 1</Label>
-                      <FilterSelect
-                        emptyLabel="Все"
-                        className={cn(filterPanelSelectClassName, "max-w-none bg-background")}
-                        value={draft.territory_region}
-                        onChange={(e) => setDraft((d) => ({ ...d, territory_region: e.target.value }))}
-                      >
-                        {territoryOptions1.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </div>
-                  ) : null}
-
-                  {filterVis.territory2 ? (
-                    <div className="space-y-1">
-                      <Label className="text-[0.65rem] text-muted-foreground sm:text-xs">Территория 2</Label>
-                      <FilterSelect
-                        emptyLabel="Все"
-                        className={cn(filterPanelSelectClassName, "max-w-none bg-background")}
-                        value={draft.territory_city}
-                        onChange={(e) => setDraft((d) => ({ ...d, territory_city: e.target.value }))}
-                      >
-                        {territoryOptions2.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </div>
-                  ) : null}
-
-                  {filterVis.territory3 ? (
-                    <div className="space-y-1">
-                      <Label className="text-[0.65rem] text-muted-foreground sm:text-xs">Территория 3</Label>
-                      <FilterSelect
-                        emptyLabel="Все"
-                        className={cn(filterPanelSelectClassName, "max-w-none bg-background")}
-                        value={draft.territory_district}
-                        onChange={(e) => setDraft((d) => ({ ...d, territory_district: e.target.value }))}
-                      >
-                        {territoryOptions2.map((t) => (
-                          <option key={`d-${t}`} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </FilterSelect>
-                    </div>
-                  ) : null}
+                  {territoryFilterSpecs.map((spec) => {
+                    const visKey = `territory${spec.visIndex}` as keyof PaymentFilterVisibility;
+                    if (!filterVis[visKey]) return null;
+                    const opts = buildPaymentTerritorySelectOptions(
+                      spec.field,
+                      clientRefsQ.data,
+                      territoryOptsQ.data,
+                      profileQ.data?.territory_nodes,
+                      readTerritoryFormField(draft, spec.field)
+                    );
+                    return (
+                      <div key={`${spec.field}-${spec.visIndex}`} className="space-y-1">
+                        <Label className="text-[0.65rem] text-muted-foreground sm:text-xs">{spec.label}</Label>
+                        <FilterSelect
+                          emptyLabel="Все"
+                          className={cn(filterPanelSelectClassName, "max-w-none bg-background")}
+                          value={readTerritoryFormField(draft, spec.field)}
+                          onChange={(e) =>
+                            setDraft((d) => patchTerritoryFormField(d, spec.field, e.target.value))
+                          }
+                        >
+                          {opts.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </FilterSelect>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
 
               <div
                 className={cn(
-                  "mt-0.5 flex flex-col gap-2.5 border-t border-border/30 pt-2 sm:flex-row sm:items-end sm:gap-3 sm:pt-2.5",
-                  isExpenses ? "sm:justify-end" : "sm:justify-between"
+                  "mt-0.5 flex flex-col gap-3 border-t border-border/30 pt-2",
+                  isExpenses
+                    ? "sm:flex-row sm:items-end sm:justify-end sm:gap-3 sm:pt-2.5"
+                    : "lg:flex-row lg:items-end lg:justify-between lg:gap-3 lg:pt-2.5"
                 )}
               >
                 {!isExpenses && filterVis.amount ? (
-                  <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="min-w-0 w-full flex-1 space-y-1.5 lg:min-w-0">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-snug text-muted-foreground sm:text-xs">
                       <span className="font-medium text-foreground">Сумма</span>
                       <span className="tabular-nums">
@@ -1084,11 +1189,11 @@ export function ClientPaymentsWorkspace({
                     </div>
                   </div>
                 ) : !isExpenses && !filterVis.amount ? (
-                  <div className="min-w-0 flex-1 text-xs text-muted-foreground sm:text-sm">
+                  <div className="min-w-0 w-full flex-1 text-xs text-muted-foreground sm:text-sm lg:min-w-0">
                     Сумма скрыта — включите «Сумма (от — до)» в «Видимость фильтров».
                   </div>
                 ) : null}
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:pb-0.5">
+                <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:pb-0.5">
                   <button
                     type="button"
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
@@ -1112,108 +1217,112 @@ export function ClientPaymentsWorkspace({
           </Card>
 
           <Card className="border-border/60 shadow-sm">
-            <CardContent className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:p-3.5">
-              <div className="flex min-w-0 w-full items-center gap-2 overflow-x-auto sm:w-auto sm:flex-1 sm:flex-nowrap sm:pb-0">
-                <button
-                  type="button"
-                  className={cn(
-                    buttonVariants({ variant: "outline", size: "sm" }),
-                    "h-9 shrink-0 gap-1.5 px-2.5"
-                  )}
-                  title="Столбцы таблицы"
-                  onClick={() => setColumnDialogOpen(true)}
-                >
-                  <Settings2 className="h-4 w-4" />
-                  <span className="hidden sm:inline">Столбцы</span>
-                </button>
-                <span
-                  className="inline-flex h-9 shrink-0 items-center rounded-lg border border-border bg-muted/30 px-2 text-muted-foreground"
-                  title="Таблица"
-                >
-                  <Table2 className="h-4 w-4" />
-                </span>
-                {!isExpenses ? (
-                  <select
-                    className={cn(filterSelectClassName, "h-9 min-w-[5.5rem] max-w-[8rem] shrink-0 bg-background")}
-                    value={String(tablePrefs.pageSize)}
-                    onChange={(e) => {
-                      const lim = Number.parseInt(e.target.value, 10) || 10;
-                      tablePrefs.setPageSize(lim);
-                      setPage(1);
-                    }}
-                  >
-                    <option value="10">10</option>
-                    <option value="30">30</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                  </select>
-                ) : null}
-                <div className="relative min-w-[10rem] max-w-xs flex-1 sm:min-w-[12rem]">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="h-9 w-full min-w-0 bg-background pl-9"
-                    placeholder="Поиск"
-                    value={draft.search}
-                    onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") applyFilters();
-                    }}
-                  />
-                </div>
-                {!isExpenses ? (
+            <CardContent className="flex flex-col gap-3 p-3 sm:p-3.5">
+              <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <button
                     type="button"
                     className={cn(
                       buttonVariants({ variant: "outline", size: "sm" }),
-                      "h-9 shrink-0 gap-1.5 border-emerald-600/30 text-emerald-800 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                      "h-9 shrink-0 gap-1.5 px-2.5"
                     )}
-                    disabled={!listQ.data?.data.length}
-                    onClick={() => downloadPaymentsExcel(listQ.data?.data ?? [])}
+                    title="Столбцы таблицы"
+                    onClick={() => setColumnDialogOpen(true)}
                   >
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    Excel
+                    <Settings2 className="h-4 w-4" />
+                    <span className="hidden sm:inline">Столбцы</span>
                   </button>
-                ) : null}
-                <span
-                  className="hidden shrink-0 text-xs text-muted-foreground sm:inline"
-                  title="Отмеченные на всех страницах (снимок строки сохраняется)"
-                >
-                  Выбрано: {selectedById.size}
-                </span>
-                {!isExpenses ? (
-                  <>
+                  <span
+                    className="inline-flex h-9 shrink-0 items-center rounded-lg border border-border bg-muted/30 px-2 text-muted-foreground"
+                    title="Таблица"
+                  >
+                    <Table2 className="h-4 w-4" />
+                  </span>
+                  {!isExpenses ? (
+                    <select
+                      className={cn(filterSelectClassName, "h-9 min-w-[5.5rem] max-w-[8rem] shrink-0 bg-background")}
+                      value={String(tablePrefs.pageSize)}
+                      onChange={(e) => {
+                        const lim = Number.parseInt(e.target.value, 10) || 10;
+                        tablePrefs.setPageSize(lim);
+                        setPage(1);
+                      }}
+                    >
+                      <option value="10">10</option>
+                      <option value="30">30</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                  ) : null}
+                  <div className="relative w-full min-w-[10rem] max-w-md shrink-0 sm:w-auto sm:min-w-[12rem] sm:flex-1 sm:max-w-sm">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="h-9 w-full min-w-0 bg-background pl-9"
+                      placeholder="Поиск"
+                      value={draft.search}
+                      onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyFilters();
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-2 lg:border-t-0 lg:pt-0">
+                  {!isExpenses ? (
                     <button
                       type="button"
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 shrink-0 gap-1.5")}
-                      title="Как группировать чеки и какие поля печатать (в этом браузере)"
-                      onClick={() => setReceiptSettingsOpen(true)}
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "h-9 shrink-0 gap-1.5 border-emerald-600/30 text-emerald-800 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                      )}
+                      disabled={!listQ.data?.data.length}
+                      onClick={() => downloadPaymentsExcel(listQ.data?.data ?? [])}
                     >
-                      <Receipt className="h-4 w-4" />
-                      <span className="hidden sm:inline">Чеки</span>
+                      <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      Excel
                     </button>
-                    <button
-                      type="button"
-                      className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-9 shrink-0 gap-1.5")}
-                      title="Печать всех отмеченных одним заданием"
-                      disabled={selectedById.size === 0}
-                      onClick={() => setPrintRows(Array.from(selectedById.values()))}
-                    >
-                      <Printer className="h-4 w-4" />
-                      <span className="hidden sm:inline">Печать</span>
-                      {selectedById.size > 0 ? <span className="tabular-nums">({selectedById.size})</span> : null}
-                    </button>
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-9 w-9 shrink-0 px-0")}
-                  onClick={() => void listQ.refetch()}
-                  title="Обновить"
-                >
-                  <RefreshCw className={cn("h-4 w-4", listQ.isFetching && "animate-spin")} />
-                </button>
+                  ) : null}
+                  <span
+                    className="text-xs text-muted-foreground"
+                    title="Отмеченные на всех страницах (снимок строки сохраняется)"
+                  >
+                    Выбрано: {selectedById.size}
+                  </span>
+                  {!isExpenses ? (
+                    <>
+                      <button
+                        type="button"
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 shrink-0 gap-1.5")}
+                        title="Как группировать чеки и какие поля печатать (в этом браузере)"
+                        onClick={() => setReceiptSettingsOpen(true)}
+                      >
+                        <Receipt className="h-4 w-4" />
+                        <span className="hidden sm:inline">Чеки</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(buttonVariants({ variant: "default", size: "sm" }), "h-9 shrink-0 gap-1.5")}
+                        title="Печать всех отмеченных одним заданием"
+                        disabled={selectedById.size === 0}
+                        onClick={() => setPrintRows(Array.from(selectedById.values()))}
+                      >
+                        <Printer className="h-4 w-4" />
+                        <span className="hidden sm:inline">Печать</span>
+                        {selectedById.size > 0 ? <span className="tabular-nums">({selectedById.size})</span> : null}
+                      </button>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-9 w-9 shrink-0 px-0")}
+                    onClick={() => void listQ.refetch()}
+                    title="Обновить"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", listQ.isFetching && "animate-spin")} />
+                  </button>
+                </div>
               </div>
-              <p className="shrink-0 text-xs text-muted-foreground sm:max-w-[min(100%,20rem)] sm:text-right">
+              <p className="text-xs text-muted-foreground lg:text-right">
                 {isExpenses
                   ? "Расходы клиента (уменьшают баланс)"
                   : "Список платежей, разрешённых для изменения"}
@@ -1501,6 +1610,8 @@ export function ClientPaymentsWorkspace({
         onOpenChange={setFilterVisDialogOpen}
         value={filterVis}
         onChange={setFilterVis}
+        territoryRows={paymentFilterTerritoryVisibilityRows}
+        territoryLevelCount={territoryFilterSpecs.length}
       />
 
       <DateRangePopover

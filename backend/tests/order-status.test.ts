@@ -4,7 +4,9 @@ import {
   getAllowedNextStatuses,
   isBackwardTransition,
   isOperatorLateStageCancelForbidden,
-  isValidOrderStatus
+  isValidOrderStatus,
+  orderTypeHasTradeReceivableDebtSemantics,
+  statusContributesToDeliveredReceivableDebt
 } from "../src/modules/orders/order-status";
 
 describe("order-status", () => {
@@ -65,5 +67,18 @@ describe("order-status", () => {
     expect(isOperatorLateStageCancelForbidden("delivering", "cancelled")).toBe(true);
     expect(isOperatorLateStageCancelForbidden("confirmed", "cancelled")).toBe(false);
     expect(isOperatorLateStageCancelForbidden("picking", "delivering")).toBe(false);
+  });
+
+  it("delivered-only receivable debt: trade order + delivered; not delivering/cancelled/new", () => {
+    expect(statusContributesToDeliveredReceivableDebt("delivering", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("delivered", "order")).toBe(true);
+    expect(statusContributesToDeliveredReceivableDebt("cancelled", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("returned", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("new", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("confirmed", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("picking", "order")).toBe(false);
+    expect(statusContributesToDeliveredReceivableDebt("delivered", "return")).toBe(false);
+    expect(orderTypeHasTradeReceivableDebtSemantics("order")).toBe(true);
+    expect(orderTypeHasTradeReceivableDebtSemantics("return")).toBe(false);
   });
 });

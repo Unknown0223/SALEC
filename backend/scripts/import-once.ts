@@ -4,6 +4,9 @@
  * Nima qiladi:
  *   [1/4]…[4/4] — zona/viloyat, savdo kanali, yo‘nalish, ombor, tenant.settings
  *   (ixtiyoriy) Xodimlar CSV
+ *   (ixtiyoriy) Supervayzerlar Excel «Супервайзеры» (agentlardan oldin)
+ *   (ixtiyoriy) Faol agentlar Excel «Активные агенты»
+ *   (ixtiyoriy) Faol eksportlar Excel «Активные экспедиторы»
  *   (ixtiyoriy) Mahsulotlar JSON
  *   (ixtiyoriy) demo_* foydalanuvchilar parolini bir xil qilish
  *
@@ -12,6 +15,13 @@
  *   $env:IMPORT_STAFF_CSV='scripts/mening-xodimlarim.csv'  # ixtiyoriy
  *   (CSV bermasangiz, `scripts/sample-staff.csv` bor bo‘lsa, avtomatik olinadi)
  *   Xodimlarni umuman o‘tkazmaslik: IMPORT_ONCE_NO_STAFF=1
+ *   Supervayzerlar: SUPERVISORS_XLSX_PATH yoki scripts/data/Супервайзеры (1).xlsx | …
+ *   O‘tkazmaslik: IMPORT_ONCE_NO_SUPERVISORS_XLSX=1
+ *   Agentlar: AGENTS_XLSX_PATH yoki scripts/data/Активные агенты*.xlsx
+ *   O‘tkazmaslik: IMPORT_ONCE_NO_AGENTS_XLSX=1
+ *   Eksportlar: EXPEDITORS_XLSX_PATH yoki scripts/data/Активные Активные экспедиторы (2).xlsx | …
+ *   O‘tkazmaslik: IMPORT_ONCE_NO_EXPEDITORS_XLSX=1
+ *   Yangi foydalanuvchi paroli: IMPORT_DEFAULT_PASSWORD yoki AGENTS_IMPORT_PASSWORD / …
  *   $env:IMPORT_PRODUCTS_JSON='scripts/data/mahsulotlar.json'  # ixtiyoriy (bo‘sh bo‘lmasa, avtomatik ham olinadi)
  *   npm run import:once
  *
@@ -36,6 +46,14 @@ import { runLalakuReferenceImport } from "./lib/lalaku-reference-import";
 import { runStaffImportFromCsv } from "./lib/staff-csv-import";
 import { runProductsImportFromJson } from "./lib/import-products-json";
 import { runEnsureDemoStaffLogin } from "./lib/ensure-demo-login";
+import {
+  resolveAgentsXlsxPath,
+  resolveExpeditorsXlsxPath,
+  resolveSupervisorsXlsxPath,
+  runActiveAgentsXlsxImport,
+  runExpeditorsXlsxImport,
+  runSupervisorsXlsxImport
+} from "./lib/active-agents-xlsx-import";
 
 const prisma = new PrismaClient();
 
@@ -117,6 +135,87 @@ async function main() {
     });
   } else {
     console.log("\n(o‘tkazib yuborildi) IMPORT_STAFF_CSV — xodimlar CSV yo‘q.");
+  }
+
+  const staffXlsxPass = (
+    process.env.SUPERVISORS_IMPORT_PASSWORD ||
+    process.env.EXPEDITORS_IMPORT_PASSWORD ||
+    process.env.AGENTS_IMPORT_PASSWORD ||
+    process.env.IMPORT_DEFAULT_PASSWORD ||
+    "Parol123!"
+  ).trim();
+  const staffXlsxReset = truthy(process.env.AGENTS_RESET_PASSWORD);
+
+  if (!truthy(process.env.IMPORT_ONCE_NO_SUPERVISORS_XLSX)) {
+    const supResolved = resolveSupervisorsXlsxPath(cwdBackend, process.env.SUPERVISORS_XLSX_PATH);
+    if (supResolved.ok) {
+      const pw = (process.env.SUPERVISORS_IMPORT_PASSWORD || staffXlsxPass).trim();
+      await runSupervisorsXlsxImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        xlsxPath: supResolved.path,
+        dry,
+        defaultPassword: pw,
+        resetPassword: staffXlsxReset
+      });
+    } else if (supResolved.reason === "missing_env_file") {
+      throw new Error(`SUPERVISORS_XLSX_PATH berildi, fayl yo‘q: ${supResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Supervayzerlar Excel — topilmadi. SUPERVISORS_XLSX_PATH yoki scripts/data/Супервайзеры*.xlsx."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_SUPERVISORS_XLSX=1.");
+  }
+
+  if (!truthy(process.env.IMPORT_ONCE_NO_AGENTS_XLSX)) {
+    const agentsResolved = resolveAgentsXlsxPath(cwdBackend, process.env.AGENTS_XLSX_PATH);
+    if (agentsResolved.ok) {
+      const agentPass = (process.env.AGENTS_IMPORT_PASSWORD || staffXlsxPass).trim();
+      await runActiveAgentsXlsxImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        xlsxPath: agentsResolved.path,
+        dry,
+        defaultPassword: agentPass,
+        resetPassword: staffXlsxReset
+      });
+    } else if (agentsResolved.reason === "missing_env_file") {
+      throw new Error(`AGENTS_XLSX_PATH berildi, fayl yo‘q: ${agentsResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Faol agentlar Excel — fayl topilmadi. AGENTS_XLSX_PATH yoki scripts/data/Активные агенты*.xlsx."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_AGENTS_XLSX=1 — agentlar Excel.");
+  }
+
+  if (!truthy(process.env.IMPORT_ONCE_NO_EXPEDITORS_XLSX)) {
+    const expResolved = resolveExpeditorsXlsxPath(cwdBackend, process.env.EXPEDITORS_XLSX_PATH);
+    if (expResolved.ok) {
+      const pw = (process.env.EXPEDITORS_IMPORT_PASSWORD || staffXlsxPass).trim();
+      await runExpeditorsXlsxImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        xlsxPath: expResolved.path,
+        dry,
+        defaultPassword: pw,
+        resetPassword: staffXlsxReset
+      });
+    } else if (expResolved.reason === "missing_env_file") {
+      throw new Error(`EXPEDITORS_XLSX_PATH berildi, fayl yo‘q: ${expResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Eksportlar Excel — topilmadi. EXPEDITORS_XLSX_PATH yoki scripts/data/Активные*экспедиторы*.xlsx."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_EXPEDITORS_XLSX=1.");
   }
 
   let productsJson = (process.env.IMPORT_PRODUCTS_JSON || "").trim();

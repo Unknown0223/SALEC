@@ -23,8 +23,13 @@ import { getUserFacingError } from "@/lib/error-utils";
 import { useUserTablePrefs } from "@/hooks/use-user-table-prefs";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { formatGroupedInteger, formatNumberGrouped } from "@/lib/format-numbers";
+import {
+  paymentMethodSelectOptions,
+  type ProfilePaymentMethodEntry
+} from "@/lib/payment-method-options";
 import { STALE } from "@/lib/query-stale";
 import {
+  formatOrderListDebtAsClientLiability,
   ORDER_LIST_COLUMNS,
   ORDER_LIST_COLUMN_IDS,
   ORDERS_LIST_TABLE_ID,
@@ -71,6 +76,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 const VALID_STATUSES = new Set<string>(ORDER_STATUS_VALUES);
 const VALID_ORDER_TYPES = new Set<string>(ORDER_TYPE_VALUES);
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const VALID_DATE_MODES = new Set<OrdersDateMode>(["created", "order", "ship"]);
+
+type OrdersDateMode = "created" | "order" | "ship";
 
 type OrdersUrlFilters = {
   status: string;
@@ -84,6 +92,12 @@ type OrdersUrlFilters = {
   client_id: string;
   product_id: string;
   client_category: string;
+  date_mode: OrdersDateMode;
+  /** URL: true | false | "" */
+  is_consignment: "" | "true" | "false";
+  product_category_id: string;
+  payment_type: string;
+  payment_method_ref: string;
 };
 
 type OrdersFilterVisibility = {
@@ -91,6 +105,8 @@ type OrdersFilterVisibility = {
   orderType: boolean;
   nakladnoyType: boolean;
   paymentMethod: boolean;
+  /** Платёж по заказу (client_payments.payment_type) */
+  paymentLinkedType: boolean;
   priceType: boolean;
   day: boolean;
   clientCategory: boolean;
@@ -113,6 +129,7 @@ const DEFAULT_ORDERS_FILTER_VISIBILITY: OrdersFilterVisibility = {
   orderType: true,
   nakladnoyType: true,
   paymentMethod: true,
+  paymentLinkedType: true,
   priceType: true,
   day: true,
   clientCategory: true,
@@ -151,6 +168,19 @@ function parseOrdersUrl(searchParams: URLSearchParams): OrdersUrlFilters {
   const client_category = (searchParams.get("client_category")?.trim() ?? "").slice(0, 128);
   const rawOrderType = searchParams.get("order_type")?.trim() ?? "";
   const order_type = VALID_ORDER_TYPES.has(rawOrderType) ? rawOrderType : "";
+  const rawDm = (searchParams.get("date_mode")?.trim().toLowerCase() ?? "") as OrdersDateMode;
+  const date_mode: OrdersDateMode = VALID_DATE_MODES.has(rawDm) ? rawDm : "ship";
+  const icRaw = searchParams.get("is_consignment")?.trim().toLowerCase() ?? "";
+  const is_consignment: "" | "true" | "false" =
+    icRaw === "true" || icRaw === "1" || icRaw === "yes"
+      ? "true"
+      : icRaw === "false" || icRaw === "0" || icRaw === "no"
+        ? "false"
+        : "";
+  const pc = searchParams.get("product_category_id")?.trim() ?? "";
+  const product_category_id = /^\d+$/.test(pc) ? pc : "";
+  const payment_type = (searchParams.get("payment_type")?.trim() ?? "").slice(0, 64);
+  const payment_method_ref = (searchParams.get("payment_method_ref")?.trim() ?? "").slice(0, 64);
   return {
     status,
     order_type,
@@ -162,7 +192,12 @@ function parseOrdersUrl(searchParams: URLSearchParams): OrdersUrlFilters {
     date_to,
     client_id,
     product_id,
-    client_category
+    client_category,
+    date_mode,
+    is_consignment,
+    product_category_id,
+    payment_type,
+    payment_method_ref
   };
 }
 
@@ -268,8 +303,6 @@ function OrdersPageContent() {
   const [nakladnoySettingsOpen, setNakladnoySettingsOpen] = useState(false);
   const [nakladnoyFeedback, setNakladnoyFeedback] = useState<string | null>(null);
   const [statusRowError, setStatusRowError] = useState<Record<number, string>>({});
-  /** UI: Lalaku — «Дата отгрузки»; API hozircha faqat `created_at` oralig‘i */
-  const [dateFieldMode, setDateFieldMode] = useState<"created" | "order" | "ship">("ship");
   const [totalsDialogOpen, setTotalsDialogOpen] = useState(false);
   const [bulkExpeditorChoice, setBulkExpeditorChoice] = useState<string>("");
   const [bulkExpFeedback, setBulkExpFeedback] = useState<string | null>(null);
@@ -292,7 +325,9 @@ function OrdersPageContent() {
       const parsed = JSON.parse(raw) as Partial<OrdersFilterVisibility>;
       setFilterVisibility({
         ...DEFAULT_ORDERS_FILTER_VISIBILITY,
-        ...parsed
+        ...parsed,
+        paymentLinkedType:
+          parsed.paymentLinkedType ?? DEFAULT_ORDERS_FILTER_VISIBILITY.paymentLinkedType
       });
     } catch {
       setFilterVisibility(DEFAULT_ORDERS_FILTER_VISIBILITY);
@@ -351,7 +386,14 @@ function OrdersPageContent() {
         client_id: patch.client_id !== undefined ? patch.client_id : cur.client_id,
         product_id: patch.product_id !== undefined ? patch.product_id : cur.product_id,
         client_category:
-          patch.client_category !== undefined ? patch.client_category : cur.client_category
+          patch.client_category !== undefined ? patch.client_category : cur.client_category,
+        date_mode: patch.date_mode !== undefined ? patch.date_mode : cur.date_mode,
+        is_consignment: patch.is_consignment !== undefined ? patch.is_consignment : cur.is_consignment,
+        product_category_id:
+          patch.product_category_id !== undefined ? patch.product_category_id : cur.product_category_id,
+        payment_type: patch.payment_type !== undefined ? patch.payment_type : cur.payment_type,
+        payment_method_ref:
+          patch.payment_method_ref !== undefined ? patch.payment_method_ref : cur.payment_method_ref
       };
       const p = new URLSearchParams();
       if (next.status) p.set("status", next.status);
@@ -365,6 +407,12 @@ function OrdersPageContent() {
       if (next.client_id) p.set("client_id", next.client_id);
       if (next.product_id) p.set("product_id", next.product_id);
       if (next.client_category) p.set("client_category", next.client_category);
+      if (next.date_mode !== "ship") p.set("date_mode", next.date_mode);
+      if (next.is_consignment === "true") p.set("is_consignment", "true");
+      if (next.is_consignment === "false") p.set("is_consignment", "false");
+      if (next.product_category_id) p.set("product_category_id", next.product_category_id);
+      if (next.payment_type) p.set("payment_type", next.payment_type);
+      if (next.payment_method_ref) p.set("payment_method_ref", next.payment_method_ref);
       const qs = p.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -397,11 +445,15 @@ function OrdersPageContent() {
       filters.expeditor_id,
       filters.date_from,
       filters.date_to,
+      filters.date_mode,
+      filters.is_consignment,
+      filters.product_category_id,
+      filters.payment_type,
+      filters.payment_method_ref,
       filters.product_id,
       filters.client_category,
       debouncedSearch,
-      tablePrefs.pageSize,
-      dateFieldMode
+      tablePrefs.pageSize
     ],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.list,
@@ -422,7 +474,14 @@ function OrdersPageContent() {
       if (filters.date_to) params.set("date_to", filters.date_to);
       if (filters.product_id) params.set("product_id", filters.product_id);
       if (filters.client_category) params.set("client_category", filters.client_category);
-      if (dateFieldMode !== "created") params.set("date_mode", dateFieldMode);
+      params.set("date_mode", filters.date_mode);
+      if (filters.is_consignment === "true") params.set("is_consignment", "true");
+      if (filters.is_consignment === "false") params.set("is_consignment", "false");
+      if (filters.product_category_id) params.set("product_category_id", filters.product_category_id);
+      if (filters.payment_type.trim()) params.set("payment_type", filters.payment_type.trim());
+      if (filters.payment_method_ref.trim()) {
+        params.set("payment_method_ref", filters.payment_method_ref.trim());
+      }
       const { data: body } = await api.get<OrdersResponse>(
         `/api/${tenantSlug}/orders?${params.toString()}`
       );
@@ -486,6 +545,56 @@ function OrdersPageContent() {
     }
   });
 
+  const productCategoriesQ = useQuery({
+    queryKey: ["product-categories", tenantSlug, "orders-filter"],
+    enabled: Boolean(tenantSlug) && canBulkCatalog,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data: body } = await api.get<{
+        data: { id: number; name: string; is_active?: boolean }[];
+      }>(`/api/${tenantSlug}/product-categories`);
+      return (body.data ?? []).filter((c) => c.is_active !== false);
+    }
+  });
+
+  const ordersProfileRefsQ = useQuery({
+    queryKey: ["settings", "profile", tenantSlug, "orders-filters"],
+    enabled: Boolean(tenantSlug) && canBulkCatalog,
+    staleTime: STALE.profile,
+    queryFn: async () => {
+      const { data } = await api.get<{
+        references?: {
+          payment_types?: string[];
+          payment_method_entries?: ProfilePaymentMethodEntry[];
+        };
+      }>(`/api/${tenantSlug}/settings/profile`);
+      return data.references ?? {};
+    }
+  });
+
+  const paymentMethodFilterOpts = useMemo(
+    () =>
+      paymentMethodSelectOptions(
+        ordersProfileRefsQ.data,
+        ordersProfileRefsQ.data?.payment_types ?? null
+      ),
+    [ordersProfileRefsQ.data]
+  );
+
+  const paymentTypeFilterOpts = useMemo(() => {
+    const raw = ordersProfileRefsQ.data?.payment_types;
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    for (const x of raw) {
+      const t = String(x).trim().slice(0, 64);
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push({ value: t, label: t });
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  }, [ordersProfileRefsQ.data?.payment_types]);
+
   const selectedRows = useMemo(
     () => rows.filter((r) => selectedOrderIds.has(r.id)),
     [rows, selectedOrderIds]
@@ -496,18 +605,21 @@ function OrdersPageContent() {
     let total = 0;
     let discount = 0;
     let bonusQty = 0;
+    let debt = 0;
     for (const r of selectedRows) {
       qty += parseNumField(r.qty);
       total += parseNumField(r.total_sum);
       discount += parseNumField(r.discount_sum ?? "0");
       bonusQty += parseNumField(r.bonus_qty ?? "0");
+      if (r.debt != null && r.debt !== "") debt += parseNumField(r.debt);
     }
     return {
       count: selectedRows.length,
       qty,
       total,
       discount,
-      bonusQty
+      bonusQty,
+      debt
     };
   }, [selectedRows]);
 
@@ -520,7 +632,8 @@ function OrdersPageContent() {
     { key: "status", label: "Статус" },
     { key: "orderType", label: "Тип" },
     { key: "nakladnoyType", label: "Тип накладной" },
-    { key: "paymentMethod", label: "Способ оплаты" },
+    { key: "paymentMethod", label: "Способ оплаты (заказ)" },
+    { key: "paymentLinkedType", label: "Тип платежа (по заказу)" },
     { key: "priceType", label: "Тип цены" },
     { key: "day", label: "День" },
     { key: "clientCategory", label: "Категория клиента" },
@@ -693,11 +806,11 @@ function OrdersPageContent() {
         return o.delivered_at ? new Date(o.delivered_at).toLocaleDateString() : "—";
       case "status": {
         const canPatch = effectiveRole === "admin" || effectiveRole === "operator";
-        const allowed = o.allowed_next_statuses ?? [];
-        const optionSet = new Set<string>([o.status, ...allowed]);
-        const ordered = ORDER_STATUS_VALUES.filter((v) => optionSet.has(v));
+        const allowedRaw = o.allowed_next_statuses ?? [];
+        const nextOnly = new Set(allowedRaw.filter((s) => s !== o.status));
+        const nextStatuses = ORDER_STATUS_VALUES.filter((v) => nextOnly.has(v));
         const err = statusRowError[o.id];
-        if (!canPatch || ordered.length <= 1) {
+        if (!canPatch || nextStatuses.length === 0) {
           return (
             <span className="inline-flex flex-col gap-0.5 align-top">
               <span className="w-fit rounded-md bg-muted px-2 py-0.5 text-xs">
@@ -722,7 +835,10 @@ function OrdersPageContent() {
               }}
               aria-label="Zakaz holati"
             >
-              {ordered.map((s) => (
+              <option value={o.status} disabled hidden>
+                {ORDER_STATUS_LABELS[o.status] ?? o.status}
+              </option>
+              {nextStatuses.map((s) => (
                 <option key={s} value={s}>
                   {ORDER_STATUS_LABELS[s] ?? s}
                 </option>
@@ -772,10 +888,25 @@ function OrdersPageContent() {
           </span>
         );
       }
-      case "balance":
-        return o.balance == null ? "—" : formatNumberGrouped(o.balance, { maxFractionDigits: 2 });
-      case "debt":
-        return o.debt == null ? "—" : formatNumberGrouped(o.debt, { maxFractionDigits: 2 });
+      case "balance": {
+        if (o.balance == null) return "—";
+        const b = parseNumField(o.balance);
+        return (
+          <span
+            className={cn("tabular-nums", b < 0 && "font-medium text-destructive")}
+          >
+            {formatNumberGrouped(o.balance, { maxFractionDigits: 2 })}
+          </span>
+        );
+      }
+      case "debt": {
+        const debtTxt = formatOrderListDebtAsClientLiability(o.debt);
+        return debtTxt ? (
+          <span className="tabular-nums font-medium text-destructive">{debtTxt}</span>
+        ) : (
+          "—"
+        );
+      }
       case "price_type":
         return o.price_type ?? "—";
       case "warehouse_name":
@@ -845,8 +976,8 @@ function OrdersPageContent() {
                   type="radio"
                   name="orders-date-mode"
                   className="size-4 border-input"
-                  checked={dateFieldMode === "order"}
-                  onChange={() => setDateFieldMode("order")}
+                  checked={filters.date_mode === "order"}
+                  onChange={() => replaceOrdersQuery({ date_mode: "order", page: 1 })}
                 />
                 <span>Дата заказа</span>
               </label>
@@ -855,8 +986,8 @@ function OrdersPageContent() {
                   type="radio"
                   name="orders-date-mode"
                   className="size-4 border-input"
-                  checked={dateFieldMode === "ship"}
-                  onChange={() => setDateFieldMode("ship")}
+                  checked={filters.date_mode === "ship"}
+                  onChange={() => replaceOrdersQuery({ date_mode: "ship", page: 1 })}
                 />
                 <span>Дата отгрузки</span>
               </label>
@@ -865,8 +996,8 @@ function OrdersPageContent() {
                   type="radio"
                   name="orders-date-mode"
                   className="size-4 border-input"
-                  checked={dateFieldMode === "created"}
-                  onChange={() => setDateFieldMode("created")}
+                  checked={filters.date_mode === "created"}
+                  onChange={() => replaceOrdersQuery({ date_mode: "created", page: 1 })}
                 />
                 <span>Дата создания</span>
               </label>
@@ -970,9 +1101,23 @@ function OrdersPageContent() {
           </div>
 
           <p className="text-[11px] text-foreground/72">
-            Интервал дат на сервере пока фильтрует по{" "}
-            <span className="font-medium text-foreground">дате создания</span>; режимы «заказ / отгрузка» —
-            подготовка под API.
+            Интервал дат:{" "}
+            {filters.date_mode === "ship" ? (
+              <>
+                по первому переходу в статус <span className="font-medium text-foreground">«Отгружен»</span>{" "}
+                (лог <span className="font-mono">delivering</span>)
+              </>
+            ) : filters.date_mode === "order" ? (
+              <>
+                <span className="font-medium text-foreground">дата заказа</span> — как дата создания записи
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">дата создания</span> записи в системе
+              </>
+            )}
+            . «Долг» — только для доставленных продаж (<span className="font-mono">delivered</span>): сумма
+            заказа минус распределённые оплаты.
           </p>
 
           {tenantSlug ? (
@@ -1014,7 +1159,54 @@ function OrdersPageContent() {
                 </label>
                 ) : null}
                 {filterVisibility.nakladnoyType ? <OrdersFilterStubSelect label="Тип накладной" /> : null}
-                {filterVisibility.paymentMethod ? <OrdersFilterStubSelect label="Способ оплаты" /> : null}
+                {filterVisibility.paymentMethod ? (
+                <label className="orders-filter-field-label">
+                  Способ оплаты (заказ)
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={filters.payment_method_ref}
+                    onChange={(e) =>
+                      replaceOrdersQuery({ payment_method_ref: e.target.value, page: 1 })
+                    }
+                    disabled={!canBulkCatalog && paymentMethodFilterOpts.length === 0}
+                    title={
+                      !canBulkCatalog
+                        ? "Каталог способов оплаты доступен оператору/админу"
+                        : undefined
+                    }
+                  >
+                    <option value="">Все</option>
+                    {paymentMethodFilterOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                ) : null}
+                {filterVisibility.paymentLinkedType ? (
+                <label className="orders-filter-field-label">
+                  Тип платежа (по заказу)
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={filters.payment_type}
+                    onChange={(e) => replaceOrdersQuery({ payment_type: e.target.value, page: 1 })}
+                    disabled={!canBulkCatalog && paymentTypeFilterOpts.length === 0}
+                    title={
+                      !canBulkCatalog
+                        ? "Список типов платежей доступен оператору/админу"
+                        : undefined
+                    }
+                  >
+                    <option value="">Все</option>
+                    {paymentTypeFilterOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                ) : null}
                 {filterVisibility.priceType ? <OrdersFilterStubSelect label="Тип цены" /> : null}
                 {filterVisibility.day ? <OrdersFilterStubSelect label="День" /> : null}
                 {filterVisibility.clientCategory ? (
@@ -1044,7 +1236,31 @@ function OrdersPageContent() {
                   />
                 </label>
                 ) : null}
-                {filterVisibility.productCategory ? <OrdersFilterStubSelect label="Категория продукта" /> : null}
+                {filterVisibility.productCategory ? (
+                <label className="orders-filter-field-label">
+                  Категория продукта
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={filters.product_category_id}
+                    onChange={(e) =>
+                      replaceOrdersQuery({ product_category_id: e.target.value, page: 1 })
+                    }
+                    disabled={!canBulkCatalog || productCategoriesQ.isLoading}
+                    title={
+                      !canBulkCatalog
+                        ? "Список категорий доступен оператору/админу"
+                        : undefined
+                    }
+                  >
+                    <option value="">Все</option>
+                    {(productCategoriesQ.data ?? []).map((c) => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                ) : null}
                 {filterVisibility.product ? (
                 <label className="orders-filter-field-label">
                   Продукт
@@ -1111,7 +1327,25 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <OrdersFilterStubSelect label="Консигнация" />
+                {filterVisibility.consignment ? (
+                <label className="orders-filter-field-label">
+                  Консигнация
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    value={filters.is_consignment}
+                    onChange={(e) =>
+                      replaceOrdersQuery({
+                        is_consignment: e.target.value as "" | "true" | "false",
+                        page: 1
+                      })
+                    }
+                  >
+                    <option value="">Все</option>
+                    <option value="true">Да</option>
+                    <option value="false">Нет</option>
+                  </select>
+                </label>
+                ) : null}
                 <OrdersFilterStubSelect label="Направление торговли" />
                 <OrdersFilterStubSelect label="Территория 1" />
                 <OrdersFilterStubSelect label="Территория 2" />
@@ -1144,7 +1378,12 @@ function OrdersPageContent() {
                     !filters.client_category &&
                     !filters.client_id &&
                     !filters.order_type &&
-                    !filters.status
+                    !filters.status &&
+                    filters.is_consignment === "" &&
+                    !filters.product_category_id &&
+                    !filters.payment_type &&
+                    !filters.payment_method_ref &&
+                    filters.date_mode === "ship"
                   }
                   onClick={() =>
                     replaceOrdersQuery({
@@ -1158,6 +1397,11 @@ function OrdersPageContent() {
                       client_id: "",
                       order_type: "",
                       status: "",
+                      is_consignment: "",
+                      product_category_id: "",
+                      payment_type: "",
+                      payment_method_ref: "",
+                      date_mode: "ship",
                       page: 1
                     })
                   }
@@ -1308,7 +1552,9 @@ function OrdersPageContent() {
                         colId === "qty" ||
                           colId === "total_sum" ||
                           colId === "discount_sum" ||
-                          colId === "bonus_qty";
+                          colId === "bonus_qty" ||
+                          colId === "balance" ||
+                          colId === "debt";
                       return (
                         <th
                           key={colId}
@@ -1340,7 +1586,9 @@ function OrdersPageContent() {
                           colId === "qty" ||
                           colId === "total_sum" ||
                           colId === "discount_sum" ||
-                          colId === "bonus_qty";
+                          colId === "bonus_qty" ||
+                          colId === "balance" ||
+                          colId === "debt";
                         return (
                           <td
                             key={colId}
@@ -1700,7 +1948,8 @@ function OrdersPageContent() {
           <DialogHeader>
             <DialogTitle>Tanlangan zakazlar bo‘yicha itoglar</DialogTitle>
             <DialogDescription>
-              Joriy sahifadan tanlangan qatorlar (serverdan qayta hisoblanmagan).
+              Joriy sahifadan tanlangan qatorlar. «Долг» — faqat tanlovda yetkazilgan savdo zakazlari
+              ustunidagi qiymatlar yig‘indisi.
             </DialogDescription>
           </DialogHeader>
           <dl className="grid gap-2 text-sm">
@@ -1728,10 +1977,16 @@ function OrdersPageContent() {
                 {formatNumberGrouped(selectionTotals.discount, { maxFractionDigits: 2 })}
               </dd>
             </div>
-            <div className="flex justify-between gap-4 py-1">
+            <div className="flex justify-between gap-4 border-b border-border/60 py-1">
               <dt className="text-muted-foreground">Jami bonus (dona)</dt>
               <dd className="font-medium tabular-nums">
                 {formatNumberGrouped(selectionTotals.bonusQty, { maxFractionDigits: 3 })}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4 py-1">
+              <dt className="text-muted-foreground">Jami долг (tanlangan)</dt>
+              <dd className="font-medium tabular-nums">
+                {formatNumberGrouped(selectionTotals.debt, { maxFractionDigits: 2 })}
               </dd>
             </div>
           </dl>

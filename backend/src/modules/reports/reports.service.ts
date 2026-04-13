@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import * as XLSX from "xlsx";
 import { prisma } from "../../config/database";
-import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
+import { ORDER_STATUSES_OUTSTANDING_RECEIVABLE } from "../orders/order-status";
 
 /** ─── Helpers ─────────────────────────────────────────────── */
 
@@ -662,12 +662,6 @@ export type ClientReceivablesResult = {
   limit: number;
 };
 
-function receivableExcludedStatusSql() {
-  return Prisma.join(
-    ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE.map((s) => Prisma.sql`${s}`)
-  );
-}
-
 export async function getClientReceivables(
   tenantId: number,
   opts: {
@@ -696,26 +690,32 @@ export async function getClientReceivables(
       ? Prisma.sql`AND credit_limit > 0 AND outstanding > (credit_limit + account_balance)`
       : Prisma.empty;
 
-  const st = receivableExcludedStatusSql();
-
   const countRows = await prisma.$queryRaw<[{ total: bigint }]>`
-    WITH oagg AS (
+    WITH alloc AS (
+      SELECT pa.order_id, SUM(pa.amount)::numeric(15,2) AS sum_amt
+      FROM payment_allocations pa
+      WHERE pa.tenant_id = ${tenantId}
+      GROUP BY pa.order_id
+    ),
+    unpaid AS (
       SELECT o.client_id,
-        SUM(o.total_sum)::numeric(15,2) AS outstanding
+        SUM(GREATEST(o.total_sum - COALESCE(a.sum_amt, 0), 0))::numeric(15,2) AS outstanding
       FROM orders o
+      LEFT JOIN alloc a ON a.order_id = o.id
       WHERE o.tenant_id = ${tenantId}
-        AND o.status NOT IN (${st})
+        AND o.order_type = 'order'
+        AND o.status IN (${Prisma.join([...ORDER_STATUSES_OUTSTANDING_RECEIVABLE])})
       GROUP BY o.client_id
-      HAVING SUM(o.total_sum) > 0
+      HAVING SUM(GREATEST(o.total_sum - COALESCE(a.sum_amt, 0), 0)) > 0
     ),
     fr AS (
       SELECT
         c.id AS client_id,
         c.credit_limit::numeric(15,2) AS credit_limit,
         COALESCE(cb.balance, 0)::numeric(15,2) AS account_balance,
-        oagg.outstanding
-      FROM oagg
-      INNER JOIN clients c ON c.id = oagg.client_id AND c.tenant_id = ${tenantId}
+        unpaid.outstanding
+      FROM unpaid
+      INNER JOIN clients c ON c.id = unpaid.client_id AND c.tenant_id = ${tenantId}
       LEFT JOIN client_balances cb ON cb.tenant_id = c.tenant_id AND cb.client_id = c.id
       WHERE c.merged_into_client_id IS NULL
         ${searchClause}
@@ -744,14 +744,22 @@ export async function getClientReceivables(
       over_limit: boolean;
     }>
   >`
-    WITH oagg AS (
+    WITH alloc AS (
+      SELECT pa.order_id, SUM(pa.amount)::numeric(15,2) AS sum_amt
+      FROM payment_allocations pa
+      WHERE pa.tenant_id = ${tenantId}
+      GROUP BY pa.order_id
+    ),
+    unpaid AS (
       SELECT o.client_id,
-        SUM(o.total_sum)::numeric(15,2) AS outstanding
+        SUM(GREATEST(o.total_sum - COALESCE(a.sum_amt, 0), 0))::numeric(15,2) AS outstanding
       FROM orders o
+      LEFT JOIN alloc a ON a.order_id = o.id
       WHERE o.tenant_id = ${tenantId}
-        AND o.status NOT IN (${st})
+        AND o.order_type = 'order'
+        AND o.status IN (${Prisma.join([...ORDER_STATUSES_OUTSTANDING_RECEIVABLE])})
       GROUP BY o.client_id
-      HAVING SUM(o.total_sum) > 0
+      HAVING SUM(GREATEST(o.total_sum - COALESCE(a.sum_amt, 0), 0)) > 0
     ),
     fr AS (
       SELECT
@@ -761,9 +769,9 @@ export async function getClientReceivables(
         c.is_active,
         c.credit_limit::numeric(15,2) AS credit_limit,
         COALESCE(cb.balance, 0)::numeric(15,2) AS account_balance,
-        oagg.outstanding
-      FROM oagg
-      INNER JOIN clients c ON c.id = oagg.client_id AND c.tenant_id = ${tenantId}
+        unpaid.outstanding
+      FROM unpaid
+      INNER JOIN clients c ON c.id = unpaid.client_id AND c.tenant_id = ${tenantId}
       LEFT JOIN client_balances cb ON cb.tenant_id = c.tenant_id AND cb.client_id = c.id
       WHERE c.merged_into_client_id IS NULL
         ${searchClause}

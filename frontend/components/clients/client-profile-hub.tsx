@@ -267,7 +267,13 @@ function ClientProfileRequisitesAside({
           ) : null}
 
           <div className="flex items-baseline justify-between gap-2 border-t border-border/50 pt-1.5">
-            <span className="text-[10px] text-muted-foreground">Откр. заказы</span>
+            <span className="text-[10px] text-muted-foreground">Долг (дост., не опл.)</span>
+            <span className="font-mono text-xs font-semibold tabular-nums text-amber-900 dark:text-amber-200">
+              {formatNumberGrouped(c.delivered_unpaid_total ?? "0", { maxFractionDigits: 2 })}
+            </span>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 border-t border-border/50 pt-1.5">
+            <span className="text-[10px] text-muted-foreground">Откр. заказы (конвейер)</span>
             <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
               {formatNumberGrouped(c.open_orders_total, { maxFractionDigits: 2 })}
             </span>

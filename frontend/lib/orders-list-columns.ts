@@ -74,6 +74,20 @@ export const ORDER_LIST_COLUMNS = ORDER_LIST_COLUMN_IDS.map((id) => ({
   label: LABELS[id]
 }));
 
+/** API: musbat qoldiq — UI/Excel: mijoz qarzi sifatida manfiy ko‘rsatiladi. */
+export function formatOrderListDebtAsClientLiability(debt: string | null | undefined): string {
+  if (debt == null) return "";
+  const t = String(debt)
+    .replace(/\u00a0/g, "")
+    .replace(/\s/g, "")
+    .replace(/\u2212/g, "-")
+    .replace(/−/g, "-")
+    .replace(/,/g, ".");
+  const n = Number.parseFloat(t);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return formatNumberGrouped(String(-n), { maxFractionDigits: 2 });
+}
+
 export function orderListExportCell(o: OrderListRow, colId: string): string {
   switch (colId) {
     case "number":
@@ -107,7 +121,7 @@ export function orderListExportCell(o: OrderListRow, colId: string): string {
     case "balance":
       return o.balance == null ? "" : formatNumberGrouped(o.balance, { maxFractionDigits: 2 });
     case "debt":
-      return o.debt == null ? "" : formatNumberGrouped(o.debt, { maxFractionDigits: 2 });
+      return formatOrderListDebtAsClientLiability(o.debt);
     case "price_type":
       return o.price_type ?? "";
     case "warehouse_name":

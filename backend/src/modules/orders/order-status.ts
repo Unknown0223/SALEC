@@ -159,5 +159,40 @@ export function getAllowedNextStatuses(
   return out;
 }
 
-/** Kredit yuki: bu holatlardagi zakazlar `total_sum` yig‘indisiga kirmaydi. */
+/**
+ * Kredit limiti / «ochiq yuk» (ombor oldi): bekor va qaytgan zakazlar summaga kirmaydi;
+ * `new` … `delivering` gacha — hali yetkazilmagan majburiyat sifatida qatnashadi.
+ * (Balansdagi «yetkazilgan qarz» bilan aralashtirilmasin.)
+ */
 export const ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE = ["cancelled", "returned"] as const;
+
+/**
+ * Debitor qarz — **faqat savdo zakazi** (`order_type === "order"`) va **faqat** `delivered` (Доставлен):
+ * mijoz tovarni olgan, qarz shundan keyin. To‘lov taqsimlari ayiriladi.
+ *
+ * **Nega `delivering` (Отгружен) kirmaydi:** yolda / qaytarilish ehtimoli — hali «olgan» hisoblanmaydi.
+ *
+ * UI / modullar (bir xil qoida):
+ * - Заявки: «Долг», «Баланс» (ledger + bu qarz)
+ * - Балансы клиентов, ведомость, карточка: `loadDeliveryDebtByClient` + `mergeLedgerWithUnpaidDelivered`
+ * - Консигнация (клиенты): `loadConsignmentDebtByClient`
+ * - Дашборд `open_orders_total`, отчёты дебиторки (receivables CTE)
+ *
+ * **Kirmaydi:** `cancelled`, `returned`, `new`, `confirmed`, `picking`, `delivering`.
+ *
+ * Boshqa hujjat turlari (`return`, `exchange`, …): alohida jarayon; bu yerda qarz hisoblanmaydi.
+ */
+export const ORDER_STATUSES_OUTSTANDING_RECEIVABLE = ["delivered"] as const;
+
+const receivableSet = new Set<string>(ORDER_STATUSES_OUTSTANDING_RECEIVABLE);
+
+/** Savdo `order` + status `delivered` — qator «Долг» va balans blend. */
+export function statusContributesToDeliveredReceivableDebt(status: string, orderType?: string): boolean {
+  if (!orderTypeHasTradeReceivableDebtSemantics(orderType)) return false;
+  return receivableSet.has(status);
+}
+
+/** Qarz formulasi faqat `order` turidagi savdo zakazlariga qo‘llanadi. */
+export function orderTypeHasTradeReceivableDebtSemantics(orderType: string | undefined | null): boolean {
+  return normalizeOrderType(orderType) === "order";
+}

@@ -24,6 +24,8 @@ import { useRef, useState, type ReactNode } from "react";
 export type ClientDetailApiRow = ClientRow & {
   phone_normalized: string | null;
   open_orders_total: string;
+  /** Yetkazilgan, lekin to‘liq to‘lanmagan savdo zakazlari yig‘indisi */
+  delivered_unpaid_total: string;
   updated_at: string;
   created_by_user_label?: string | null;
   last_modified_by_user_label?: string | null;
@@ -664,17 +666,36 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
               {
                 label: "Сальдо счёта",
                 value: (
-                  <span className="tabular-nums font-mono text-xs">
-                    {formatNumberGrouped(data.account_balance, { maxFractionDigits: 2 })}
+                  <div className="space-y-0.5">
+                    <span className="tabular-nums font-mono text-xs">
+                      {formatNumberGrouped(data.account_balance, { maxFractionDigits: 2 })}
+                    </span>
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      Ledger + yetkazilgan, to‘lanmagan zakazlar (eng yomon ko‘rinish, «Балансы клиентов» bilan
+                      mos).
+                    </p>
+                  </div>
+                )
+              },
+              {
+                label: "Долг по доставленным (не оплачено)",
+                value: (
+                  <span className="tabular-nums font-mono text-xs text-amber-900 dark:text-amber-200">
+                    {formatNumberGrouped(data.delivered_unpaid_total ?? "0", { maxFractionDigits: 2 })}
                   </span>
                 )
               },
               {
                 label: "Открытые заказы (всего)",
                 value: (
-                  <span className="tabular-nums font-mono text-xs">
-                    {formatNumberGrouped(data.open_orders_total, { maxFractionDigits: 2 })}
-                  </span>
+                  <div className="space-y-0.5">
+                    <span className="tabular-nums font-mono text-xs">
+                      {formatNumberGrouped(data.open_orders_total, { maxFractionDigits: 2 })}
+                    </span>
+                    <p className="text-[10px] text-muted-foreground">
+                      Barcha ochiq konveyor zakazlar (bekor/vozvratdan tashqari) — kredit tekshiruvi.
+                    </p>
+                  </div>
                 )
               },
               showCreditHint

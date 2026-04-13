@@ -43,6 +43,6 @@ for (let i = 0; i < maxAttempts; i++) {
 console.error(
   "[wait-for-postgres] " +
     maxAttempts +
-    " s kutildi, ulanib bo‘lmadi. `docker compose ps`, `DATABASE_URL` va port 5433 ni tekshiring."
+    " s kutildi, ulanib bo‘lmadi. `docker compose ps`, `DATABASE_URL` va docker-compose.yml dagi Postgres host portini tekshiring."
 );
 process.exit(1);

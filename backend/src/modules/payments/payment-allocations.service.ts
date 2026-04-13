@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -101,8 +102,9 @@ export async function allocatePayment(
     const orders = await tx.order.findMany({
       where: {
         tenant_id: tenantId,
-        client_id: payment.client_id
-        // No status filter — include all orders; unpaid computed from totals
+        client_id: payment.client_id,
+        order_type: "order",
+        status: { notIn: [...ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE] }
       },
       orderBy: { created_at: "asc" },
       select: {
@@ -246,10 +248,12 @@ export async function getClientAging(
   const toDays = (d: Date): number =>
     Math.floor((asOfDate.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 
-  // Fetch all orders and payments for the tenant
-  const [orders, payments] = await Promise.all([
+  /** As-of sanasigacha bo‘lgan yozuvlar — kelajakdagi tranzaksiyalar yukni oshirmaydi. */
+  const asOfFilter = { lte: asOfDate };
+
+  const [orders, payments, allocations] = await Promise.all([
     prisma.order.findMany({
-      where: { tenant_id: tenantId },
+      where: { tenant_id: tenantId, created_at: asOfFilter },
       select: {
         id: true,
         client_id: true,
@@ -258,20 +262,18 @@ export async function getClientAging(
       }
     }),
     prisma.payment.findMany({
-      where: { tenant_id: tenantId, deleted_at: null },
+      where: { tenant_id: tenantId, deleted_at: null, created_at: asOfFilter },
       select: {
         client_id: true,
         amount: true,
         created_at: true
       }
+    }),
+    prisma.paymentAllocation.findMany({
+      where: { tenant_id: tenantId, created_at: asOfFilter },
+      select: { order_id: true, amount: true, created_at: true }
     })
   ]);
-
-  // Fetch allocations to get what's actually been allocated per order
-  const allocations = await prisma.paymentAllocation.findMany({
-    where: { tenant_id: tenantId },
-    select: { order_id: true, amount: true, created_at: true }
-  });
 
   // Aggregate per client
   const clientData = new Map<number, {

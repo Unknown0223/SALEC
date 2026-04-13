@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
+import { DatePickerPopover, formatRuDateButton } from "@/components/ui/date-picker-popover";
 import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -898,6 +899,8 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const [polkiSkidkaType, setPolkiSkidkaType] = useState("none");
   const [orderIsConsignment, setOrderIsConsignment] = useState(false);
   const [consignmentDueDate, setConsignmentDueDate] = useState("");
+  const [consignmentDueOpen, setConsignmentDueOpen] = useState(false);
+  const consignmentDueAnchorRef = useRef<HTMLButtonElement>(null);
   /** Savdo zakazi uchun profil `payment_method_entries[].id` yoki erkin matn (backend `payment_method_ref`) */
   const [paymentMethodRef, setPaymentMethodRef] = useState("");
 
@@ -919,6 +922,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     setPolkiBonusToBalance({});
     setPolkiBonusCash({});
   }, [isPolkiSheet, polkiDateFrom, polkiDateTo, clientId]);
+
+  useEffect(() => {
+    if (!orderIsConsignment) setConsignmentDueOpen(false);
+  }, [orderIsConsignment]);
 
   type OrderCreateContextResponse = {
     clients: ClientRow[];
@@ -1124,7 +1131,21 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const paymentMethodSelectOptions = useMemo(() => {
     const raw = ctxProfile?.references?.payment_method_entries;
     if (!Array.isArray(raw)) return [];
-    return raw.filter((e) => e && typeof e.id === "string" && e.id.trim() && e.active !== false);
+    const out: { id: string; name: string }[] = [];
+    for (const e of raw) {
+      if (!e || typeof e !== "object") continue;
+      const row = e as { id?: unknown; name?: unknown; active?: boolean };
+      const id =
+        typeof row.id === "string"
+          ? row.id.trim()
+          : typeof row.id === "number" && Number.isFinite(row.id)
+            ? String(row.id)
+            : "";
+      const name = typeof row.name === "string" ? row.name.trim() : "";
+      if (!id || !name || row.active === false) continue;
+      out.push({ id, name });
+    }
+    return out;
   }, [ctxProfile]);
 
   const hasPaymentMethodCatalog = paymentMethodSelectOptions.length > 0;
@@ -1726,6 +1747,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
       setRefSelectKey((k) => k + 1);
       setOrderIsConsignment(false);
       setConsignmentDueDate("");
+      setConsignmentDueOpen(false);
       setPaymentMethodRef("");
       onCreated();
     },
@@ -2468,16 +2490,32 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   </label>
                   {orderIsConsignment ? (
                     <div className="space-y-1 pl-6">
-                      <Label htmlFor="oc-cons-due" className="text-xs text-muted-foreground">
-                        To‘lash muddati (ixtiyoriy)
-                      </Label>
-                      <Input
-                        id="oc-cons-due"
-                        type="date"
-                        className={fieldClass}
-                        value={consignmentDueDate}
-                        onChange={(e) => setConsignmentDueDate(e.target.value)}
+                      <Label className="text-xs text-muted-foreground">To‘lash muddati (ixtiyoriy)</Label>
+                      <button
+                        ref={consignmentDueAnchorRef}
+                        type="button"
                         disabled={mutation.isPending}
+                        className={cn(
+                          buttonVariants({ variant: "outline", size: "sm" }),
+                          "h-10 w-full max-w-xs justify-start gap-2 font-normal",
+                          consignmentDueOpen && "border-primary/60 bg-primary/5"
+                        )}
+                        aria-expanded={consignmentDueOpen}
+                        aria-haspopup="dialog"
+                        onClick={() => setConsignmentDueOpen((o) => !o)}
+                      >
+                        <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-sm">
+                          {formatRuDateButton(consignmentDueDate) || "kk.oo.yyyy"}
+                        </span>
+                      </button>
+                      <DatePickerPopover
+                        open={consignmentDueOpen}
+                        onOpenChange={setConsignmentDueOpen}
+                        anchorRef={consignmentDueAnchorRef}
+                        value={consignmentDueDate}
+                        onChange={setConsignmentDueDate}
+                        footerLabels={{ clear: "Tozalash", today: "Bugun", close: "Yopish" }}
                       />
                     </div>
                   ) : null}

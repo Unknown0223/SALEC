@@ -15,6 +15,7 @@ import {
 } from "./order-bonus-apply";
 import {
   ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE,
+  statusContributesToDeliveredReceivableDebt,
   normalizeOrderType,
   canTransitionOrderStatus,
   getAllowedNextStatuses,
@@ -36,6 +37,12 @@ import {
   DEFAULT_NAKLADNOY_BUILD_OPTIONS
 } from "./order-nakladnoy-xlsx";
 import { buildNakladnoyPdf } from "./order-nakladnoy-pdf";
+import {
+  loadDeliveryDebtByClient,
+  mergeLedgerWithUnpaidDelivered
+} from "../client-balances/client-balances.service";
+import { resolvePaymentMethodRefToLabel } from "../tenant-settings/finance-refs";
+import { loadPaymentMethodEntriesForResolve } from "../tenant-settings/tenant-settings.service";
 
 export type OrderLineInput = { product_id: number; qty: number };
 
@@ -167,6 +174,8 @@ export type OrderDetailRow = OrderListRow & {
   agent_display: string | null;
   /** Savdo zakazida tanlangan to‘lov usuli */
   payment_method_ref: string | null;
+  /** Spravochnik bo‘yicha o‘qiladigan nom (vedoma «Способ оплаты» bilan bir xil) */
+  payment_method_label: string | null;
   is_consignment: boolean;
   consignment_due_date: string | null;
   apply_bonus: boolean;
@@ -412,6 +421,7 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
     agent_id: o.agent_id,
     agent_display: agentDisplay,
     payment_method_ref: o.payment_method_ref?.trim() || null,
+    payment_method_label: null,
     is_consignment: o.is_consignment ?? false,
     consignment_due_date: o.consignment_due_date ? o.consignment_due_date.toISOString() : null,
     apply_bonus: o.applied_auto_bonus_rule_ids.length > 0,
@@ -474,11 +484,32 @@ async function enrichOrderDetailRow(
   viewerRole?: string
 ): Promise<OrderDetailRow> {
   const base = toDetailRow(o, viewerRole);
+  const pmEntries = await loadPaymentMethodEntriesForResolve(tenantId);
+  const payment_method_label = resolvePaymentMethodRefToLabel(base.payment_method_ref, pmEntries);
   const sel = parseBonusGiftSelectionsJson(o.bonus_gift_selections ?? null);
   const swap = await buildBonusGiftSwapOptions(tenantId, o.applied_auto_bonus_rule_ids, sel);
   const bonus_gift_selections: Record<string, number> = {};
   for (const [k, v] of sel) bonus_gift_selections[String(k)] = v;
-  return { ...base, bonus_gift_selections, bonus_gift_swap_options: swap };
+  const fin = await loadOrdersFinanceEnrichment(tenantId, [
+    {
+      id: o.id,
+      client_id: o.client_id,
+      order_type: o.order_type ?? "order",
+      status: o.status,
+      total_sum: o.total_sum
+    }
+  ]);
+  const x = fin.get(o.id);
+  return {
+    ...base,
+    payment_method_label,
+    bonus_gift_selections,
+    bonus_gift_swap_options: swap,
+    shipped_at: x?.shipped_at ?? base.shipped_at,
+    delivered_at: x?.delivered_at ?? base.delivered_at,
+    debt: x?.debt ?? base.debt,
+    balance: x?.balance ?? base.balance
+  };
 }
 
 export async function createOrder(
@@ -1849,6 +1880,12 @@ export type ListOrdersQuery = {
   /** YYYY-MM-DD (server vaqt zonasi — brauzer `date` input bilan mos) */
   date_from?: string;
   date_to?: string;
+  /**
+   * Sana oralig‘i qaysi vaqtga tegishli: `created` | `order` | `ship`.
+   * `order` — hozircha `created_at` bilan bir xil (alohida «zakaz sanasi» ustuni yo‘q).
+   * `ship` — birinchi marta `delivering` holatiga o‘tgan log vaqti.
+   */
+  date_mode?: string;
   /** Hujjat tipi bo’yicha filter */
   order_type?: string;
   /** Konsignatsiya zakazlari */
@@ -1857,7 +1894,108 @@ export type ListOrdersQuery = {
   product_category_id?: number;
   /** Shu payment_type bo‘lgan to‘lovi bor zakazlar */
   payment_type?: string;
+  /** Zakazda saqlangan to‘lov usuli (`payment_method_ref`) */
+  payment_method_ref?: string;
 };
+
+type OrderFinanceSlice = {
+  id: number;
+  client_id: number;
+  order_type: string;
+  status: string;
+  total_sum: Prisma.Decimal;
+};
+
+/** Ro‘yxat va bitta zakaz tafsiloti: taqsimot, mijoz balansi, birinchi «отгружен/доставлен» vaqtlari. */
+async function loadOrdersFinanceEnrichment(
+  tenantId: number,
+  slices: OrderFinanceSlice[]
+): Promise<
+  Map<
+    number,
+    {
+      debt: string | null;
+      balance: string | null;
+      delivered_at: string | null;
+      shipped_at: string | null;
+    }
+  >
+> {
+  const out = new Map<
+    number,
+    {
+      debt: string | null;
+      balance: string | null;
+      delivered_at: string | null;
+      shipped_at: string | null;
+    }
+  >();
+  if (slices.length === 0) return out;
+
+  const ids = slices.map((s) => s.id);
+  const clientIds = [...new Set(slices.map((s) => s.client_id))];
+
+  const [allocRows, statusRows, balRows, deliveryByClient] = await Promise.all([
+    prisma.$queryRaw<Array<{ order_id: number; alloc: Prisma.Decimal }>>`
+      SELECT order_id, COALESCE(SUM(amount), 0)::decimal(15,2) AS alloc
+      FROM payment_allocations
+      WHERE tenant_id = ${tenantId}
+        AND order_id IN (${Prisma.join(ids)})
+      GROUP BY order_id
+    `,
+    prisma.$queryRaw<Array<{ order_id: number; to_status: string; first_at: Date }>>`
+      SELECT order_id, to_status, MIN(created_at) AS first_at
+      FROM order_status_logs
+      WHERE order_id IN (${Prisma.join(ids)})
+        AND to_status IN ('delivering', 'delivered')
+      GROUP BY order_id, to_status
+    `,
+    prisma.clientBalance.findMany({
+      where: { tenant_id: tenantId, client_id: { in: clientIds } },
+      select: { client_id: true, balance: true }
+    }),
+    loadDeliveryDebtByClient(tenantId, clientIds)
+  ]);
+
+  const allocByOrder = new Map<number, Prisma.Decimal>();
+  for (const r of allocRows) {
+    allocByOrder.set(r.order_id, r.alloc);
+  }
+
+  const shippedDelivered = new Map<number, { ship?: Date; del?: Date }>();
+  for (const r of statusRows) {
+    const cur = shippedDelivered.get(r.order_id) ?? {};
+    if (r.to_status === "delivering") cur.ship = r.first_at;
+    if (r.to_status === "delivered") cur.del = r.first_at;
+    shippedDelivered.set(r.order_id, cur);
+  }
+
+  const balByClient = new Map<number, Prisma.Decimal>();
+  for (const b of balRows) {
+    balByClient.set(b.client_id, b.balance);
+  }
+
+  for (const s of slices) {
+    const allocated = allocByOrder.get(s.id) ?? new Prisma.Decimal(0);
+    let debt: string | null = null;
+    if (statusContributesToDeliveredReceivableDebt(s.status, s.order_type)) {
+      const unpaid = s.total_sum.sub(allocated);
+      debt = (unpaid.gt(0) ? unpaid : new Prisma.Decimal(0)).toString();
+    }
+    const ledger = balByClient.get(s.client_id) ?? new Prisma.Decimal(0);
+    const blend = deliveryByClient.get(s.client_id);
+    const displayBal = mergeLedgerWithUnpaidDelivered(ledger, blend);
+    const sd = shippedDelivered.get(s.id);
+    out.set(s.id, {
+      debt,
+      balance: displayBal.toString(),
+      delivered_at: sd?.del ? sd.del.toISOString() : null,
+      shipped_at: sd?.ship ? sd.ship.toISOString() : null
+    });
+  }
+
+  return out;
+}
 
 function parseListOrderLocalDayStart(isoDate: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
@@ -1948,7 +2086,14 @@ export async function listOrdersPaged(
   }
   const payT = q.payment_type?.trim();
   if (payT) {
-    andClauses.push({ payments: { some: { payment_type: payT } } });
+    andClauses.push({
+      payments: { some: { payment_type: payT, deleted_at: null } }
+    });
+  }
+
+  const pmRef = q.payment_method_ref?.trim();
+  if (pmRef) {
+    andClauses.push({ payment_method_ref: pmRef });
   }
 
   const fromD = q.date_from?.trim() ? parseListOrderLocalDayStart(q.date_from.trim()) : null;
@@ -1956,11 +2101,24 @@ export async function listOrdersPaged(
   if (fromD && toD && fromD.getTime() > toD.getTime()) {
     return { data: [], total: 0, page: q.page, limit: q.limit };
   }
-  if (fromD) {
-    andClauses.push({ created_at: { gte: fromD } });
-  }
-  if (toD) {
-    andClauses.push({ created_at: { lte: toD } });
+  if (fromD || toD) {
+    const range: Prisma.DateTimeFilter = {};
+    if (fromD) range.gte = fromD;
+    if (toD) range.lte = toD;
+    const rawMode = (q.date_mode?.trim() || "created").toLowerCase();
+    const mode = rawMode === "order" ? "created" : rawMode;
+    if (mode === "ship") {
+      andClauses.push({
+        status_logs: {
+          some: {
+            to_status: "delivering",
+            created_at: range
+          }
+        }
+      });
+    } else {
+      andClauses.push({ created_at: range });
+    }
   }
 
   const rawSearch = q.search?.trim() ?? "";
@@ -2002,10 +2160,22 @@ export async function listOrdersPaged(
     })
   ]);
 
+  const finance = await loadOrdersFinanceEnrichment(
+    tenantId,
+    rows.map((o) => ({
+      id: o.id,
+      client_id: o.client_id,
+      order_type: o.order_type ?? "order",
+      status: o.status,
+      total_sum: o.total_sum
+    }))
+  );
+
   return {
     data: rows.map((o) => {
       const ex = o.expeditor_user;
       const expeditorDisplay = ex ? `${ex.login} (${ex.name})` : null;
+      const finRow = finance.get(o.id);
       return {
       id: o.id,
       number: o.number,
@@ -2029,8 +2199,8 @@ export async function listOrdersPaged(
       created_by: null,
       created_by_role: null,
       expected_ship_date: null,
-      shipped_at: null,
-      delivered_at: null,
+      shipped_at: finRow?.shipped_at ?? null,
+      delivered_at: finRow?.delivered_at ?? null,
       status: o.status,
       qty: o.items
         .filter((i) => !i.is_bonus)
@@ -2040,8 +2210,8 @@ export async function listOrdersPaged(
       bonus_qty: sumBonusQty(o.items),
       discount_sum: o.discount_sum.toString(),
       bonus_sum: o.bonus_sum.toString(),
-      balance: null,
-      debt: null,
+      balance: finRow?.balance ?? null,
+      debt: finRow?.debt ?? null,
       price_type: null,
       comment: (o as { comment?: string | null }).comment ?? null,
       request_type_ref: (o as { request_type_ref?: string | null }).request_type_ref ?? null,

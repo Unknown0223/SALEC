@@ -7,6 +7,10 @@ import { prisma } from "../../config/database";
 import { appendTenantAuditEvent } from "../../lib/tenant-audit";
 import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
 import {
+  loadDeliveryDebtByClient,
+  mergeLedgerWithUnpaidDelivered
+} from "../client-balances/client-balances.service";
+import {
   activeValuesFromClientRefEntries,
   buildCityTerritoryHints,
   clientRefEntriesFromUnknown,
@@ -1113,9 +1117,14 @@ export async function listClientsForTenantPaged(
     })
   ]);
 
+  const pageIds = clients.map((cl) => cl.id);
+  const deliveryMap =
+    pageIds.length === 0 ? new Map() : await loadDeliveryDebtByClient(tenantId, pageIds);
+
   return {
     data: clients.map((c) => {
-      const bal = c.client_balances[0]?.balance;
+      const ledger = c.client_balances[0]?.balance ?? new Prisma.Decimal(0);
+      const mergedBal = mergeLedgerWithUnpaidDelivered(ledger, deliveryMap.get(c.id));
       const agent_assignments = mapAgentAssignmentsToApi(c.agent_assignments);
       const visitLegacy = c.visit_date?.toISOString() ?? null;
       const disp = mergeAgentDisplayFromAssignments(
@@ -1134,7 +1143,7 @@ export async function listClientsForTenantPaged(
         client_type_code: c.client_type_code,
         credit_limit: c.credit_limit.toString(),
         is_active: c.is_active,
-        account_balance: bal != null ? bal.toString() : "0",
+        account_balance: mergedBal.toString(),
         responsible_person: c.responsible_person,
         landmark: c.landmark,
         inn: c.inn,
@@ -1183,6 +1192,8 @@ export type ClientDetailRow = ClientListRow & {
   phone_normalized: string | null;
   /** `cancelled` / `returned` dan tashqari zakazlar `total_sum` yig‘indisi (kredit yuki). */
   open_orders_total: string;
+  /** Yetkazilgan savdo zakazlari bo‘yicha to‘lanmagan qoldiq (taqsimlangan to‘lovlardan keyin). */
+  delivered_unpaid_total: string;
   updated_at: string;
   /** `client_audit_logs` bo‘yicha birinchi `client.create` */
   created_by_user_label: string | null;
@@ -1199,7 +1210,7 @@ function auditActorLabel(user: { name: string; login: string } | null | undefine
 }
 
 export async function getClientDetail(tenantId: number, id: number): Promise<ClientDetailRow> {
-  const [c, agg, balRow, auditPair] = await Promise.all([
+  const [c, agg, balRow, auditPair, deliveryMap] = await Promise.all([
     prisma.client.findFirst({
       where: { id, tenant_id: tenantId, merged_into_client_id: null },
       select: {
@@ -1287,14 +1298,18 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
         orderBy: { created_at: "desc" },
         include: { user: { select: { login: true, name: true } } }
       })
-    ])
+    ]),
+    loadDeliveryDebtByClient(tenantId, [id])
   ]);
   const [createLog, lastPatchLog] = auditPair;
   if (!c) {
     throw new Error("NOT_FOUND");
   }
   const open_orders_total = (agg._sum.total_sum ?? new Prisma.Decimal(0)).toString();
-  const account_balance = balRow?.balance.toString() ?? "0";
+  const ledgerBal = balRow?.balance ?? new Prisma.Decimal(0);
+  const deliveryInfo = deliveryMap.get(id);
+  const account_balance = mergeLedgerWithUnpaidDelivered(ledgerBal, deliveryInfo).toString();
+  const delivered_unpaid_total = (deliveryInfo?.debt ?? new Prisma.Decimal(0)).toString();
   const agent_assignments = mapAgentAssignmentsToApi(c.agent_assignments);
   const visitLegacy = c.visit_date?.toISOString() ?? null;
   const disp = mergeAgentDisplayFromAssignments(
@@ -1319,6 +1334,7 @@ export async function getClientDetail(tenantId: number, id: number): Promise<Cli
     created_at: c.created_at.toISOString(),
     updated_at: c.updated_at.toISOString(),
     account_balance,
+    delivered_unpaid_total,
     responsible_person: c.responsible_person,
     landmark: c.landmark,
     inn: c.inn,
@@ -1390,7 +1406,9 @@ export async function listClientBalanceMovements(
     where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } }
   });
   if (!bal) {
-    return { data: [], total: 0, page, limit, account_balance: "0" };
+    const dm = await loadDeliveryDebtByClient(tenantId, [clientId]);
+    const m = mergeLedgerWithUnpaidDelivered(new Prisma.Decimal(0), dm.get(clientId));
+    return { data: [], total: 0, page, limit, account_balance: m.toString() };
   }
 
   const createdAt: { gte?: Date; lte?: Date } = {};
@@ -1401,7 +1419,7 @@ export async function listClientBalanceMovements(
     ...(Object.keys(createdAt).length > 0 ? { created_at: createdAt } : {})
   };
 
-  const [total, rows] = await Promise.all([
+  const [total, rows, deliveryMap] = await Promise.all([
     prisma.clientBalanceMovement.count({ where: movementWhere }),
     prisma.clientBalanceMovement.findMany({
       where: movementWhere,
@@ -1409,8 +1427,11 @@ export async function listClientBalanceMovements(
       skip: (page - 1) * limit,
       take: limit,
       include: { user: { select: { login: true } } }
-    })
+    }),
+    loadDeliveryDebtByClient(tenantId, [clientId])
   ]);
+
+  const mergedBal = mergeLedgerWithUnpaidDelivered(bal.balance, deliveryMap.get(clientId));
 
   return {
     data: rows.map((r) => ({
@@ -1423,7 +1444,7 @@ export async function listClientBalanceMovements(
     total,
     page,
     limit,
-    account_balance: bal.balance.toString()
+    account_balance: mergedBal.toString()
   };
 }
 

@@ -58,14 +58,28 @@ function shiftMonthYm(y: number, m0: number, delta: number): { y: number; m: num
   return { y: d.getFullYear(), m: d.getMonth() };
 }
 
+export type DatePickerFooterLabels = Partial<{
+  clear: string;
+  today: string;
+  close: string;
+}>;
+
+const DEFAULT_PICKER_FOOTER_LABELS: Required<DatePickerFooterLabels> = {
+  clear: "Очистить",
+  today: "Сегодня",
+  close: "Закрыть"
+};
+
 function SingleMonthPanel({
   selected,
   onSelect,
-  onClose
+  onClose,
+  footerLabels
 }: {
   selected: string;
   onSelect: (iso: string) => void;
   onClose: () => void;
+  footerLabels: Required<DatePickerFooterLabels>;
 }) {
   const [view, setView] = useState(() => {
     const d = parseYmd(selected) ?? new Date();
@@ -145,9 +159,35 @@ function SingleMonthPanel({
           })
         )}
       </div>
-      <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+        <div className="flex flex-wrap gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs"
+            onClick={() => {
+              onSelect("");
+              onClose();
+            }}
+          >
+            {footerLabels.clear}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs"
+            onClick={() => {
+              onSelect(todayIso);
+              onClose();
+            }}
+          >
+            {footerLabels.today}
+          </Button>
+        </div>
         <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={onClose}>
-          Закрыть
+          {footerLabels.close}
         </Button>
       </div>
     </div>
@@ -160,9 +200,19 @@ export type DatePickerPopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   value: string;
   onChange: (isoYmd: string) => void;
+  /** Localized labels for clear / today / close in the panel footer. */
+  footerLabels?: DatePickerFooterLabels;
 };
 
-export function DatePickerPopover({ open, onOpenChange, anchorRef, value, onChange }: DatePickerPopoverProps) {
+export function DatePickerPopover({
+  open,
+  onOpenChange,
+  anchorRef,
+  value,
+  onChange,
+  footerLabels: footerLabelsProp
+}: DatePickerPopoverProps) {
+  const footerLabels = { ...DEFAULT_PICKER_FOOTER_LABELS, ...footerLabelsProp };
   const panelRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ top: 0, left: 0 });
 
@@ -243,6 +293,7 @@ export function DatePickerPopover({ open, onOpenChange, anchorRef, value, onChan
         selected={value}
         onSelect={onChange}
         onClose={() => onOpenChange(false)}
+        footerLabels={footerLabels}
       />
     </div>,
     document.body

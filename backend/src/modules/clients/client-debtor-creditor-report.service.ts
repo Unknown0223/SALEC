@@ -36,6 +36,7 @@ export async function getClientDebtorCreditorMonthly(
     throw new Error("NOT_FOUND");
   }
 
+  /** Aylana hisob: oyda yaratilgan zakazlar debeti; `cancelled`/`returned` yo‘q. (Заявки «Долг» emas — u faqat отгружен/доставлен.) */
   const excluded = ["cancelled", "returned"] as const;
 
   const orderRows = await prisma.$queryRaw<Array<{ month_key: string; debit: Prisma.Decimal }>>`

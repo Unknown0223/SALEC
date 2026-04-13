@@ -112,10 +112,16 @@ export function defaultCurrencyCodeFromEntries(entries: CurrencyEntryDto[]): str
   return d?.code ?? entries[0]?.code ?? "UZS";
 }
 
+function paymentMethodEntryIdFromUnknown(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return "";
+}
+
 export function parsePaymentMethodEntry(item: unknown): PaymentMethodEntryDto | null {
   if (item == null || typeof item !== "object" || Array.isArray(item)) return null;
   const row = item as Record<string, unknown>;
-  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const id = paymentMethodEntryIdFromUnknown(row.id);
   const name = typeof row.name === "string" ? row.name.trim() : "";
   if (!id || !name) return null;
   const codeRaw = typeof row.code === "string" ? row.code.trim().toLowerCase() : "";
@@ -202,6 +208,28 @@ export function resolvePaymentMethodEntries(
 export function paymentTypesFromMethodEntries(entries: PaymentMethodEntryDto[]): string[] {
   const names = entries.filter((e) => e.active !== false).map((e) => e.name.trim()).filter(Boolean);
   return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "uz"));
+}
+
+/**
+ * `orders.payment_method_ref` — odatda `payment_method_entries[].id`; to‘lovlar — `payment_type` (kod yoki nom).
+ * Vedoma / hisobotda ko‘rsatish uchun katalog bo‘yicha o‘qiladigan nom.
+ */
+export function resolvePaymentMethodRefToLabel(
+  refRaw: string | null | undefined,
+  entries: PaymentMethodEntryDto[]
+): string | null {
+  const ref = (refRaw ?? "").trim();
+  if (!ref) return null;
+  const active = entries.filter((e) => e.active !== false);
+  const byIdActive = active.find((e) => e.id === ref);
+  if (byIdActive) return byIdActive.name.trim();
+  const byIdAny = entries.find((e) => e.id === ref);
+  if (byIdAny) return byIdAny.name.trim();
+  const byKeyActive = active.find((e) => paymentMethodStorageKey(e) === ref);
+  if (byKeyActive) return byKeyActive.name.trim();
+  const byKeyAny = entries.find((e) => paymentMethodStorageKey(e) === ref);
+  if (byKeyAny) return byKeyAny.name.trim();
+  return ref;
 }
 
 export function parsePriceTypeEntry(item: unknown): PriceTypeEntryDto | null {

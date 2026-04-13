@@ -106,6 +106,8 @@ function parsePaymentListQuery(q: Record<string, string | undefined>): PaymentLi
   const territory_region = q.territory_region?.trim() || undefined;
   const territory_city = q.territory_city?.trim() || undefined;
   const territory_district = q.territory_district?.trim() || undefined;
+  const territory_zone = q.territory_zone?.trim() || undefined;
+  const territory_neighborhood = q.territory_neighborhood?.trim() || undefined;
 
   const dt = q.deal_type?.trim();
   let deal_type: PaymentListQuery["deal_type"] | undefined;
@@ -150,6 +152,8 @@ function parsePaymentListQuery(q: Record<string, string | undefined>): PaymentLi
     ...(territory_region ? { territory_region } : {}),
     ...(territory_city ? { territory_city } : {}),
     ...(territory_district ? { territory_district } : {}),
+    ...(territory_zone ? { territory_zone } : {}),
+    ...(territory_neighborhood ? { territory_neighborhood } : {}),
     ...(deal_type !== undefined && deal_type !== "both" ? { deal_type } : {}),
     ...(payment_status !== undefined ? { payment_status } : {}),
     ...(cash_desk_ids !== undefined ? { cash_desk_ids } : {}),

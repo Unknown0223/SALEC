@@ -3,8 +3,9 @@ import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
-import type { ListStaffFilters } from "./staff.service";
+import type { BulkAgentsInput, ListStaffFilters } from "./staff.service";
 import {
+  bulkPatchAgents,
   bulkPatchWebPanelStaffMaxSessions,
   bulkRevokeWebPanelStaffSessions,
   createStaff,
@@ -31,20 +32,20 @@ import {
 const catalogRoles = ["admin", "operator"] as const;
 const adminRoles = ["admin"] as const;
 
-const agentEntitlementsSchema = z
-  .object({
-    price_types: z.array(z.string()).optional(),
-    product_rules: z
-      .array(
-        z.object({
-          category_id: z.number().int().positive(),
-          all: z.boolean(),
-          product_ids: z.array(z.number().int().positive()).optional()
-        })
-      )
-      .optional()
-  })
-  .optional();
+const agentEntitlementsPayloadSchema = z.object({
+  price_types: z.array(z.string()).optional(),
+  product_rules: z
+    .array(
+      z.object({
+        category_id: z.number().int().positive(),
+        all: z.boolean(),
+        product_ids: z.array(z.number().int().positive()).optional()
+      })
+    )
+    .optional()
+});
+
+const agentEntitlementsSchema = agentEntitlementsPayloadSchema.optional();
 
 const createBodySchema = z.object({
   first_name: z.string().min(1),
@@ -139,6 +140,76 @@ const patchAgentBody = patchStaffMutableBody
     agent_entitlements: agentEntitlementsSchema
   })
   .refine((o) => Object.keys(o).length > 0, { message: "empty" });
+
+const bulkAgentIds = z.array(z.number().int().positive()).min(1).max(500);
+
+const bulkAgentsBody = z.union([
+  z.object({
+    action: z.literal("set_agent_entitlements"),
+    agent_ids: bulkAgentIds,
+    agent_entitlements: agentEntitlementsPayloadSchema
+  }),
+  z
+    .object({
+      action: z.literal("patch_product_list"),
+      agent_ids: bulkAgentIds,
+      mode: z.enum(["add", "remove"]),
+      category_id: z.number().int().positive().optional(),
+      product_ids: z.array(z.number().int().positive()).optional(),
+      price_types: z.array(z.string()).optional()
+    })
+    .refine(
+      (o) =>
+        (o.product_ids?.length ?? 0) > 0 ||
+        (o.price_types?.some((s) => String(s).trim().length > 0) ?? false),
+      { message: "empty_product_patch", path: ["product_ids"] }
+    )
+    .refine((o) => !(o.product_ids?.length) || o.category_id != null, {
+      message: "category_required",
+      path: ["category_id"]
+    }),
+  z.object({
+    action: z.literal("set_trade_direction"),
+    agent_ids: bulkAgentIds,
+    trade_direction_id: z.number().int().positive().nullable()
+  }),
+  z.object({
+    action: z.literal("set_trade_directions"),
+    updates: z
+      .array(
+        z.object({
+          agent_id: z.number().int().positive(),
+          trade_direction_id: z.number().int().positive().nullable()
+        })
+      )
+      .min(1)
+      .max(500)
+  }),
+  z.object({
+    action: z.literal("set_consignment"),
+    agent_ids: bulkAgentIds,
+    consignment: z.boolean()
+  }),
+  z.object({
+    action: z.literal("set_app_access"),
+    agent_ids: bulkAgentIds,
+    app_access: z.boolean()
+  }),
+  z.object({
+    action: z.literal("revoke_sessions"),
+    agent_ids: bulkAgentIds
+  }),
+  z.object({
+    action: z.literal("set_max_sessions"),
+    agent_ids: bulkAgentIds,
+    max_sessions: z.number().int().min(1).max(99)
+  }),
+  z.object({
+    action: z.literal("adjust_max_sessions"),
+    agent_ids: bulkAgentIds,
+    delta: z.number().int().min(-98).max(98).refine((d) => d !== 0, { message: "nonzero" })
+  })
+]);
 
 const revokeSessionsBody = z.union([
   z.object({ all: z.literal(true) }),
@@ -401,6 +472,42 @@ export async function registerStaffRoutes(app: FastifyInstance) {
         if (msg === "BAD_ENTITLEMENT_CATEGORY" || msg === "BAD_ENTITLEMENT_PRODUCT") {
           return reply.status(400).send({ error: "BadEntitlements" });
         }
+        throw e;
+      }
+    }
+  );
+
+  app.post(
+    "/api/:slug/agents/bulk",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const parsed = bulkAgentsBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "ValidationError", details: parsed.error.flatten() });
+      }
+      try {
+        const data = await bulkPatchAgents(
+          request.tenant!.id,
+          parsed.data as BulkAgentsInput,
+          actorUserIdOrNull(request)
+        );
+        return reply.send({ data });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg === "EMPTY_IDS") return reply.status(400).send({ error: "EmptyIds" });
+        if (msg === "TOO_MANY_AGENTS") return reply.status(400).send({ error: "TooManyAgents" });
+        if (msg === "BAD_AGENT_IDS") return reply.status(400).send({ error: "BadAgentIds" });
+        if (msg === "BAD_TRADE_DIRECTION") return reply.status(400).send({ error: "BadTradeDirection" });
+        if (msg === "BAD_MAX_SESSIONS") return reply.status(400).send({ error: "BadMaxSessions" });
+        if (msg === "BAD_DELTA") return reply.status(400).send({ error: "BadDelta" });
+        if (msg === "EMPTY_PRODUCT_PATCH") return reply.status(400).send({ error: "EmptyProductPatch" });
+        if (msg === "BAD_CATEGORY") return reply.status(400).send({ error: "BadCategory" });
+        if (msg === "BAD_ENTITLEMENT_CATEGORY" || msg === "BAD_ENTITLEMENT_PRODUCT") {
+          return reply.status(400).send({ error: "BadEntitlements" });
+        }
+        if (msg === "BAD_BULK_ACTION") return reply.status(400).send({ error: "BadBulkAction" });
+        if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
         throw e;
       }
     }

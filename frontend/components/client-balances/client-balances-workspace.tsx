@@ -1,10 +1,11 @@
 "use client";
 
+import { ClientBalancesBulkPaymentDialog } from "@/components/client-balances/client-balances-bulk-payment-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { PageShell } from "@/components/dashboard/page-shell";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
-import { DatePickerPopover, formatRuDateButton } from "@/components/ui/date-picker-popover";
+import { DatePickerPopover, formatRuDateButton, localYmd } from "@/components/ui/date-picker-popover";
 import { FilterSelect, filterPanelSelectClassName } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,10 +24,11 @@ import { getUserFacingError } from "@/lib/error-utils";
 import { paymentMethodSelectOptions, type ProfilePaymentMethodEntry } from "@/lib/payment-method-options";
 import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, Copy, FileSpreadsheet, Filter, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type StaffPick = { id: number; fio: string; code?: string | null };
@@ -43,11 +45,16 @@ type FilterForm = {
   territory_region: string;
   territory_city: string;
   territory_district: string;
-  balance_as_of: string;
-  consignment_due_from: string;
-  consignment_due_to: string;
+  /** YYYY-MM-DD — belgilangan «Применить период к» maydonlariga */
+  filter_date: string;
+  apply_balance_as_of: boolean;
+  apply_order_date: boolean;
+  apply_license_from: boolean;
+  apply_license_to: boolean;
   agent_branch: string;
   agent_payment_type: string;
+  /** Фильтр «По доставке» — id заказа в системе (не путать с полем строки API) */
+  filter_order_id: string;
 };
 
 const defaultForm = (): FilterForm => ({
@@ -62,11 +69,14 @@ const defaultForm = (): FilterForm => ({
   territory_region: "",
   territory_city: "",
   territory_district: "",
-  balance_as_of: "",
-  consignment_due_from: "",
-  consignment_due_to: "",
+  filter_date: localYmd(new Date()),
+  apply_balance_as_of: false,
+  apply_order_date: false,
+  apply_license_from: false,
+  apply_license_to: false,
   agent_branch: "",
-  agent_payment_type: ""
+  agent_payment_type: "",
+  filter_order_id: ""
 });
 
 function parseAmount(s: string): number {
@@ -151,12 +161,42 @@ function buildQuery(
   if (form.territory_region.trim()) p.set("territory_region", form.territory_region.trim());
   if (form.territory_city.trim()) p.set("territory_city", form.territory_city.trim());
   if (form.territory_district.trim()) p.set("territory_district", form.territory_district.trim());
-  if (form.balance_as_of.trim()) p.set("balance_as_of", form.balance_as_of.trim());
-  if (form.consignment_due_from.trim()) p.set("consignment_due_from", form.consignment_due_from.trim());
-  if (form.consignment_due_to.trim()) p.set("consignment_due_to", form.consignment_due_to.trim());
+  const day = form.filter_date.trim();
+  if (form.apply_balance_as_of && day) p.set("balance_as_of", day);
+  if (form.apply_order_date && day) {
+    p.set("order_date_from", day);
+    p.set("order_date_to", day);
+  }
+  if (form.apply_license_from && day) p.set("consignment_due_from", day);
+  if (form.apply_license_to && day) p.set("consignment_due_to", day);
   if (form.agent_branch.trim()) p.set("agent_branch", form.agent_branch.trim());
   if (form.agent_payment_type.trim()) p.set("agent_payment_type", form.agent_payment_type.trim());
+  if (view === "clients_delivery" && form.filter_order_id.trim()) {
+    const oid = Number.parseInt(form.filter_order_id.trim(), 10);
+    if (Number.isFinite(oid) && oid > 0) p.set("order_id", String(oid));
+  }
   return p.toString();
+}
+
+/** Zakaz id ro‘yxat qatorida (API: delivery_order_id yoki order_id). */
+function rowDeliveryOrderId(r: ClientBalanceRow): number | undefined {
+  const raw = r.delivery_order_id ?? r.order_id ?? null;
+  if (raw == null) return undefined;
+  const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function clientBalanceRowKey(
+  view: ClientBalanceViewMode,
+  r: ClientBalanceRow,
+  rowIndex: number
+): string {
+  if (view === "clients_delivery") {
+    const oid = rowDeliveryOrderId(r);
+    if (oid != null) return `o:${oid}`;
+    return `c:${r.client_id}:i:${rowIndex}`;
+  }
+  return `c:${r.client_id}`;
 }
 
 /**
@@ -194,7 +234,7 @@ function MoneyCell({
         className
       )}
     >
-      {formatNumberGrouped(value, { maxFractionDigits: 2 })} UZS
+      {formatNumberGrouped(value, { maxFractionDigits: 2 })}
     </span>
   );
 }
@@ -242,43 +282,85 @@ async function downloadClientsExcel(
   view: ClientBalanceViewMode,
   paymentColumnLabels: string[]
 ) {
-  const baseHeaders = [
-    "Ид клиента",
-    "Клиент",
-    "Агент",
-    "Код агента",
-    "Супервайзер",
-    "Название фирмы",
-    "Направление торговли",
-    "ИНН",
-    "Телефон",
-    "Срок",
-    "Дни просрочки",
-    "Дата последней доставки заказа",
-    "Дата последней оплаты",
-    "Дни с последней оплаты",
-    "Общий"
-  ];
+  const orderCols =
+    view === "clients_delivery" && rows.some((r) => rowDeliveryOrderId(r) != null);
+  const baseHeaders = orderCols
+    ? [
+        "ID заказа",
+        "Номер заказа",
+        "Ид клиента",
+        "Клиент",
+        "Агент",
+        "Код агента",
+        "Супервайзер",
+        "Название фирмы",
+        "Направление торговли",
+        "ИНН",
+        "Телефон",
+        "Срок",
+        "Дни просрочки",
+        "Дата доставки заказа",
+        "Дата последней оплаты",
+        "Дни с последней оплаты",
+        "Общий"
+      ]
+    : [
+        "Ид клиента",
+        "Клиент",
+        "Агент",
+        "Код агента",
+        "Супервайзер",
+        "Название фирмы",
+        "Направление торговли",
+        "ИНН",
+        "Телефон",
+        "Срок",
+        "Дни просрочки",
+        "Дата последней доставки заказа",
+        "Дата последней оплаты",
+        "Дни с последней оплаты",
+        "Общий"
+      ];
   const payHeaders = paymentColumnLabels.length > 0 ? paymentColumnLabels : [];
   const headers = [...baseHeaders, ...payHeaders];
   const dataRows = rows.map((r) => {
-    const base = [
-      clientDisplayId(r),
-      r.name,
-      r.agent_name ?? "",
-      r.agent_code ?? "",
-      r.supervisor_name ?? "",
-      r.legal_name ?? "",
-      r.trade_direction ?? "",
-      r.inn ?? "",
-      r.phone ?? "",
-      r.license_until ? formatDateOnly(r.license_until) : "",
-      r.days_overdue ?? "",
-      r.last_order_at ?? "",
-      r.last_payment_at ?? "",
-      r.days_since_payment ?? "",
-      r.balance
-    ];
+    const base = orderCols
+      ? [
+          rowDeliveryOrderId(r) ?? "",
+          r.delivery_order_number ?? "",
+          clientDisplayId(r),
+          r.name,
+          r.agent_name ?? "",
+          r.agent_code ?? "",
+          r.supervisor_name ?? "",
+          r.legal_name ?? "",
+          r.trade_direction ?? "",
+          r.inn ?? "",
+          r.phone ?? "",
+          r.license_until ? formatDateOnly(r.license_until) : "",
+          r.days_overdue ?? "",
+          r.last_order_at ?? "",
+          r.last_payment_at ?? "",
+          r.days_since_payment ?? "",
+          r.balance
+        ]
+      : [
+          clientDisplayId(r),
+          r.name,
+          r.agent_name ?? "",
+          r.agent_code ?? "",
+          r.supervisor_name ?? "",
+          r.legal_name ?? "",
+          r.trade_direction ?? "",
+          r.inn ?? "",
+          r.phone ?? "",
+          r.license_until ? formatDateOnly(r.license_until) : "",
+          r.days_overdue ?? "",
+          r.last_order_at ?? "",
+          r.last_payment_at ?? "",
+          r.days_since_payment ?? "",
+          r.balance
+        ];
     const payCells = payHeaders.map((lab) => amountForPaymentLabel(r.payment_amounts, lab));
     return [...base, ...payCells];
   });
@@ -324,14 +406,15 @@ export function ClientBalancesWorkspace() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [copyFlash, setCopyFlash] = useState(false);
-  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  /** Tanlangan qatorlar (sahifa almashganda ham saqlanadi) */
+  const [selectedClients, setSelectedClients] = useState<Map<string, ClientBalanceRow>>(
+    () => new Map()
+  );
+  const [bulkPayOpen, setBulkPayOpen] = useState(false);
+  const [bulkPayClients, setBulkPayClients] = useState<ClientBalanceRow[]>([]);
   const [excelBusy, setExcelBusy] = useState(false);
-  const [balanceAsOfOpen, setBalanceAsOfOpen] = useState(false);
-  const [consignFromOpen, setConsignFromOpen] = useState(false);
-  const [consignToOpen, setConsignToOpen] = useState(false);
-  const balanceAsOfAnchorRef = useRef<HTMLButtonElement>(null);
-  const consignFromAnchorRef = useRef<HTMLButtonElement>(null);
-  const consignToAnchorRef = useRef<HTMLButtonElement>(null);
+  const [filterDateOpen, setFilterDateOpen] = useState(false);
+  const filterDateRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(searchInput.trim()), 350);
@@ -346,7 +429,9 @@ export function ClientBalancesWorkspace() {
   const listQ = useQuery({
     queryKey: ["client-balances", tenantSlug, queryString],
     enabled: Boolean(tenantSlug) && hydrated,
-    staleTime: STALE.list,
+    staleTime: STALE.heavyList,
+    placeholderData: keepPreviousData,
+    structuralSharing: false,
     queryFn: async () => {
       const { data } = await api.get<ClientBalanceListResponse>(
         `/api/${tenantSlug}/client-balances?${queryString}`
@@ -454,28 +539,46 @@ export function ClientBalancesWorkspace() {
       v === "agents" ? "agents" : v === "clients_delivery" ? "clients_delivery" : "clients";
     setView(next);
     setPage(1);
-    setSelected(new Set());
+    setSelectedClients(new Map());
   };
 
   const tabValue = view === "agents" ? "agents" : view === "clients_delivery" ? "clients_delivery" : "clients";
 
-  const toggleSelect = (id: number) => {
-    setSelected((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+  const toggleSelect = (row: ClientBalanceRow, rowIndex: number) => {
+    const key = clientBalanceRowKey(view, row, rowIndex);
+    setSelectedClients((prev) => {
+      const n = new Map(prev);
+      if (n.has(key)) n.delete(key);
+      else n.set(key, row);
       return n;
     });
   };
 
   const toggleSelectAllPage = () => {
     if (view !== "clients" && view !== "clients_delivery") return;
-    const ids = clientRowsForSelection.map((r) => r.client_id);
-    const allOn = ids.length > 0 && ids.every((id) => selected.has(id));
-    setSelected(() => {
-      if (allOn) return new Set();
-      return new Set(ids);
+    const keys = clientRowsForSelection.map((r, i) => clientBalanceRowKey(view, r, i));
+    const allOn = keys.length > 0 && keys.every((k) => selectedClients.has(k));
+    setSelectedClients((prev) => {
+      const n = new Map(prev);
+      if (allOn) {
+        for (const k of keys) n.delete(k);
+      } else {
+        clientRowsForSelection.forEach((r, i) => {
+          n.set(clientBalanceRowKey(view, r, i), r);
+        });
+      }
+      return n;
     });
+  };
+
+  const openBulkPayModal = () => {
+    if (selectedClients.size === 0) return;
+    const byClient = new Map<number, ClientBalanceRow>();
+    for (const r of Array.from(selectedClients.values())) {
+      byClient.set(r.client_id, r);
+    }
+    setBulkPayClients(Array.from(byClient.values()));
+    setBulkPayOpen(true);
   };
 
   const runExcelExport = useCallback(async () => {
@@ -511,7 +614,7 @@ export function ClientBalancesWorkspace() {
         description={
           isDeliveryView
             ? "Долг по доставленным заказам: неоплаченный остаток (total − распределённые оплаты), дата — момент перехода в «доставлен»."
-            : "Оплаты и долги: баланс из учёта; «Баланс на дату» — сумма движений по счёту до выбранного дня (UTC)."
+            : "Оплаты и долги: баланс из учёта. Даты — один календарь; отметьте «Баланс», «Дата заказа» (долг по доставленным), «Срок от/до» (лицензия)."
         }
       />
 
@@ -519,7 +622,7 @@ export function ClientBalancesWorkspace() {
         <Card className="border border-border bg-card shadow-sm">
           <CardContent className="space-y-0 p-0">
             <div className="space-y-4 p-4 sm:p-5">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-8">
                 <div className="min-w-0 flex-1 space-y-4">
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                     <div className="space-y-1.5">
@@ -673,6 +776,20 @@ export function ClientBalancesWorkspace() {
                         <option value="consignment">Консигнация</option>
                       </FilterSelect>
                     </div>
+                    {isDeliveryView ? (
+                      <div className="space-y-1.5">
+                        <Label className={filterFieldLabelClass}>ID заказа</Label>
+                        <Input
+                          className="h-10"
+                          placeholder="Фильтр по id"
+                          inputMode="numeric"
+                          value={draft.filter_order_id}
+                          onChange={(e) =>
+                            setDraft((d) => ({ ...d, filter_order_id: e.target.value.trim() }))
+                          }
+                        />
+                      </div>
+                    ) : null}
                     <div className="space-y-1.5">
                       <Label className={filterFieldLabelClass}>Территория 1 — область</Label>
                       <FilterSelect
@@ -734,124 +851,115 @@ export function ClientBalancesWorkspace() {
                   </div>
                 </div>
 
-                <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-border/70 pt-4 lg:w-[15.5rem] lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0 xl:w-[17rem]">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Даты
-                  </p>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Баланс на дату</Label>
-                    <button
-                      ref={balanceAsOfAnchorRef}
-                      type="button"
-                      className={cn(
-                        buttonVariants({ variant: "outline", size: "sm" }),
-                        "h-10 w-full justify-start gap-2 font-normal",
-                        balanceAsOfOpen && "border-blue-500/60 bg-blue-500/5"
-                      )}
-                      aria-expanded={balanceAsOfOpen}
-                      aria-haspopup="dialog"
-                      onClick={() => {
-                        setConsignFromOpen(false);
-                        setConsignToOpen(false);
-                        setBalanceAsOfOpen((o) => !o);
-                      }}
-                    >
-                      <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate text-sm">
-                        {formatRuDateButton(draft.balance_as_of) || "дд.мм.гггг"}
-                      </span>
-                    </button>
-                    <DatePickerPopover
-                      open={balanceAsOfOpen}
-                      onOpenChange={setBalanceAsOfOpen}
-                      anchorRef={balanceAsOfAnchorRef as React.RefObject<HTMLElement | null>}
-                      value={draft.balance_as_of}
-                      onChange={(iso) => setDraft((d) => ({ ...d, balance_as_of: iso }))}
-                    />
+                <aside className="w-full shrink-0 space-y-3 border-t border-border/70 pt-4 xl:w-[19.5rem] xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+                  <p className={filterFieldLabelClass}>Даты</p>
+                  <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-2 py-2.5">
+                    <p className="text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Применить период к
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <span
+                          className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
+                          title="Обороты до конца дня (UTC)"
+                        >
+                          Баланс
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                          checked={draft.apply_balance_as_of}
+                          onChange={(e) =>
+                            setDraft((d) => ({ ...d, apply_balance_as_of: e.target.checked }))
+                          }
+                          aria-label="Баланс на дату"
+                        />
+                      </div>
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <span
+                          className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
+                          title="Долг по доставленным заказам с датой заказа (Asia/Tashkent)"
+                        >
+                          Дата заказа
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                          checked={draft.apply_order_date}
+                          onChange={(e) =>
+                            setDraft((d) => ({ ...d, apply_order_date: e.target.checked }))
+                          }
+                          aria-label="Дата заказа"
+                        />
+                      </div>
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <span
+                          className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
+                          title="Срок лицензии от"
+                        >
+                          Срок от
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                          checked={draft.apply_license_from}
+                          onChange={(e) =>
+                            setDraft((d) => ({ ...d, apply_license_from: e.target.checked }))
+                          }
+                          aria-label="Срок от"
+                        />
+                      </div>
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <span
+                          className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
+                          title="Срок лицензии до"
+                        >
+                          Срок до
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                          checked={draft.apply_license_to}
+                          onChange={(e) =>
+                            setDraft((d) => ({ ...d, apply_license_to: e.target.checked }))
+                          }
+                          aria-label="Срок до"
+                        />
+                      </div>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Консигнация — срок от</Label>
                     <button
-                      ref={consignFromAnchorRef}
+                      ref={filterDateRef}
                       type="button"
                       className={cn(
                         buttonVariants({ variant: "outline", size: "sm" }),
                         "h-10 w-full justify-start gap-2 font-normal",
-                        consignFromOpen && "border-blue-500/60 bg-blue-500/5"
+                        filterDateOpen && "border-primary/60 bg-primary/5"
                       )}
-                      aria-expanded={consignFromOpen}
+                      aria-expanded={filterDateOpen}
                       aria-haspopup="dialog"
-                      onClick={() => {
-                        setBalanceAsOfOpen(false);
-                        setConsignToOpen(false);
-                        setConsignFromOpen((o) => !o);
-                      }}
+                      onClick={() => setFilterDateOpen((o) => !o)}
                     >
                       <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate text-sm">
-                        {formatRuDateButton(draft.consignment_due_from) || "дд.мм.гггг"}
+                      <span className="truncate text-left text-xs sm:text-sm">
+                        {formatRuDateButton(draft.filter_date) || "дд.мм.гггг"}
                       </span>
                     </button>
                     <DatePickerPopover
-                      open={consignFromOpen}
-                      onOpenChange={setConsignFromOpen}
-                      anchorRef={consignFromAnchorRef as React.RefObject<HTMLElement | null>}
-                      value={draft.consignment_due_from}
-                      onChange={(iso) =>
-                        setDraft((d) => ({
-                          ...d,
-                          consignment_due_from: iso,
-                          consignment_due_to:
-                            d.consignment_due_to.trim() && d.consignment_due_to < iso ? iso : d.consignment_due_to
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Консигнация — срок до</Label>
-                    <button
-                      ref={consignToAnchorRef}
-                      type="button"
-                      className={cn(
-                        buttonVariants({ variant: "outline", size: "sm" }),
-                        "h-10 w-full justify-start gap-2 font-normal",
-                        consignToOpen && "border-blue-500/60 bg-blue-500/5"
-                      )}
-                      aria-expanded={consignToOpen}
-                      aria-haspopup="dialog"
-                      onClick={() => {
-                        setBalanceAsOfOpen(false);
-                        setConsignFromOpen(false);
-                        setConsignToOpen((o) => !o);
-                      }}
-                    >
-                      <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate text-sm">
-                        {formatRuDateButton(draft.consignment_due_to) || "дд.мм.гггг"}
-                      </span>
-                    </button>
-                    <DatePickerPopover
-                      open={consignToOpen}
-                      onOpenChange={setConsignToOpen}
-                      anchorRef={consignToAnchorRef as React.RefObject<HTMLElement | null>}
-                      value={draft.consignment_due_to}
-                      onChange={(iso) =>
-                        setDraft((d) => ({
-                          ...d,
-                          consignment_due_to: iso,
-                          consignment_due_from:
-                            d.consignment_due_from.trim() && d.consignment_due_from > iso
-                              ? iso
-                              : d.consignment_due_from
-                        }))
-                      }
+                      open={filterDateOpen}
+                      onOpenChange={setFilterDateOpen}
+                      anchorRef={filterDateRef as React.RefObject<HTMLElement | null>}
+                      value={draft.filter_date}
+                      onChange={(iso) => setDraft((d) => ({ ...d, filter_date: iso }))}
                     />
                   </div>
                 </aside>
               </div>
               <p className="text-[10px] leading-relaxed text-muted-foreground">
-                «Баланс на дату» — сумма движений до конца выбранного дня (UTC). Консигнация — диапазон дат лицензии
-                агента (от / до).
+                Отметьте, к чему относится дата в календаре, и нажмите «Применить». Баланс — движения до конца дня
+                (UTC). Дата заказа — долг по доставленным заказам с этой датой создания (Asia/Tashkent). Срок от/до —
+                фильтр по дате лицензии клиента.
               </p>
             </div>
           </CardContent>
@@ -881,29 +989,13 @@ export function ClientBalancesWorkspace() {
 
         <Tabs value={tabValue} onValueChange={onTabView}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <TabsList className="inline-flex h-auto min-h-10 w-full flex-wrap gap-0.5 rounded-lg border border-border bg-slate-100 p-1 sm:w-auto dark:bg-zinc-900/60">
-              <TabsTrigger
-                value="clients"
-                className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
-              >
-                По клиентам
-              </TabsTrigger>
-              <TabsTrigger
-                value="agents"
-                className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
-              >
-                По агентам
-              </TabsTrigger>
-              <TabsTrigger
-                value="clients_delivery"
-                className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
-              >
-                По доставке
-              </TabsTrigger>
-            </TabsList>
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-2 py-1.5 dark:bg-muted/20">
+            {/* Select va tablar bir qatorda: TabsList da w-full bo‘lmasin — aks holda select yuqoriga “tushadi” */}
+            <div className="flex min-w-0 max-w-full flex-1 items-center gap-2 overflow-x-auto">
               <select
-                className={cn(filterPanelSelectClassName, "h-9 min-w-[5.5rem] max-w-[6rem] py-0")}
+                className={cn(
+                  filterPanelSelectClassName,
+                  "h-9 min-w-[5.5rem] max-w-[6rem] shrink-0 py-0"
+                )}
                 value={String(limit)}
                 title="Строк на странице"
                 onChange={(e) => {
@@ -916,6 +1008,43 @@ export function ClientBalancesWorkspace() {
                 <option value="50">50</option>
                 <option value="100">100</option>
               </select>
+              <TabsList className="inline-flex h-auto min-h-10 shrink-0 flex-nowrap gap-0.5 rounded-lg border border-border bg-slate-100 p-1 dark:bg-zinc-900/60">
+                <TabsTrigger
+                  value="clients"
+                  className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
+                >
+                  По клиентам
+                </TabsTrigger>
+                <TabsTrigger
+                  value="agents"
+                  className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
+                >
+                  По агентам
+                </TabsTrigger>
+                <TabsTrigger
+                  value="clients_delivery"
+                  className="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-blue-600"
+                >
+                  По доставке
+                </TabsTrigger>
+              </TabsList>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-2 py-1.5 dark:bg-muted/20">
+              {(view === "clients" || view === "clients_delivery") && selectedClients.size > 0 ? (
+                <button
+                  type="button"
+                  className={cn(
+                    buttonVariants({ size: "sm" }),
+                    "h-9 shrink-0 gap-2 bg-emerald-600 px-3 text-white hover:bg-emerald-700 sm:px-4"
+                  )}
+                  onClick={openBulkPayModal}
+                >
+                  Оплатить
+                  <span className="rounded-md bg-white/20 px-1.5 text-xs tabular-nums">
+                    {selectedClients.size}
+                  </span>
+                </button>
+              ) : null}
               <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -951,12 +1080,13 @@ export function ClientBalancesWorkspace() {
             ) : (
               <ClientLikeTable
                 variant="clients"
+                rowKey={(r, idx) => clientBalanceRowKey(view, r, idx)}
                 paymentColumnLabels={paymentColumnLabels}
                 loading={listQ.isLoading}
                 rows={
                   listQ.data?.view === "clients" ? (listQ.data.data as ClientBalanceRow[]) : []
                 }
-                selected={selected}
+                selected={selectedClients}
                 onToggle={toggleSelect}
                 onToggleAll={toggleSelectAllPage}
                 onCopyId={(text) =>
@@ -977,6 +1107,7 @@ export function ClientBalancesWorkspace() {
             ) : (
               <ClientLikeTable
                 variant="delivery"
+                rowKey={(r, idx) => clientBalanceRowKey(view, r, idx)}
                 paymentColumnLabels={paymentColumnLabels}
                 loading={listQ.isLoading}
                 rows={
@@ -984,7 +1115,7 @@ export function ClientBalancesWorkspace() {
                     ? (listQ.data.data as ClientBalanceRow[])
                     : []
                 }
-                selected={selected}
+                selected={selectedClients}
                 onToggle={toggleSelect}
                 onToggleAll={toggleSelectAllPage}
                 onCopyId={(text) =>
@@ -1111,12 +1242,27 @@ export function ClientBalancesWorkspace() {
           </div>
         ) : null}
       </div>
+      {tenantSlug ? (
+        <ClientBalancesBulkPaymentDialog
+          open={bulkPayOpen}
+          onOpenChange={(o) => {
+            setBulkPayOpen(o);
+            if (!o) setBulkPayClients([]);
+          }}
+          tenantSlug={tenantSlug}
+          clients={bulkPayClients}
+          paymentColumnLabels={paymentColumnLabels}
+          tradeDirections={filterOptQ.data?.trade_directions ?? []}
+          onSaved={() => setSelectedClients(new Map())}
+        />
+      ) : null}
     </PageShell>
   );
 }
 
 function ClientLikeTable({
   variant,
+  rowKey,
   paymentColumnLabels,
   loading,
   rows,
@@ -1126,20 +1272,22 @@ function ClientLikeTable({
   onCopyId
 }: {
   variant: "clients" | "delivery";
+  rowKey: (r: ClientBalanceRow, rowIndex: number) => string;
   paymentColumnLabels: string[];
   loading: boolean;
   rows: ClientBalanceRow[];
-  selected: Set<number>;
-  onToggle: (id: number) => void;
+  selected: Map<string, ClientBalanceRow>;
+  onToggle: (row: ClientBalanceRow, rowIndex: number) => void;
   onToggleAll: () => void;
   onCopyId: (text: string) => void;
 }) {
+  const router = useRouter();
   const nPay = paymentColumnLabels.length;
-  const colCount = 16 + nPay;
+  const colCount = (variant === "delivery" ? 17 : 16) + nPay;
   const headBg = "bg-muted/50";
   const note =
     variant === "delivery"
-      ? "Дни просрочки — от самой ранней неоплаченной доставки; последняя доставка — по незакрытым суммам."
+      ? "Одна строка — один доставленный неоплаченный заказ. Клик по строке (кроме ссылки и чекбокса) открывает карточку заказа."
       : null;
   const tableMinPx = Math.max(1100, 1100 + nPay * 112);
 
@@ -1162,10 +1310,17 @@ function ClientLikeTable({
                 <input
                   type="checkbox"
                   className="rounded border-input"
-                  checked={rows.length > 0 && rows.every((r) => selected.has(r.client_id))}
+                  checked={
+                    rows.length > 0 &&
+                    rows.every((r, i) => selected.has(rowKey(r, i)))
+                  }
+                  title="Выбрать всех на странице"
                   onChange={onToggleAll}
                 />
               </th>
+              {variant === "delivery" ? (
+                <th className="whitespace-nowrap px-2 py-2">Заказ (id)</th>
+              ) : null}
               <th className="whitespace-nowrap px-2 py-2">Ид клиента</th>
               <th className="whitespace-nowrap px-2 py-2">Клиент</th>
               <th className="whitespace-nowrap px-2 py-2">Агент</th>
@@ -1177,7 +1332,9 @@ function ClientLikeTable({
               <th className="whitespace-nowrap px-2 py-2">Телефон</th>
               <th className="whitespace-nowrap px-2 py-2">Срок</th>
               <th className="whitespace-nowrap px-2 py-2">Дни просрочки</th>
-              <th className="whitespace-nowrap px-2 py-2">Дата последней доставки заказа</th>
+              <th className="whitespace-nowrap px-2 py-2">
+                {variant === "delivery" ? "Дата доставки заказа" : "Дата последней доставки заказа"}
+              </th>
               <th className="whitespace-nowrap px-2 py-2">Дата последней оплаты</th>
               <th className="whitespace-nowrap px-2 py-2">Дни с последней оплаты</th>
               <th className="whitespace-nowrap px-2 py-2 text-right">Общий</th>
@@ -1202,16 +1359,52 @@ function ClientLikeTable({
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
-                <tr key={r.client_id} className="border-b border-border/80 hover:bg-muted/25">
-                  <td className="sticky left-0 z-10 border-r border-border bg-card px-2 py-2">
+              rows.map((r, rowIndex) => {
+                const oid = rowDeliveryOrderId(r);
+                return (
+                <tr
+                  key={rowKey(r, rowIndex)}
+                  className={cn(
+                    "border-b border-border/80 hover:bg-muted/25",
+                    variant === "delivery" && oid != null && "cursor-pointer"
+                  )}
+                  onClick={(e) => {
+                    if (variant !== "delivery" || oid == null) return;
+                    const el = e.target as HTMLElement;
+                    if (el.closest("a,button,input,label")) return;
+                    router.push(`/orders/${oid}`);
+                  }}
+                >
+                  <td
+                    className="sticky left-0 z-10 border-r border-border bg-card px-2 py-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       className="rounded border-input"
-                      checked={selected.has(r.client_id)}
-                      onChange={() => onToggle(r.client_id)}
+                      checked={selected.has(rowKey(r, rowIndex))}
+                      onChange={() => onToggle(r, rowIndex)}
                     />
                   </td>
+                  {variant === "delivery" ? (
+                    <td className="max-w-[10rem] px-2 py-2 text-xs">
+                      {oid != null ? (
+                        <Link
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                          href={`/orders/${oid}`}
+                        >
+                          #{oid}
+                          {r.delivery_order_number ? (
+                            <span className="block truncate font-normal text-muted-foreground">
+                              {r.delivery_order_number}
+                            </span>
+                          ) : null}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  ) : null}
                   <td className="px-2 py-2 font-mono text-xs">
                     <div className="flex items-center gap-1">
                       <Link
@@ -1269,12 +1462,13 @@ function ClientLikeTable({
                     <MoneyCell value={r.balance} />
                   </td>
                   {paymentColumnLabels.map((lab) => (
-                    <td key={`${r.client_id}-${lab}`} className="px-2 py-2">
+                    <td key={`${rowKey(r, rowIndex)}-${lab}`} className="px-2 py-2">
                       <MoneyCell value={amountForPaymentLabel(r.payment_amounts, lab)} />
                     </td>
                   ))}
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

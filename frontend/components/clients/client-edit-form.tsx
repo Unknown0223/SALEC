@@ -20,6 +20,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 type ClientDetailApi = ClientRow & {
   phone_normalized?: string | null;
   open_orders_total?: string;
+  delivered_unpaid_total?: string;
 };
 
 function isoToDateInput(iso: string | null): string {

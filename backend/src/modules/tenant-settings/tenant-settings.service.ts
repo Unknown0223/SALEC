@@ -792,6 +792,18 @@ export async function getTenantDefaultCurrencyCode(tenantId: number): Promise<st
   return defaultCurrencyCodeFromEntries(resolveCurrencyEntries(refInner));
 }
 
+/** Vedoma / zakaz kartasi: `payment_method_ref` → nom (barcha yozuvlar, jumladan nofaol). */
+export async function loadPaymentMethodEntriesForResolve(tenantId: number): Promise<PaymentMethodEntryDto[]> {
+  const row = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const st = asRecord(row?.settings);
+  const ref = asRecord(st.references);
+  const currency_entries = resolveCurrencyEntries(ref);
+  return resolvePaymentMethodEntries(ref, currency_entries);
+}
+
 export async function getTenantProfile(tenantId: number): Promise<TenantProfileDto> {
   const row = await prisma.tenant.findUnique({
     where: { id: tenantId },

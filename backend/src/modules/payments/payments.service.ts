@@ -251,6 +251,8 @@ export type PaymentListQuery = {
   territory_region?: string;
   territory_city?: string;
   territory_district?: string;
+  territory_zone?: string;
+  territory_neighborhood?: string;
   /** Mijozning agenti: `regular` — agent yo‘q yoki consignment=false; `consignment` — agent.consignment=true */
   deal_type?: "regular" | "consignment" | "both";
   /** Filtr: `deleted` — faqat arxiv (deleted_at bor) */
@@ -455,6 +457,14 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
   }
   if (q.territory_district?.trim()) {
     clientAnd.push({ district: { contains: q.territory_district.trim(), mode: "insensitive" } });
+  }
+  if (q.territory_zone?.trim()) {
+    clientAnd.push({ zone: { contains: q.territory_zone.trim(), mode: "insensitive" } });
+  }
+  if (q.territory_neighborhood?.trim()) {
+    clientAnd.push({
+      neighborhood: { contains: q.territory_neighborhood.trim(), mode: "insensitive" }
+    });
   }
 
   if (q.deal_type === "regular") {

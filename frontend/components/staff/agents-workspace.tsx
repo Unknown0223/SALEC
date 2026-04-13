@@ -231,6 +231,18 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const [deactivateAgent, setDeactivateAgent] = useState<AgentRow | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const headerCbRef = useRef<HTMLInputElement>(null);
+  const bulkMenuRef = useRef<HTMLDivElement>(null);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+  const [groupDialog, setGroupDialog] = useState<
+    | null
+    | "restrict"
+    | "products"
+    | "trade"
+    | "consignment"
+    | "sessions"
+    | "limits"
+    | "app_access"
+  >(null);
 
   const filterOptQ = useQuery({
     queryKey: ["agents-filter-options", tenantSlug],
@@ -324,7 +336,9 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
 
   const categoriesQ = useQuery({
     queryKey: ["product-categories", tenantSlug, "agents-ws"],
-    enabled: Boolean(tenantSlug) && Boolean(restrictAgent),
+    enabled:
+      Boolean(tenantSlug) &&
+      (Boolean(restrictAgent) || groupDialog === "restrict" || groupDialog === "products"),
     staleTime: STALE.reference,
     queryFn: async () => {
       const { data } = await api.get<{ data: ProductCategoryRow[] }>(
@@ -367,6 +381,34 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
     }
   });
 
+  const bulkMut = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const { data } = await api.post<{ data: { updated: number } }>(`/api/${tenantSlug}/agents/bulk`, body);
+      return data.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["agent", tenantSlug] });
+      void qc.invalidateQueries({ queryKey: ["agents-filter-options", tenantSlug] });
+      setGroupDialog(null);
+      setBulkMenuOpen(false);
+      setSelectedIds(new Set());
+    },
+    onError: (e: unknown) => {
+      const ax = e as { response?: { data?: { error?: string } } };
+      window.alert(ax.response?.data?.error ?? "Ошибка");
+    }
+  });
+
+  useEffect(() => {
+    if (!bulkMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const el = bulkMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setBulkMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [bulkMenuOpen]);
+
   const filteredRows = useMemo(() => {
     const src = listQ.data ?? [];
     const q = search.trim().toLowerCase();
@@ -390,6 +432,11 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
   const pageRows = useMemo(() => {
     return filteredRows.slice(0, pageSize);
   }, [filteredRows, pageSize]);
+
+  const selectedRows = useMemo(
+    () => filteredRows.filter((r) => selectedIds.has(r.id)),
+    [filteredRows, selectedIds]
+  );
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -675,20 +722,103 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
               >
                 <RefreshCw className={cn("size-4", listQ.isFetching && "animate-spin")} />
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="ml-auto h-9 text-xs"
-                disabled={selectedIds.size === 0}
-                onClick={() =>
-                  window.alert(
-                    `Выбрано агентов: ${selectedIds.size}. Массовые действия будут добавлены в следующем обновлении.`
-                  )
-                }
-              >
-                Групповая обработка
-              </Button>
+              <div className="relative ml-auto" ref={bulkMenuRef}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-1 text-xs"
+                  disabled={selectedIds.size === 0}
+                  onClick={() => setBulkMenuOpen((o) => !o)}
+                >
+                  Групповая обработка
+                  <ChevronDown className="size-3 opacity-70" aria-hidden />
+                </Button>
+                {bulkMenuOpen && selectedIds.size > 0 ? (
+                  <div
+                    className="absolute right-0 z-50 mt-1 max-h-[min(70vh,520px)] w-[min(100vw-2rem,22rem)] overflow-y-auto rounded-md border border-border bg-popover py-1 text-xs text-popover-foreground shadow-md"
+                    role="menu"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("restrict");
+                      }}
+                    >
+                      Ограничения (тип цены / продукты)
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("products");
+                      }}
+                    >
+                      Добавить / убрать товары и типы цен
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("trade");
+                      }}
+                    >
+                      Направление торговли
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("consignment");
+                      }}
+                    >
+                      Консигнация вкл / выкл
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("app_access");
+                      }}
+                    >
+                      Доступ к приложению
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("sessions");
+                      }}
+                    >
+                      Завершить сессии
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setBulkMenuOpen(false);
+                        setGroupDialog("limits");
+                      }}
+                    >
+                      Лимит сессий (max)
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -853,12 +983,195 @@ export function AgentsWorkspace({ tenantSlug }: Props) {
       />
 
       <RestrictionsDialog
+        open={restrictAgent != null}
         agent={restrictAgent}
         onClose={() => setRestrictAgent(null)}
         tenantSlug={tenantSlug}
         categories={categoriesQ.data ?? []}
         priceTypes={priceTypesQ.data ?? []}
-        onSave={(id, ent) => patchMut.mutateAsync({ id, body: { agent_entitlements: ent } })}
+        onSave={async (ent) => {
+          if (!restrictAgent) return;
+          await patchMut.mutateAsync({ id: restrictAgent.id, body: { agent_entitlements: ent } });
+        }}
+      />
+
+      <RestrictionsDialog
+        open={groupDialog === "restrict"}
+        agent={null}
+        bulkMode
+        bulkSummary={`Выбрано агентов: ${selectedIds.size}`}
+        onClose={() => setGroupDialog(null)}
+        tenantSlug={tenantSlug}
+        categories={categoriesQ.data ?? []}
+        priceTypes={priceTypesQ.data ?? []}
+        onSave={async (ent) => {
+          await bulkMut.mutateAsync({
+            action: "set_agent_entitlements",
+            agent_ids: Array.from(selectedIds),
+            agent_entitlements: ent
+          });
+        }}
+      />
+
+      <GroupProductListDialog
+        open={groupDialog === "products"}
+        onClose={() => setGroupDialog(null)}
+        tenantSlug={tenantSlug}
+        categories={categoriesQ.data ?? []}
+        priceTypes={priceTypesQ.data ?? []}
+        selectedCount={selectedIds.size}
+        loading={bulkMut.isPending}
+        onApply={async (payload) => {
+          await bulkMut.mutateAsync({
+            action: "patch_product_list",
+            agent_ids: Array.from(selectedIds),
+            ...payload
+          });
+        }}
+      />
+
+      <GroupTradeDirectionDialog
+        open={groupDialog === "trade"}
+        onClose={() => setGroupDialog(null)}
+        rows={selectedRows}
+        tradeDirections={tradeDirectionRows}
+        loading={bulkMut.isPending}
+        onSave={async (updates) => {
+          await bulkMut.mutateAsync({
+            action: "set_trade_directions",
+            updates
+          });
+        }}
+      />
+
+      <Dialog open={groupDialog === "consignment"} onOpenChange={(o) => !o && setGroupDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Консигнация</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Агентов: {selectedIds.size}</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={bulkMut.isPending}
+              onClick={() =>
+                void bulkMut.mutateAsync({
+                  action: "set_consignment",
+                  agent_ids: Array.from(selectedIds),
+                  consignment: true
+                })
+              }
+            >
+              Включить
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              disabled={bulkMut.isPending}
+              onClick={() =>
+                void bulkMut.mutateAsync({
+                  action: "set_consignment",
+                  agent_ids: Array.from(selectedIds),
+                  consignment: false
+                })
+              }
+            >
+              Выключить
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={groupDialog === "app_access"} onOpenChange={(o) => !o && setGroupDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Доступ к приложению</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Агентов: {selectedIds.size}</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={bulkMut.isPending}
+              onClick={() =>
+                void bulkMut.mutateAsync({
+                  action: "set_app_access",
+                  agent_ids: Array.from(selectedIds),
+                  app_access: true
+                })
+              }
+            >
+              Вкл
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              disabled={bulkMut.isPending}
+              onClick={() =>
+                void bulkMut.mutateAsync({
+                  action: "set_app_access",
+                  agent_ids: Array.from(selectedIds),
+                  app_access: false
+                })
+              }
+            >
+              Выкл
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={groupDialog === "sessions"} onOpenChange={(o) => !o && setGroupDialog(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Завершить сессии</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Будут отозваны все активные refresh-токены для выбранных агентов ({selectedIds.size}).
+          </p>
+          <DialogFooter className="flex-row justify-end gap-2 border-0 bg-transparent p-0 sm:flex-row">
+            <Button type="button" variant="outline" onClick={() => setGroupDialog(null)}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={bulkMut.isPending}
+              onClick={() =>
+                void bulkMut.mutateAsync({
+                  action: "revoke_sessions",
+                  agent_ids: Array.from(selectedIds)
+                })
+              }
+            >
+              Завершить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <GroupLimitsDialog
+        open={groupDialog === "limits"}
+        onClose={() => setGroupDialog(null)}
+        rows={selectedRows}
+        loading={bulkMut.isPending}
+        onAdjustDelta={(delta) =>
+          bulkMut.mutateAsync({
+            action: "adjust_max_sessions",
+            agent_ids: Array.from(selectedIds),
+            delta
+          })
+        }
+        onSetAbsolute={(max_sessions) =>
+          bulkMut.mutateAsync({
+            action: "set_max_sessions",
+            agent_ids: Array.from(selectedIds),
+            max_sessions
+          })
+        }
       />
 
       <Dialog open={Boolean(deactivateAgent)} onOpenChange={(o) => !o && setDeactivateAgent(null)}>
@@ -1369,20 +1682,31 @@ function useCategoryProducts(tenantSlug: string, categoryId: number | null, enab
   });
 }
 
+type EntitlementSavePayload = {
+  price_types: string[];
+  product_rules: Array<{ category_id: number; all: boolean; product_ids?: number[] }>;
+};
+
 function RestrictionsDialog({
+  open,
   agent,
+  bulkMode = false,
+  bulkSummary,
   onClose,
   tenantSlug,
   categories,
   priceTypes,
   onSave
 }: {
+  open: boolean;
   agent: AgentRow | null;
+  bulkMode?: boolean;
+  bulkSummary?: string;
   onClose: () => void;
   tenantSlug: string;
   categories: ProductCategoryRow[];
   priceTypes: string[];
-  onSave: (id: number, ent: Record<string, unknown>) => Promise<unknown>;
+  onSave: (ent: EntitlementSavePayload) => Promise<unknown>;
 }) {
   const [ptSel, setPtSel] = useState<Set<string>>(new Set());
   const [ptSearch, setPtSearch] = useState("");
@@ -1393,6 +1717,16 @@ function RestrictionsDialog({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!open) return;
+    if (bulkMode) {
+      setPtSel(new Set());
+      setCatChecked({});
+      setProdChecked({});
+      setExpanded(new Set());
+      setPtSearch("");
+      setPrSearch("");
+      return;
+    }
     if (!agent) return;
     const pts = new Set(agent.price_types?.length ? agent.price_types : agent.price_type ? [agent.price_type] : []);
     const entPts = agent.agent_entitlements?.price_types ?? [];
@@ -1418,9 +1752,10 @@ function RestrictionsDialog({
     setExpanded(exp);
     setPtSearch("");
     setPrSearch("");
-  }, [agent]);
+  }, [open, agent, bulkMode]);
 
-  if (!agent) return null;
+  if (!open) return null;
+  if (!bulkMode && !agent) return null;
 
   const filteredPt = priceTypes.filter((p) => p.toLowerCase().includes(ptSearch.trim().toLowerCase()));
   const filteredCat = categories.filter((c) => c.name.toLowerCase().includes(prSearch.trim().toLowerCase()));
@@ -1448,7 +1783,7 @@ function RestrictionsDialog({
   const save = async () => {
     setSaving(true);
     try {
-      await onSave(agent.id, {
+      await onSave({
         price_types: Array.from(ptSel),
         product_rules: buildRules()
       });
@@ -1459,11 +1794,14 @@ function RestrictionsDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[92vh] max-w-4xl overflow-hidden sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Ограничения</DialogTitle>
-          <p className="text-sm text-muted-foreground">Агент: {agent.fio}</p>
+          <DialogTitle>Ограничения{bulkMode ? " (группа)" : ""}</DialogTitle>
+          {!bulkMode && agent && <p className="text-sm text-muted-foreground">Агент: {agent.fio}</p>}
+          {bulkMode && bulkSummary ? (
+            <p className="text-sm text-muted-foreground">{bulkSummary}</p>
+          ) : null}
         </DialogHeader>
         <div className="grid max-h-[65vh] grid-cols-1 gap-4 md:grid-cols-2">
           <SearchableMultiSelectPanel<string>
@@ -1511,6 +1849,319 @@ function RestrictionsDialog({
             Сохранить
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GroupProductListDialog({
+  open,
+  onClose,
+  tenantSlug,
+  categories,
+  priceTypes,
+  selectedCount,
+  loading,
+  onApply
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantSlug: string;
+  categories: ProductCategoryRow[];
+  priceTypes: string[];
+  selectedCount: number;
+  loading: boolean;
+  onApply: (payload: {
+    mode: "add" | "remove";
+    category_id?: number;
+    product_ids?: number[];
+    price_types?: string[];
+  }) => Promise<void>;
+}) {
+  const [ptSel, setPtSel] = useState<Set<string>>(new Set());
+  const [ptSearch, setPtSearch] = useState("");
+  const [catId, setCatId] = useState("");
+  const [prodSel, setProdSel] = useState<Set<number>>(new Set());
+  const parsedCat = catId.trim() ? Number.parseInt(catId.trim(), 10) : NaN;
+  const categoryId = Number.isInteger(parsedCat) && parsedCat > 0 ? parsedCat : null;
+
+  const pq = useCategoryProducts(tenantSlug, categoryId, open && categoryId != null);
+
+  useEffect(() => {
+    if (!open) return;
+    setPtSel(new Set());
+    setCatId("");
+    setProdSel(new Set());
+    setPtSearch("");
+  }, [open]);
+
+  useEffect(() => {
+    setProdSel(new Set());
+  }, [catId]);
+
+  const filteredPt = priceTypes.filter((p) => p.toLowerCase().includes(ptSearch.trim().toLowerCase()));
+  const products = pq.data ?? [];
+
+  const run = async (mode: "add" | "remove") => {
+    const price_types = Array.from(ptSel).filter(Boolean);
+    const product_ids = Array.from(prodSel);
+    if (!price_types.length && !product_ids.length) {
+      window.alert("Выберите тип цены и/или товары.");
+      return;
+    }
+    if (product_ids.length && categoryId == null) {
+      window.alert("Выберите группу товаров для товаров.");
+      return;
+    }
+    await onApply({
+      mode,
+      ...(categoryId != null && product_ids.length ? { category_id: categoryId, product_ids } : {}),
+      ...(price_types.length ? { price_types } : {})
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[92vh] max-w-4xl overflow-hidden sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Товары и типы цен (группа)</DialogTitle>
+          <p className="text-sm text-muted-foreground">Агентов: {selectedCount}</p>
+        </DialogHeader>
+        <div className="grid max-h-[60vh] grid-cols-1 gap-4 md:grid-cols-2">
+          <SearchableMultiSelectPanel<string>
+            label="Тип цены"
+            searchPlaceholder="Поиск"
+            search={ptSearch}
+            onSearchChange={setPtSearch}
+            items={filteredPt.map((p) => ({ id: p, title: p }))}
+            selected={ptSel}
+            onSelectedChange={setPtSel}
+            emptyMessage="Нет вариантов"
+          />
+          <div className="flex min-h-0 flex-col gap-2 rounded-md border p-2">
+            <label className="text-xs text-muted-foreground">
+              Группа товаров
+              <FilterSelect
+                className="mt-1 h-9 w-full rounded-md border border-input bg-background p-2 text-sm"
+                emptyLabel="Категория"
+                aria-label="Категория"
+                value={catId}
+                onChange={(e) => setCatId(e.target.value)}
+              >
+                {categories.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </option>
+                ))}
+              </FilterSelect>
+            </label>
+            <div className="min-h-0 flex-1 overflow-y-auto text-xs">
+              {pq.isLoading && <p className="text-muted-foreground">Загрузка…</p>}
+              {products.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 py-0.5">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    checked={prodSel.has(p.id)}
+                    onChange={(e) => {
+                      setProdSel((prev) => {
+                        const n = new Set(prev);
+                        if (e.target.checked) n.add(p.id);
+                        else n.delete(p.id);
+                        return n;
+                      });
+                    }}
+                  />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter className="flex-col gap-2 sm:flex-col">
+          <Button
+            type="button"
+            className="w-full bg-emerald-700 text-white hover:bg-emerald-800"
+            disabled={loading}
+            onClick={() => void run("add")}
+          >
+            Добавить к списку агентов
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full"
+            disabled={loading}
+            onClick={() => void run("remove")}
+          >
+            Убрать из списка агентов
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GroupTradeDirectionDialog({
+  open,
+  onClose,
+  rows,
+  tradeDirections,
+  loading,
+  onSave
+}: {
+  open: boolean;
+  onClose: () => void;
+  rows: AgentRow[];
+  tradeDirections: Array<{ id: number; name: string; code: string | null }>;
+  loading: boolean;
+  onSave: (updates: { agent_id: number; trade_direction_id: number | null }[]) => Promise<void>;
+}) {
+  const [perTd, setPerTd] = useState<Record<number, string>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    const m: Record<number, string> = {};
+    for (const r of rows) {
+      if (r.trade_direction_id != null && r.trade_direction_id > 0) m[r.id] = String(r.trade_direction_id);
+      else m[r.id] = "";
+    }
+    setPerTd(m);
+  }, [open, rows]);
+
+  const save = async () => {
+    const updates = rows.map((r) => ({
+      agent_id: r.id,
+      trade_direction_id: perTd[r.id]?.trim()
+        ? Number.parseInt(perTd[r.id]!.trim(), 10)
+        : null
+    }));
+    await onSave(updates);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Направление торговли</DialogTitle>
+          <p className="text-sm text-muted-foreground">Строк: {rows.length}</p>
+        </DialogHeader>
+        <div className="max-h-[58vh] overflow-x-auto overflow-y-auto rounded-md border">
+          <table className="w-full min-w-[480px] text-xs">
+            <thead className="sticky top-0 bg-muted/80">
+              <tr>
+                <th className="px-2 py-2 text-left">Ф.И.О.</th>
+                <th className="px-2 py-2 text-left">Код</th>
+                <th className="px-2 py-2 text-left">Направление</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t">
+                  <td className="px-2 py-1.5">{r.fio}</td>
+                  <td className="px-2 py-1.5 font-mono">{r.code ?? "—"}</td>
+                  <td className="px-2 py-1.5">
+                    <FilterSelect
+                      className="h-8 w-full min-w-[10rem] rounded-md border border-input bg-background px-2 text-xs"
+                      emptyLabel="—"
+                      aria-label="Направление торговли"
+                      value={perTd[r.id] ?? ""}
+                      onChange={(e) => setPerTd((p) => ({ ...p, [r.id]: e.target.value }))}
+                    >
+                      {tradeDirections.map((t) => (
+                        <option key={t.id} value={String(t.id)}>
+                          {t.name}
+                          {t.code ? ` (${t.code})` : ""}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button type="button" disabled={loading || rows.length === 0} onClick={() => void save()}>
+            Сохранить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GroupLimitsDialog({
+  open,
+  onClose,
+  rows,
+  loading,
+  onAdjustDelta,
+  onSetAbsolute
+}: {
+  open: boolean;
+  onClose: () => void;
+  rows: AgentRow[];
+  loading: boolean;
+  onAdjustDelta: (d: number) => Promise<unknown>;
+  onSetAbsolute: (n: number) => Promise<unknown>;
+}) {
+  const [num, setNum] = useState("");
+
+  useEffect(() => {
+    if (open) setNum("");
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Лимит сессий</DialogTitle>
+          <p className="text-sm text-muted-foreground">Агентов: {rows.length}</p>
+        </DialogHeader>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void onAdjustDelta(-1)}>
+            −1 к лимиту
+          </Button>
+          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void onAdjustDelta(1)}>
+            +1 к лимиту
+          </Button>
+        </div>
+        <div className="flex gap-2">
+          <Input
+            placeholder="1…99"
+            className="h-9"
+            value={num}
+            onChange={(e) => setNum(e.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 shrink-0"
+            disabled={loading}
+            onClick={() => {
+              const n = Number.parseInt(num.trim(), 10);
+              if (!Number.isInteger(n) || n < 1 || n > 99) {
+                window.alert("Введите число от 1 до 99.");
+                return;
+              }
+              void onSetAbsolute(n);
+            }}
+          >
+            Применить
+          </Button>
+        </div>
+        <div className="max-h-40 overflow-y-auto rounded border p-2 text-xs text-muted-foreground">
+          {rows.slice(0, 50).map((r) => (
+            <div key={r.id}>
+              {r.fio} — {r.max_sessions}
+            </div>
+          ))}
+          {rows.length > 50 ? <div>… ещё {rows.length - 50}</div> : null}
+        </div>
       </DialogContent>
     </Dialog>
   );

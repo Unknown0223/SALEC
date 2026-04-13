@@ -160,14 +160,14 @@ export function DashboardHome({
           </Card>
           <Card className="border-border/90">
             <CardHeader className="pb-1">
-              <CardDescription className="text-xs">Каталог / открытая задолженность</CardDescription>
+              <CardDescription className="text-xs">Каталог / долг по доставленным</CardDescription>
               <CardTitle className="text-lg tabular-nums leading-snug">
                 {formatGroupedInteger(statsQ.data.clients_total)} клиентов ·{" "}
                 {formatGroupedInteger(statsQ.data.products_active)} товаров
               </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              Сумма открытых заказов:{" "}
+              Неоплаченный остаток по доставленным продажам:{" "}
               <span className="font-medium text-foreground tabular-nums">
                 {formatNumberGrouped(statsQ.data.open_orders_total, { maxFractionDigits: 2 })}
               </span>

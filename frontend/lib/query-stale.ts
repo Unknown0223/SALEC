@@ -10,6 +10,8 @@ export const STALE = {
   profile: 3 * 60 * 1000,
   /** Ro‘yxatlar (paginatsiya) */
   list: 75 * 1000,
+  /** Og‘ir agregat: balanslar / konsignatsiya ro‘yxati */
+  heavyList: 120 * 1000,
   /** Hisobot / agregat endpointlar */
   report: 2 * 60 * 1000,
   /** Bitta hujjat / kartochka */

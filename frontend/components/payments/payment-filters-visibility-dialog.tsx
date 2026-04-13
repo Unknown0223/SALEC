@@ -11,36 +11,51 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  buildPaymentFilterVisibilityMeta,
+  clampPaymentFilterVisibilityToTerritoryLevels,
   DEFAULT_PAYMENT_FILTER_VISIBILITY,
   type PaymentFilterVisibility,
-  PAYMENT_FILTER_VISIBILITY_META,
   savePaymentFilterVisibility
 } from "@/lib/payment-filters-visibility";
 import { useEffect, useMemo, useState } from "react";
+
+type TerritoryRow = { key: keyof PaymentFilterVisibility; label: string };
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   value: PaymentFilterVisibility;
   onChange: (next: PaymentFilterVisibility) => void;
+  /** Profil/sozlamadagi hudud sarlavhalari — faqat shu qatorlar modalda ko‘rinadi */
+  territoryRows: TerritoryRow[];
+  territoryLevelCount: number;
 };
 
-export function PaymentFiltersVisibilityDialog({ open, onOpenChange, value, onChange }: Props) {
+export function PaymentFiltersVisibilityDialog({
+  open,
+  onOpenChange,
+  value,
+  onChange,
+  territoryRows,
+  territoryLevelCount
+}: Props) {
   const [draft, setDraft] = useState<PaymentFilterVisibility>(value);
   const [q, setQ] = useState("");
 
+  const fullMeta = useMemo(() => buildPaymentFilterVisibilityMeta(territoryRows), [territoryRows]);
+
   useEffect(() => {
     if (open) {
-      setDraft(value);
+      setDraft(clampPaymentFilterVisibilityToTerritoryLevels(value, territoryLevelCount));
       setQ("");
     }
-  }, [open, value]);
+  }, [open, value, territoryLevelCount]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return PAYMENT_FILTER_VISIBILITY_META;
-    return PAYMENT_FILTER_VISIBILITY_META.filter((x) => x.label.toLowerCase().includes(s));
-  }, [q]);
+    if (!s) return fullMeta;
+    return fullMeta.filter((x) => x.label.toLowerCase().includes(s));
+  }, [q, fullMeta]);
 
   const setAll = (on: boolean) => {
     setDraft(() => {
@@ -48,21 +63,24 @@ export function PaymentFiltersVisibilityDialog({ open, onOpenChange, value, onCh
       (Object.keys(next) as (keyof PaymentFilterVisibility)[]).forEach((k) => {
         next[k] = on;
       });
-      return next;
+      return clampPaymentFilterVisibilityToTerritoryLevels(next, territoryLevelCount);
     });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(85vh,520px)] max-w-md overflow-hidden p-0 sm:max-w-md" showCloseButton>
-        <DialogHeader className="border-b border-border/60 px-4 py-3 text-left">
+      <DialogContent
+        className="flex max-h-[min(90vh,560px)] w-full max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
+        showCloseButton
+      >
+        <DialogHeader className="shrink-0 border-b border-border/60 px-4 py-3 pr-10 text-left">
           <DialogTitle className="text-base">Видимость фильтров</DialogTitle>
           <DialogDescription className="text-xs">
             Отметьте, какие поля показывать на панели. Сохраняется в браузере.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2 px-4 py-2">
+        <div className="shrink-0 space-y-2 px-4 py-2">
           <Input
             className="h-8 text-sm"
             placeholder="Поиск…"
@@ -79,7 +97,7 @@ export function PaymentFiltersVisibilityDialog({ open, onOpenChange, value, onCh
           </div>
         </div>
 
-        <div className="max-h-[min(45vh,280px)] space-y-0.5 overflow-y-auto px-4 pb-2">
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-4 py-1">
           {filtered.map(({ key, label }) => (
             <label
               key={key}
@@ -96,7 +114,7 @@ export function PaymentFiltersVisibilityDialog({ open, onOpenChange, value, onCh
           ))}
         </div>
 
-        <DialogFooter className="border-t border-border/60 px-4 py-3">
+        <DialogFooter className="mx-0 mb-0 flex shrink-0 flex-col gap-2 rounded-b-xl border-t border-border/60 bg-muted/50 px-4 py-3 sm:flex-row sm:justify-end">
           <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Отмена
           </Button>
@@ -104,8 +122,9 @@ export function PaymentFiltersVisibilityDialog({ open, onOpenChange, value, onCh
             type="button"
             size="sm"
             onClick={() => {
-              savePaymentFilterVisibility(draft);
-              onChange(draft);
+              const clamped = clampPaymentFilterVisibilityToTerritoryLevels(draft, territoryLevelCount);
+              savePaymentFilterVisibility(clamped);
+              onChange(clamped);
               onOpenChange(false);
             }}
           >

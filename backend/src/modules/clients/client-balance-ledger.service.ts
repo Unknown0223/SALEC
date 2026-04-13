@@ -3,8 +3,15 @@ import { prisma } from "../../config/database";
 import {
   paymentTypesFromMethodEntries,
   resolveCurrencyEntries,
-  resolvePaymentMethodEntries
+  resolvePaymentMethodEntries,
+  resolvePaymentMethodRefToLabel,
+  type PaymentMethodEntryDto
 } from "../tenant-settings/finance-refs";
+import {
+  loadDeliveryDebtByClient,
+  mergeLedgerWithUnpaidDelivered
+} from "../client-balances/client-balances.service";
+import { ORDER_STATUSES_OUTSTANDING_RECEIVABLE } from "../orders/order-status";
 
 export type ClientBalancePaymentTypeSummary = {
   label: string;
@@ -42,6 +49,11 @@ export type ClientLedgerRow = {
   created_by_display: string | null;
   /** Нарастающий баланс после строки (только при ledger_detail=1). */
   balance_after: string | null;
+  /**
+   * Строка оплаты/расхода, привязанная к заказу: способ оплаты из заказа (как при оформлении).
+   * Показывается в UI, если отличается от способа у самого платежа.
+   */
+  order_payment_method_label: string | null;
 };
 
 export type AgentBalanceCard = {
@@ -146,17 +158,25 @@ function normPayTypeKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-async function loadTenantPaymentTypeLabels(tenantId: number): Promise<string[]> {
+async function loadTenantLedgerPaymentContext(tenantId: number): Promise<{
+  sprLabels: string[];
+  paymentMethodEntries: PaymentMethodEntryDto[];
+}> {
   const row = await prisma.tenant.findUnique({
     where: { id: tenantId },
     select: { settings: true }
   });
   const settings = row?.settings as Record<string, unknown> | null | undefined;
   const ref = settings?.references as Record<string, unknown> | undefined;
-  if (!ref || typeof ref !== "object") return [];
+  if (!ref || typeof ref !== "object") {
+    return { sprLabels: [], paymentMethodEntries: [] };
+  }
   const currency_entries = resolveCurrencyEntries(ref);
-  const methods = resolvePaymentMethodEntries(ref, currency_entries);
-  return paymentTypesFromMethodEntries(methods);
+  const paymentMethodEntries = resolvePaymentMethodEntries(ref, currency_entries);
+  return {
+    sprLabels: paymentTypesFromMethodEntries(paymentMethodEntries),
+    paymentMethodEntries
+  };
 }
 
 function paymentAmountsForSpravochnik(
@@ -209,6 +229,8 @@ type UnionRaw = {
   created_by_login: string | null;
   entry_kind: string | null;
   balance_after?: Prisma.Decimal | null;
+  /** Сырой `orders.payment_method_ref` для строки платежа (если есть заказ). */
+  order_payment_method_ref: string | null;
 };
 
 function mapUnionToLedgerRow(r: UnionRaw): ClientLedgerRow {
@@ -238,7 +260,7 @@ function mapUnionToLedgerRow(r: UnionRaw): ClientLedgerRow {
   const created_by_display =
     rk === "payment"
       ? (r.created_by_login?.trim() || null)
-      : (r.expeditor_name?.trim() || r.agent_name?.trim() || null);
+      : (r.created_by_login?.trim() || r.expeditor_name?.trim() || r.agent_name?.trim() || null);
 
   return {
     row_kind: rk,
@@ -263,7 +285,8 @@ function mapUnionToLedgerRow(r: UnionRaw): ClientLedgerRow {
     comment_primary,
     comment_transaction,
     created_by_display,
-    balance_after: r.balance_after != null ? r.balance_after.toString() : null
+    balance_after: r.balance_after != null ? r.balance_after.toString() : null,
+    order_payment_method_label: null
   };
 }
 
@@ -289,23 +312,31 @@ export async function getClientBalanceLedger(
     throw new Error("NOT_FOUND");
   }
 
-  const sprLabels = await loadTenantPaymentTypeLabels(tenantId);
+  const { sprLabels, paymentMethodEntries } = await loadTenantLedgerPaymentContext(tenantId);
 
-  const balRow = await prisma.clientBalance.findUnique({
-    where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
-    select: { balance: true }
-  });
-  const account_balance = balRow?.balance.toString() ?? "0";
+  const [balRow, deliveryMap] = await Promise.all([
+    prisma.clientBalance.findUnique({
+      where: { tenant_id_client_id: { tenant_id: tenantId, client_id: clientId } },
+      select: { balance: true }
+    }),
+    loadDeliveryDebtByClient(tenantId, [clientId])
+  ]);
+  const ledgerDec = balRow?.balance ?? new Prisma.Decimal(0);
+  const account_balance = mergeLedgerWithUnpaidDelivered(
+    ledgerDec,
+    deliveryMap.get(clientId)
+  ).toString();
 
   const excluded = ["cancelled", "returned"] as const;
 
+  /** Faqat yetkazilgan savdo zakazlari — to‘lanmagan qoldiq (taqsimlar bilan). */
   const remainingByAgent = await prisma.$queryRaw<
     Array<{ agent_id: number | null; agent_name: string | null; agent_code: string | null; remaining: Prisma.Decimal }>
   >`
     SELECT o.agent_id,
       ag.name AS agent_name,
       ag.code AS agent_code,
-      SUM(o.total_sum - COALESCE(al.sum_amt, 0))::decimal(15,2) AS remaining
+      SUM(GREATEST(o.total_sum - COALESCE(al.sum_amt, 0), 0))::decimal(15,2) AS remaining
     FROM orders o
     LEFT JOIN (
       SELECT pa.order_id, SUM(pa.amount)::decimal(15,2) AS sum_amt
@@ -316,8 +347,9 @@ export async function getClientBalanceLedger(
     LEFT JOIN users ag ON ag.id = o.agent_id
     WHERE o.tenant_id = ${tenantId}
       AND o.client_id = ${clientId}
-      AND o.status NOT IN (${Prisma.join(excluded)})
+      AND o.status IN (${Prisma.join([...ORDER_STATUSES_OUTSTANDING_RECEIVABLE])})
       AND o.order_type = 'order'
+      AND GREATEST(o.total_sum - COALESCE(al.sum_amt, 0), 0) > 0
     GROUP BY o.agent_id, ag.name, ag.code
     ORDER BY ag.name ASC NULLS LAST
   `;
@@ -653,14 +685,32 @@ export async function getClientBalanceLedger(
           o.number AS order_number,
           (-(o.total_sum))::decimal(15,2) AS debt_amount,
           NULL::decimal(15,2) AS payment_amount,
-          NULL::text AS payment_type,
-          o.is_consignment AS is_consignment,
+          NULLIF(TRIM(o.payment_method_ref), '')::text AS payment_type,
+          (o.is_consignment OR COALESCE(ag.consignment, false)) AS is_consignment,
           ag.name AS agent_name,
           ex.name AS expeditor_name,
           NULL::text AS cash_desk_name,
           o.comment AS note,
-          NULL::text AS created_by_login,
-          'order'::text AS entry_kind
+          COALESCE(
+            (
+              SELECT COALESCE(NULLIF(TRIM(cu.name), ''), cu.login)::text
+              FROM order_change_logs ocl
+              JOIN users cu ON cu.id = ocl.user_id
+              WHERE ocl.order_id = o.id AND ocl.user_id IS NOT NULL
+              ORDER BY ocl.created_at ASC NULLS LAST, ocl.id ASC
+              LIMIT 1
+            ),
+            (
+              SELECT COALESCE(NULLIF(TRIM(su.name), ''), su.login)::text
+              FROM order_status_logs osl
+              JOIN users su ON su.id = osl.user_id
+              WHERE osl.order_id = o.id AND osl.user_id IS NOT NULL
+              ORDER BY osl.created_at ASC NULLS LAST, osl.id ASC
+              LIMIT 1
+            )
+          ) AS created_by_login,
+          'order'::text AS entry_kind,
+          NULL::text AS order_payment_method_ref
         FROM orders o
         LEFT JOIN users ag ON ag.id = o.agent_id
         LEFT JOIN users ex ON ex.id = o.expeditor_user_id
@@ -683,13 +733,17 @@ export async function getClientBalanceLedger(
           CASE WHEN p.entry_kind = 'client_expense' THEN p.amount ELSE NULL END AS debt_amount,
           CASE WHEN p.entry_kind = 'payment' THEN p.amount ELSE NULL END AS payment_amount,
           p.payment_type,
-          NULL::boolean AS is_consignment,
+          CASE
+            WHEN ord.id IS NOT NULL THEN (ord.is_consignment OR COALESCE(oag.consignment, false))
+            ELSE NULL
+          END AS is_consignment,
           COALESCE(lag.name, oag.name, cag.name) AS agent_name,
           pex.name AS expeditor_name,
           cd.name AS cash_desk_name,
           p.note,
-          u.login AS created_by_login,
-          p.entry_kind
+          COALESCE(NULLIF(TRIM(u.name), ''), u.login)::text AS created_by_login,
+          p.entry_kind,
+          NULLIF(TRIM(ord.payment_method_ref), '')::text AS order_payment_method_ref
         FROM client_payments p
         JOIN clients c ON c.id = p.client_id AND c.tenant_id = ${tenantId}
         LEFT JOIN orders ord ON ord.id = p.order_id AND ord.tenant_id = ${tenantId}
@@ -714,7 +768,25 @@ export async function getClientBalanceLedger(
     LIMIT ${limit} OFFSET ${offset}
   `;
 
-  const rows = unionRows.map(mapUnionToLedgerRow);
+  const rows = unionRows.map((raw) => {
+    const row = mapUnionToLedgerRow(raw);
+    const pt = row.payment_type?.trim() ?? "";
+    const resolvedPt = pt ? resolvePaymentMethodRefToLabel(pt, paymentMethodEntries) : null;
+
+    let order_payment_method_label: string | null = null;
+    if (row.row_kind === "payment") {
+      const orf = raw.order_payment_method_ref?.trim() ?? "";
+      if (orf) {
+        order_payment_method_label = resolvePaymentMethodRefToLabel(orf, paymentMethodEntries);
+      }
+    }
+
+    return {
+      ...row,
+      payment_type: resolvedPt,
+      order_payment_method_label
+    };
+  });
 
   return {
     client: {

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "tenant": {
+    "slug": "mycompany",
+    "name": "MChJ Mening kompaniyam",
+    "phone": "+998901234567",
+    "address": "Toshkent"
+  },
+  "admin": {
+    "login": "admin",
+    "password": "O‘zgartiring8!",
+    "display_name": "Administrator"
+  },
+  "warehouse": {
+    "name": "Asosiy ombor",
+    "type": "main"
+  },
+  "staff": [
+    {
+      "login": "agent1",
+      "password": "Parol123!",
+      "name": "Agent Bir",
+      "role": "agent",
+      "code": "A01",
+      "branch": null
+    }
+  ],
+  "clients": [
+    {
+      "name": "Do‘kon «Namuna»",
+      "phone": "+998901112233",
+      "inn": null,
+      "legal_name": null,
+      "client_code": "C001",
+      "category": "retail",
+      "credit_limit": "0"
+    }
+  ],
+  "products": [
+    {
+      "sku": "SKU-1001",
+      "name": "Mahsulot namunasi",
+      "unit": "dona",
+      "retail_price": "12000",
+      "initial_stock_qty": "100"
+    }
+  ]
+}

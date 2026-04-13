@@ -26,6 +26,11 @@ export type ClientBalanceRow = {
   balance: string;
   /** Те же способы оплаты и порядок, что в summary.payment_by_type */
   payment_amounts: ClientBalancePaymentTypeSummary[];
+  /** Вкладка «По доставке»: одна строка — один заказ */
+  delivery_order_id?: number | null;
+  delivery_order_number?: string | null;
+  /** То же, что delivery_order_id (на случай расхождений сериализации) */
+  order_id?: number | null;
 };
 
 export type AgentBalanceRow = {
@@ -53,5 +58,9 @@ export type ClientBalanceTerritoryOptions = {
   regions: string[];
   cities: string[];
   districts: string[];
+  /** Mijoz `zone` maydoni (masalan «Зона» darajasi) */
+  zones: string[];
+  /** Mijoz `neighborhood` (махалля) */
+  neighborhoods: string[];
   branches: string[];
 };

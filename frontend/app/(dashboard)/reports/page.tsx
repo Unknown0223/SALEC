@@ -1250,7 +1250,7 @@ function ReportsContent() {
                         <tr>
                           <th className="px-3 py-2 text-left">Mijoz</th>
                           <th className="px-3 py-2 text-left">Telefon</th>
-                          <th className="px-3 py-2 text-right">Ochiq zakazlar</th>
+                          <th className="px-3 py-2 text-right">Yetkaz., to‘lanmagan</th>
                           <th className="px-3 py-2 text-right">Hisob</th>
                           <th className="px-3 py-2 text-right">K. limit</th>
                           <th className="px-3 py-2 text-right">Headroom</th>

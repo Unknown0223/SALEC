@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { listConsignmentBalancesReport } from "./consignment-balances.service";
 import {
   listClientBalancesReport,
   listClientBalanceTerritoryOptions,
@@ -20,6 +21,7 @@ function parseListQuery(q: Record<string, string | undefined>): ClientBalanceLis
   const allowLarge = q.large_export === "1" || q.large_export === "true";
   const maxL = allowLarge ? 5000 : 200;
   const limit = Math.min(maxL, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
+  const deliveryOrderId = parseOptPositiveInt(q.order_id);
   const viewRaw = q.view?.trim();
   const view: ClientBalanceListQuery["view"] =
     viewRaw === "agents"
@@ -49,11 +51,26 @@ function parseListQuery(q: Record<string, string | undefined>): ClientBalanceLis
     ...(q.territory_region?.trim() ? { territory_region: q.territory_region.trim() } : {}),
     ...(q.territory_city?.trim() ? { territory_city: q.territory_city.trim() } : {}),
     ...(q.territory_district?.trim() ? { territory_district: q.territory_district.trim() } : {}),
+    ...(q.territory_zone?.trim() ? { territory_zone: q.territory_zone.trim() } : {}),
+    ...(q.territory_neighborhood?.trim()
+      ? { territory_neighborhood: q.territory_neighborhood.trim() }
+      : {}),
     ...(q.balance_as_of?.trim() ? { balance_as_of: q.balance_as_of.trim() } : {}),
     ...(q.consignment_due_from?.trim() ? { consignment_due_from: q.consignment_due_from.trim() } : {}),
     ...(q.consignment_due_to?.trim() ? { consignment_due_to: q.consignment_due_to.trim() } : {}),
     ...(q.agent_branch?.trim() ? { agent_branch: q.agent_branch.trim() } : {}),
-    ...(q.agent_payment_type?.trim() ? { agent_payment_type: q.agent_payment_type.trim() } : {})
+    ...(q.agent_payment_type?.trim() ? { agent_payment_type: q.agent_payment_type.trim() } : {}),
+    ...(q.branch_ids?.trim()
+      ? {
+          agent_branches: q.branch_ids
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        }
+      : {}),
+    ...(q.order_date_from?.trim() ? { order_date_from: q.order_date_from.trim() } : {}),
+    ...(q.order_date_to?.trim() ? { order_date_to: q.order_date_to.trim() } : {}),
+    ...(deliveryOrderId !== undefined ? { delivery_order_id: deliveryOrderId } : {})
   };
 }
 
@@ -75,6 +92,17 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
       const result = await listClientBalancesReport(request.tenant!.id, parseListQuery(q));
+      return reply.send(result);
+    }
+  );
+
+  app.get(
+    "/api/:slug/client-balances/consignment",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const result = await listConsignmentBalancesReport(request.tenant!.id, parseListQuery(q));
       return reply.send(result);
     }
   );

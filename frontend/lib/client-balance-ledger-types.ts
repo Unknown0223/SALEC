@@ -27,6 +27,8 @@ export type ClientLedgerRow = {
   comment_transaction: string | null;
   created_by_display: string | null;
   balance_after: string | null;
+  /** Bog‘langan zakazning to‘lov usuli (oplata qatorida). */
+  order_payment_method_label: string | null;
 };
 
 export type AgentBalanceCard = {

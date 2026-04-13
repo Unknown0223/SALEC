@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
-import { ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE } from "../orders/order-status";
+import { ORDER_STATUSES_OUTSTANDING_RECEIVABLE } from "../orders/order-status";
 
 export type ConsignmentOutstandingOptions = {
   ignorePreviousMonthsDebt: boolean;
@@ -41,7 +41,8 @@ export async function computeAgentConsignmentOutstanding(
       agent_id: agentId,
       is_consignment: true,
       order_type: "order",
-      status: { notIn: [...ORDER_STATUSES_EXCLUDED_FROM_CREDIT_EXPOSURE] }
+      /** «Балансы по консигнации» bilan bir xil: faqat доставлен (mijoz olgach). */
+      status: { in: [...ORDER_STATUSES_OUTSTANDING_RECEIVABLE] }
     },
     select: { id: true, total_sum: true, created_at: true }
   });

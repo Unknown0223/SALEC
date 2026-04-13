@@ -184,6 +184,8 @@ export async function registerOrderRoutes(app: FastifyInstance) {
       else if (icRaw === "false" || icRaw === "0" || icRaw === "no") is_consignment = false;
       const product_category_id = parseOptId(q.product_category_id);
       const payment_type = q.payment_type?.trim() || undefined;
+      const payment_method_ref = q.payment_method_ref?.trim() || undefined;
+      const date_mode = q.date_mode?.trim() || undefined;
       const viewer = getAccessUser(request);
       const result = await listOrdersPaged(
         request.tenant!.id,
@@ -202,10 +204,12 @@ export async function registerOrderRoutes(app: FastifyInstance) {
           product_id,
           date_from,
           date_to,
+          date_mode,
           order_type,
           is_consignment,
           product_category_id,
-          payment_type
+          payment_type,
+          payment_method_ref
         },
         viewer.role ?? ""
       );
