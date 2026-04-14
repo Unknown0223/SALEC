@@ -393,7 +393,7 @@ export default function NewClientPage() {
               </div>
               <div className="grid gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="mb-0 text-xs">Город (код в БД)</Label>
+                  <Label className="mb-0 text-xs">Город</Label>
                   <RefAdminLink href="/settings/spravochnik/client-lists#ref-city">+</RefAdminLink>
                 </div>
                 <FilterSelect

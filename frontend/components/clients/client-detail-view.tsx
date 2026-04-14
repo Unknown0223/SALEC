@@ -15,11 +15,12 @@ import {
 import { STALE } from "@/lib/query-stale";
 import { useEffectiveRole } from "@/lib/auth-store";
 import { ORDER_STATUS_LABELS } from "@/lib/order-status";
+import { optionsToValueLabelMap } from "@/lib/ref-select-options";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 export type ClientDetailApiRow = ClientRow & {
   phone_normalized: string | null;
@@ -94,6 +95,15 @@ type ClientAuditResponse = {
   limit: number;
 };
 
+type ClientReferencesResponse = {
+  category_options?: Array<{ value: string; label: string }>;
+  client_type_options?: Array<{ value: string; label: string }>;
+  client_format_options?: Array<{ value: string; label: string }>;
+  sales_channel_options?: Array<{ value: string; label: string }>;
+  city_options?: Array<{ value: string; label: string }>;
+  region_options?: Array<{ value: string; label: string }>;
+};
+
 function parseFilenameFromDisposition(cd: string | undefined): string | null {
   if (!cd) return null;
   const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
@@ -158,11 +168,6 @@ function formatAgentAssignmentLine(a: ClientRow["agent_assignments"][number]): s
   return chunks.join(" ");
 }
 
-function territoryFullLine(c: ClientRow): string {
-  const parts = [c.region, c.city, c.district, c.zone, c.neighborhood].map((x) => (x ?? "").trim()).filter(Boolean);
-  return parts.length ? parts.join(" · ") : "";
-}
-
 function addressStructuredLine(c: ClientRow): string {
   const line = [c.street, c.house_number, c.apartment].map((x) => (x ?? "").trim()).filter(Boolean).join(", ");
   return line;
@@ -197,6 +202,12 @@ function DetailSection({ title, rows }: { title: string; rows: Array<DetailRow |
 function optStrRow(label: string, value: string | null | undefined): DetailRow | null {
   if (!nz(value)) return null;
   return { label, value: String(value).trim() };
+}
+
+function displayRefValue(raw: string | null | undefined, map?: Record<string, string>): string | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  return map?.[t] ?? t;
 }
 
 function buildContactPersonRows(cps: ContactPersonSlot[]): DetailRow[] {
@@ -250,6 +261,16 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
         `/api/${tenantSlug}/clients/${clientId}`
       );
       return body;
+    }
+  });
+
+  const refsQ = useQuery({
+    queryKey: ["clients-references", tenantSlug, "detail-view"],
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data } = await api.get<ClientReferencesResponse>(`/api/${tenantSlug}/clients/references`);
+      return data;
     }
   });
 
@@ -325,6 +346,19 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
     }
   });
 
+  const refDisplayMaps = useMemo(() => {
+    const refs = refsQ.data;
+    if (!refs) return undefined;
+    return {
+      category: optionsToValueLabelMap(refs.category_options),
+      clientType: optionsToValueLabelMap(refs.client_type_options),
+      clientFormat: optionsToValueLabelMap(refs.client_format_options),
+      salesChannel: optionsToValueLabelMap(refs.sales_channel_options),
+      city: optionsToValueLabelMap(refs.city_options),
+      region: optionsToValueLabelMap(refs.region_options)
+    };
+  }, [refsQ.data]);
+
   const creditLimitNum = data ? Number.parseFloat(data.credit_limit) : NaN;
   const openNum = data ? Number.parseFloat(data.open_orders_total) : NaN;
   const showCreditHint =
@@ -394,7 +428,15 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
   const assignmentsOrdered = [...data.agent_assignments].sort((a, b) => a.slot - b.slot);
   const assignmentsVisible = assignmentsOrdered.filter(assignmentHasDetailData);
   const structuredAddr = addressStructuredLine(data);
-  const territoryLine = territoryFullLine(data);
+  const territoryLine = [
+    displayRefValue(data.region, refDisplayMaps?.region),
+    displayRefValue(data.city, refDisplayMaps?.city),
+    data.district?.trim() || null,
+    data.zone?.trim() || null,
+    data.neighborhood?.trim() || null
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="flex flex-col gap-6 text-sm">
@@ -608,11 +650,11 @@ export function ClientDetailView({ tenantSlug, clientId }: Props) {
           <DetailSection
             title="Классификация"
             rows={[
-              optStrRow("Тип клиента", data.client_type_code),
-              optStrRow("Формат клиента", data.client_format),
-              optStrRow("Категория", data.category),
+              optStrRow("Тип клиента", displayRefValue(data.client_type_code, refDisplayMaps?.clientType)),
+              optStrRow("Формат клиента", displayRefValue(data.client_format, refDisplayMaps?.clientFormat)),
+              optStrRow("Категория", displayRefValue(data.category, refDisplayMaps?.category)),
               optStrRow("Категория товаров", data.product_category_ref),
-              optStrRow("Канал продаж", data.sales_channel)
+              optStrRow("Канал продаж", displayRefValue(data.sales_channel, refDisplayMaps?.salesChannel))
             ]}
           />
 

@@ -91,7 +91,20 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
-      const result = await listClientBalancesReport(request.tenant!.id, parseListQuery(q));
+      const parsed = parseListQuery(q);
+      const t0 = Date.now();
+      const result = await listClientBalancesReport(request.tenant!.id, parsed);
+      request.log.info(
+        {
+          tenantId: request.tenant!.id,
+          view: parsed.view,
+          page: parsed.page,
+          limit: parsed.limit,
+          total: result.total,
+          elapsedMs: Date.now() - t0
+        },
+        "client-balances report timing"
+      );
       return reply.send(result);
     }
   );
@@ -102,7 +115,19 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
-      const result = await listConsignmentBalancesReport(request.tenant!.id, parseListQuery(q));
+      const parsed = parseListQuery(q);
+      const t0 = Date.now();
+      const result = await listConsignmentBalancesReport(request.tenant!.id, parsed);
+      request.log.info(
+        {
+          tenantId: request.tenant!.id,
+          page: parsed.page,
+          limit: parsed.limit,
+          total: result.total,
+          elapsedMs: Date.now() - t0
+        },
+        "consignment-balances report timing"
+      );
       return reply.send(result);
     }
   );

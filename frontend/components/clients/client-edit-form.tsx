@@ -806,7 +806,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="mb-0">Город (код в БД)</Label>
+                    <Label className="mb-0">Город</Label>
                     <SpravochnikAdminLink href="/settings/spravochnik/client-lists#ref-city">Значения</SpravochnikAdminLink>
                   </div>
                   <FilterSelect

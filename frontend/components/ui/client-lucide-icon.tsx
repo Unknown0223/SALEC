@@ -16,5 +16,6 @@ export function ClientLucideIcon({
   className?: string;
   ariaHidden?: boolean;
 }) {
-  return <Icon className={cn(className)} aria-hidden={ariaHidden} />;
+  // Browser extensions (e.g. Dark Reader) may mutate SVG attrs before hydration.
+  return <Icon className={cn(className)} aria-hidden={ariaHidden} suppressHydrationWarning />;
 }

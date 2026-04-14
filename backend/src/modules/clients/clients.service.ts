@@ -163,6 +163,8 @@ export type ListClientsQuery = {
 };
 
 const CONTACT_SLOTS = 10;
+/** Excel import: faqat kontakt 1–2 (UI da uchinchi kontakt yo‘q). */
+const IMPORT_CONTACT_PERSON_SLOTS = 2;
 
 export type ClientRefOptionDto = { value: string; label: string };
 
@@ -2130,15 +2132,28 @@ export async function mergeClientsIntoOne(
   };
 }
 
+/** Agent / ekspeditor ustunlari: «Агент 1», «Агент 1 день», «Экспедитор 1» … */
+function clientImportAgentSlotKeyNames(): string[] {
+  const keys: string[] = [];
+  for (let i = 1; i <= CONTACT_SLOTS; i++) {
+    keys.push(`import_agent_${i}`, `import_agent_${i}_days`, `import_expeditor_${i}`);
+  }
+  return keys;
+}
+
 /** Shablon va import uchun ruxsat etilgan ustun kalitlari (1-varaq, 1-qator sarlavha). */
 export const CLIENT_IMPORT_COLUMN_KEYS = [
+  "client_db_id",
   "name",
   "legal_name",
   "phone",
   "address",
   "client_code",
   "client_pinfl",
+  "category_name",
+  "category_code",
   "category",
+  "client_type_name",
   "client_type_code",
   "credit_limit",
   "is_active",
@@ -2162,7 +2177,11 @@ export const CLIENT_IMPORT_COLUMN_KEYS = [
   "latitude",
   "longitude",
   "notes",
+  "client_format_name",
+  "client_format_code",
   "client_format",
+  "sales_channel_name",
+  "sales_channel_code",
   "sales_channel",
   "product_category_ref",
   "contact1_firstName",
@@ -2171,9 +2190,7 @@ export const CLIENT_IMPORT_COLUMN_KEYS = [
   "contact2_firstName",
   "contact2_lastName",
   "contact2_phone",
-  "contact3_firstName",
-  "contact3_lastName",
-  "contact3_phone"
+  ...clientImportAgentSlotKeyNames()
 ] as const;
 
 const HEADER_ALIASES: Record<string, string> = {
@@ -2184,7 +2201,7 @@ const HEADER_ALIASES: Record<string, string> = {
   telefon: "phone",
   tel: "phone",
   manzil: "address",
-  kategoriya: "category",
+  kategoriya: "category_name",
   kredit: "credit_limit",
   kredit_limiti: "credit_limit",
   faol: "is_active",
@@ -2207,7 +2224,7 @@ const HEADER_ALIASES: Record<string, string> = {
   xonadon: "apartment",
   gps: "gps_text",
   izoh: "notes",
-  format: "client_format",
+  format: "client_format_name",
   legal_name: "legal_name",
   yuridik_nomi: "legal_name",
   // Ruscha sarlavhalar (Excel / 1C / CRM eksport)
@@ -2224,12 +2241,13 @@ const HEADER_ALIASES: Record<string, string> = {
   фио: "name",
   телефон: "phone",
   адрес: "address",
-  категория: "category",
-  категория_клиента: "category",
-  категория_клиента_код: "category",
+  категория: "category_name",
+  категория_клиента: "category_name",
+  категория_клиента_код: "category_code",
   кредит: "credit_limit",
   кредитный_лимит: "credit_limit",
   активен: "is_active",
+  активный: "is_active",
   ответственный: "responsible_person",
   ориентир: "landmark",
   инн: "inn",
@@ -2242,15 +2260,16 @@ const HEADER_ALIASES: Record<string, string> = {
   зона: "zone",
   город_туман: "city",
   тип_клиента_код: "client_type_code",
+  тип_клиента: "client_type_name",
   код_типа_клиента: "client_type_code",
-  формат_код: "client_format",
-  формат_клиента: "client_format",
-  торговый_канал: "sales_channel",
-  торговый_канал_код: "sales_channel",
-  канал_продаж: "sales_channel",
-  канал_продаж_код: "sales_channel",
-  savdo_kanali: "sales_channel",
-  sales_channel: "sales_channel",
+  формат_код: "client_format_code",
+  формат_клиента: "client_format_name",
+  торговый_канал: "sales_channel_name",
+  торговый_канал_код: "sales_channel_code",
+  канал_продаж: "sales_channel_name",
+  канал_продаж_код: "sales_channel_code",
+  savdo_kanali: "sales_channel_name",
+  sales_channel: "sales_channel_name",
   улица: "street",
   дом: "house_number",
   квартира: "apartment",
@@ -2260,7 +2279,8 @@ const HEADER_ALIASES: Record<string, string> = {
   контакт: "responsible_person",
   ид_клиента: "client_code",
   id_клиента: "client_code",
-  ид: "client_code",
+  /** CRM ichki qator ID (Lalaku «Обновление клиентов») */
+  ид: "client_db_id",
   код_клиента: "client_code",
   клиент_код: "client_code",
   код: "client_code",
@@ -2296,6 +2316,29 @@ function headerToClientImportKey(h: string): string | null {
   return null;
 }
 
+/** Lalaku: «Агент N», «Агент N день», «Экспедитор N» + standart sarlavhalar. */
+function excelHeaderToImportKey(label: string): string | null {
+  const direct = headerToClientImportKey(label);
+  if (direct) return direct;
+  const n = normalizeHeaderLabel(label);
+  const m1 = /^агент_(\d+)$/.exec(n);
+  if (m1) {
+    const slot = Number.parseInt(m1[1], 10);
+    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_agent_${slot}`;
+  }
+  const m2 = /^агент_(\d+)_день$/.exec(n);
+  if (m2) {
+    const slot = Number.parseInt(m2[1], 10);
+    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_agent_${slot}_days`;
+  }
+  const m3 = /^экспедитор_(\d+)$/.exec(n);
+  if (m3) {
+    const slot = Number.parseInt(m3[1], 10);
+    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_expeditor_${slot}`;
+  }
+  return null;
+}
+
 function isPlaceholderCell(s: string): boolean {
   const t = s.trim();
   return t === "" || t === "---" || t === "—" || t === "-" || t.toLowerCase() === "n/a";
@@ -2321,7 +2364,13 @@ function parseOptionalDate(raw: string | null): Date | null {
 function parseIsActive(raw: string | null): boolean {
   if (raw == null || isPlaceholderCell(raw)) return true;
   const t = raw.trim().toLowerCase();
-  if (["yoq", "false", "0", "no", "off"].includes(t)) return false;
+  if (
+    ["yoq", "false", "0", "no", "off", "нет", "неактив", "неактивный", "inaktiv"].includes(t) ||
+    t.startsWith("неакт")
+  ) {
+    return false;
+  }
+  if (["da", "ha", "yes", "true", "1", "on", "акт", "актив", "активный"].includes(t)) return true;
   return true;
 }
 
@@ -2332,10 +2381,18 @@ function parseCreditLimit(raw: string | null): Prisma.Decimal {
   return new Prisma.Decimal(n);
 }
 
-function parseOptionalLatLng(raw: string | null): Prisma.Decimal | null {
+/** DB: Decimal(11,8) — noto‘g‘ri ustun (hajm, kod) tushganda overflow bo‘lmasin. */
+function parseOptionalLatitudeImport(raw: string | null): Prisma.Decimal | null {
   if (raw == null || isPlaceholderCell(raw)) return null;
   const n = Number.parseFloat(String(raw).trim().replace(",", "."));
-  if (!Number.isFinite(n)) return null;
+  if (!Number.isFinite(n) || Math.abs(n) > 90) return null;
+  return new Prisma.Decimal(n);
+}
+
+function parseOptionalLongitudeImport(raw: string | null): Prisma.Decimal | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const n = Number.parseFloat(String(raw).trim().replace(",", "."));
+  if (!Number.isFinite(n) || Math.abs(n) > 180) return null;
   return new Prisma.Decimal(n);
 }
 
@@ -2365,6 +2422,18 @@ function readArrayCell(row: unknown[] | undefined, colIdx: number | undefined): 
   return xlsxCellToString(row[colIdx]);
 }
 
+function readImportRefCell(
+  row: unknown[],
+  colIndexByKey: Record<string, number>,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const v = readArrayCell(row, colIndexByKey[key]);
+    if (v != null && !isPlaceholderCell(v)) return v;
+  }
+  return null;
+}
+
 function headerLabelFromCell(cell: unknown): string {
   if (cell == null) return "";
   return String(cell).trim();
@@ -2372,15 +2441,75 @@ function headerLabelFromCell(cell: unknown): string {
 
 const CLIENT_IMPORT_TEMPLATE_FILE = join(__dirname, "../../../assets/client-import-template.xlsx");
 
+/** Lalaku «Скачать шаблон» (yangi mijoz) — asset bo‘lmasa shu sarlavhalar yoziladi. */
+function lalakuNewClientTemplateHeaders(): string[] {
+  const agentCols: string[] = [];
+  for (let i = 1; i <= CONTACT_SLOTS; i++) {
+    agentCols.push(`Агент ${i}`, `Агент ${i} день`, `Экспедитор ${i}`);
+  }
+  return [
+    "Наименование",
+    "Юридическое название",
+    "Адрес",
+    "Телефон",
+    "Контактное лицо",
+    "Ориентир",
+    "ИНН",
+    "ПИНФЛ",
+    "Торговый канал (код)",
+    "Категория клиента (код)",
+    "Тип клиента (код)",
+    "Формат (код)",
+    "Город (код)",
+    "Широта",
+    "Долгота",
+    ...agentCols
+  ];
+}
+
+/** Lalaku «Обновление клиентов с Excel» */
+function lalakuClientUpdateTemplateHeaders(): string[] {
+  const agentCols: string[] = [];
+  for (let i = 1; i <= CONTACT_SLOTS; i++) {
+    agentCols.push(`Агент ${i}`, `Агент ${i} день`, `Экспедитор ${i}`);
+  }
+  return [
+    "ИД",
+    "Наименование",
+    "Юридическое название",
+    "Контактное лицо",
+    "Адрес",
+    "Телефон",
+    "Ориентир",
+    "ИНН",
+    "ПИНФЛ",
+    "Торговый канал",
+    "Торговый канал (код)",
+    "Категория клиента",
+    "Категория клиента (код)",
+    "Тип клиента",
+    "Тип клиента (код)",
+    "Формат",
+    "Формат (код)",
+    "Город",
+    "Город (код)",
+    "Широта",
+    "Долгота",
+    "Код",
+    "Активный",
+    ...agentCols
+  ];
+}
+
 export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
   if (existsSync(CLIENT_IMPORT_TEMPLATE_FILE)) {
     return readFileSync(CLIENT_IMPORT_TEMPLATE_FILE);
   }
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Mijozlar", {
+  const ws = wb.addWorksheet("KPI", {
     views: [{ state: "frozen", ySplit: 1 }]
   });
-  const headers = [...CLIENT_IMPORT_COLUMN_KEYS];
+  const headers = lalakuNewClientTemplateHeaders();
   ws.addRow(headers);
   const r1 = ws.getRow(1);
   r1.font = { bold: true };
@@ -2391,23 +2520,138 @@ export async function buildClientImportTemplateBuffer(): Promise<Buffer> {
       fgColor: { argb: "FFE8F4F8" }
     };
   });
-  const example: string[] = headers.map((key) => {
-    if (key === "name") return "Misol MCHJ yoki FIO";
-    if (key === "client_code") return "l0_2471";
-    if (key === "phone") return "+998901112233";
-    if (key === "credit_limit") return "0";
-    if (key === "is_active") return "ha";
-    if (key === "region") return "Toshkent";
-    if (key === "city") return "Toshkent shahri";
-    if (key.startsWith("contact1_")) {
-      if (key === "contact1_firstName") return "Ali";
-      if (key === "contact1_lastName") return "Valiyev";
-      if (key === "contact1_phone") return "+998901112233";
-    }
+  const example: string[] = headers.map((h) => {
+    if (h === "Наименование") return "Misol do'kon";
+    if (h === "Телефон") return "+998901112233";
+    if (h === "Город (код)") return "ANDIJON SHAXAR";
+    if (h.startsWith("Агент ") && !h.includes("день") && !h.startsWith("Агент 1")) return "---";
+    if (h.includes("день")) return "Пн, Ср";
+    if (h.startsWith("Экспедитор")) return "---";
     return "---";
   });
   ws.addRow(example);
-  ws.columns = headers.map(() => ({ width: 18 }));
+  ws.columns = headers.map(() => ({ width: 16 }));
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+function formatVisitWeekdaysRussian(days: number[]): string {
+  const labelByDay: Record<number, string> = {
+    1: "Пн",
+    2: "Вт",
+    3: "Ср",
+    4: "Чт",
+    5: "Пт",
+    6: "Сб",
+    7: "Вс"
+  };
+  return parseVisitWeekdaysJson(days)
+    .map((d) => labelByDay[d] ?? "")
+    .filter(Boolean)
+    .join(", ");
+}
+
+type ClientUpdateTemplateFilterQuery = Omit<ListClientsQuery, "page" | "limit">;
+
+export async function buildClientUpdateImportTemplateBuffer(
+  tenantId: number,
+  q: ClientUpdateTemplateFilterQuery
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("KPI", {
+    views: [{ state: "frozen", ySplit: 1 }]
+  });
+  const headers = lalakuClientUpdateTemplateHeaders();
+  ws.addRow(headers);
+  const r1 = ws.getRow(1);
+  r1.font = { bold: true };
+  r1.eachCell((c) => {
+    c.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE8F4F8" }
+    };
+  });
+
+  const where = await buildClientListWhereInput(tenantId, { page: 1, limit: 1, ...q });
+  const sortField = q.sort ?? "name";
+  const ord: Prisma.SortOrder = q.order === "desc" ? "desc" : "asc";
+  const orderBy = clientListOrderBy(sortField, ord);
+  const clients =
+    where == null
+      ? []
+      : await prisma.client.findMany({
+          where,
+          orderBy,
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            responsible_person: true,
+            address: true,
+            phone: true,
+            landmark: true,
+            inn: true,
+            client_pinfl: true,
+            sales_channel: true,
+            category: true,
+            client_type_code: true,
+            client_format: true,
+            city: true,
+            latitude: true,
+            longitude: true,
+            client_code: true,
+            is_active: true,
+            agent_assignments: {
+              orderBy: { slot: "asc" },
+              select: {
+                slot: true,
+                expeditor_phone: true,
+                visit_weekdays: true,
+                agent: { select: { name: true, code: true } },
+                expeditor_user: { select: { name: true } }
+              }
+            }
+          }
+        });
+
+  for (const c of clients) {
+    const bySlot = new Map(c.agent_assignments.map((a) => [a.slot, a]));
+    const row: Array<string | number> = [
+      c.id,
+      c.name,
+      c.legal_name ?? "",
+      c.responsible_person ?? "",
+      c.address ?? "",
+      c.phone ?? "",
+      c.landmark ?? "",
+      c.inn ?? "",
+      c.client_pinfl ?? "",
+      c.sales_channel ?? "",
+      c.sales_channel ?? "",
+      c.category ?? "",
+      c.category ?? "",
+      c.client_type_code ?? "",
+      c.client_type_code ?? "",
+      c.client_format ?? "",
+      c.client_format ?? "",
+      c.city ?? "",
+      c.city ?? "",
+      c.latitude?.toString() ?? "",
+      c.longitude?.toString() ?? "",
+      c.client_code ?? "",
+      c.is_active ? "да" : "нет"
+    ];
+    for (let slot = 1; slot <= CONTACT_SLOTS; slot++) {
+      const item = bySlot.get(slot);
+      row.push(item?.agent?.code?.trim() || item?.agent?.name?.trim() || "");
+      row.push(formatVisitWeekdaysRussian(parseVisitWeekdaysJson(item?.visit_weekdays)));
+      row.push(item?.expeditor_user?.name?.trim() || item?.expeditor_phone?.trim() || "");
+    }
+    ws.addRow(row);
+  }
+
+  ws.columns = headers.map(() => ({ width: 16 }));
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
 }
@@ -2424,10 +2668,12 @@ function buildColIndexFromHeaderRow(headerCells: unknown): Record<string, number
   headerCells.forEach((cell, idx) => {
     const label = headerLabelFromCell(cell);
     if (!label) return;
-    const key = headerToClientImportKey(label);
+    const key = excelHeaderToImportKey(label);
     if (key) colIndexByKey[key] = idx;
   });
-  return Object.prototype.hasOwnProperty.call(colIndexByKey, "name") ? colIndexByKey : null;
+  const hasName = Object.prototype.hasOwnProperty.call(colIndexByKey, "name");
+  const hasDbId = Object.prototype.hasOwnProperty.call(colIndexByKey, "client_db_id");
+  return hasName || hasDbId ? colIndexByKey : null;
 }
 
 function sheetToRowsMatrix(ws: XLSX.WorkSheet): unknown[][] {
@@ -2493,13 +2739,21 @@ export type ClientXlsxImportOptions = {
   columnMap?: Record<string, number>;
 };
 
+export type ClientXlsxImportResult = {
+  created: number;
+  /** «Обновление с Excel»: `ИД` ustuni bo‘lsa */
+  updated: number;
+  errors: string[];
+};
+
 async function importClientDataRows(
   tenantId: number,
   rows: unknown[][],
   headerRowIdx: number,
   colIndexByKey: Record<string, number>,
   sheetLabel: string,
-  refResolver: ClientImportRefResolver
+  refResolver: ClientImportRefResolver,
+  staffLookup: ImportStaffLookup
 ): Promise<{ created: number; errors: string[] }> {
   const errors: string[] = [];
   let totalRowErrors = 0;
@@ -2510,6 +2764,7 @@ async function importClientDataRows(
 
   let created = 0;
   let skippedEmpty = 0;
+  let skippedDuplicate = 0;
 
   const firstDataRow = headerRowIdx + 1;
   const lastRowIdx = Math.min(rows.length - 1, headerRowIdx + IMPORT_MAX_DATA_ROWS);
@@ -2521,6 +2776,31 @@ async function importClientDataRows(
         `Sarlavha ${headerRowIdx + 1}-qatorda («${sheetLabel}»), lekin undan keyin ma’lumot qatori yo‘q.`
       ]
     };
+  }
+
+  const existingClients = await prisma.client.findMany({
+    where: { tenant_id: tenantId, merged_into_client_id: null },
+    select: {
+      id: true,
+      name: true,
+      phone_normalized: true,
+      client_code: true,
+      client_pinfl: true,
+      inn: true
+    }
+  });
+  const seenClientCodes = new Set<string>();
+  const seenPinfls = new Set<string>();
+  const seenInns = new Set<string>();
+  const seenNamePhone = new Set<string>();
+
+  for (const c of existingClients) {
+    if (c.client_code) seenClientCodes.add(c.client_code.trim());
+    if (c.client_pinfl) seenPinfls.add(c.client_pinfl.trim());
+    if (c.inn) seenInns.add(c.inn.trim());
+    if (c.phone_normalized && c.name) {
+      seenNamePhone.add(`${c.name.trim().toLocaleLowerCase("ru-RU")}::${c.phone_normalized}`);
+    }
   }
 
   for (let r = firstDataRow; r <= lastRowIdx; r++) {
@@ -2541,9 +2821,11 @@ async function importClientDataRows(
     const address = readArrayCell(row, colIndexByKey.address);
     const client_code = trimImportClientCode(readArrayCell(row, colIndexByKey.client_code));
     const client_pinfl = trimImportPinfl(readArrayCell(row, colIndexByKey.client_pinfl));
-    const category = refResolver.resolveCategory(readArrayCell(row, colIndexByKey.category));
+    const category = refResolver.resolveCategory(
+      readImportRefCell(row, colIndexByKey, ["category_code", "category_name", "category"])
+    );
     const client_type_code = refResolver.resolveClientType(
-      readArrayCell(row, colIndexByKey.client_type_code)
+      readImportRefCell(row, colIndexByKey, ["client_type_code", "client_type_name"])
     );
     const credit_limit = parseCreditLimit(readArrayCell(row, colIndexByKey.credit_limit));
     const is_active = parseIsActive(readArrayCell(row, colIndexByKey.is_active));
@@ -2565,14 +2847,22 @@ async function importClientDataRows(
     const house_number = readArrayCell(row, colIndexByKey.house_number);
     const apartment = readArrayCell(row, colIndexByKey.apartment);
     const gps_text = readArrayCell(row, colIndexByKey.gps_text);
-    const latitude = parseOptionalLatLng(readArrayCell(row, colIndexByKey.latitude));
-    const longitude = parseOptionalLatLng(readArrayCell(row, colIndexByKey.longitude));
+    const latitude = parseOptionalLatitudeImport(readArrayCell(row, colIndexByKey.latitude));
+    const longitude = parseOptionalLongitudeImport(readArrayCell(row, colIndexByKey.longitude));
     const notes = readArrayCell(row, colIndexByKey.notes);
     const client_format = refResolver.resolveClientFormat(
-      readArrayCell(row, colIndexByKey.client_format)
+      readImportRefCell(row, colIndexByKey, [
+        "client_format_code",
+        "client_format_name",
+        "client_format"
+      ])
     );
     const sales_channel = refResolver.resolveSalesChannel(
-      readArrayCell(row, colIndexByKey.sales_channel)
+      readImportRefCell(row, colIndexByKey, [
+        "sales_channel_code",
+        "sales_channel_name",
+        "sales_channel"
+      ])
     );
     const product_category_refRaw = readArrayCell(row, colIndexByKey.product_category_ref);
     const product_category_ref =
@@ -2580,12 +2870,12 @@ async function importClientDataRows(
         ? product_category_refRaw.trim() || null
         : null;
 
-    const slots: ContactPersonSlot[] = Array.from({ length: CONTACT_SLOTS }, () => ({
+    const slots: ContactPersonSlot[] = Array.from({ length: IMPORT_CONTACT_PERSON_SLOTS }, () => ({
       firstName: null,
       lastName: null,
       phone: null
     }));
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < IMPORT_CONTACT_PERSON_SLOTS; i++) {
       const p = i + 1;
       const fn = readArrayCell(row, colIndexByKey[`contact${p}_firstName`]);
       const ln = readArrayCell(row, colIndexByKey[`contact${p}_lastName`]);
@@ -2594,46 +2884,75 @@ async function importClientDataRows(
     }
 
     try {
-      await prisma.client.create({
-        data: {
-          tenant_id: tenantId,
-          name: nameRaw.trim(),
-          legal_name,
-          phone,
-          phone_normalized: normalizePhoneDigits(phone),
-          address,
-          client_code,
-          client_pinfl,
-          category,
-          client_type_code,
-          credit_limit,
-          is_active,
-          responsible_person,
-          landmark,
-          inn,
-          pdl,
-          logistics_service,
-          license_until,
-          working_hours,
-          region,
-          district,
-          city,
-          neighborhood,
-          zone,
-          street,
-          house_number,
-          apartment,
-          gps_text,
-          latitude,
-          longitude,
-          notes,
-          client_format,
-          sales_channel,
-          product_category_ref,
-          contact_persons: contactPersonsToJson(slots)
+      const nameTrimmed = nameRaw.trim();
+      const phoneNormalized = normalizePhoneDigits(phone);
+      const namePhoneKey =
+        phoneNormalized && phoneNormalized.length >= 7
+          ? `${nameTrimmed.toLocaleLowerCase("ru-RU")}::${phoneNormalized}`
+          : null;
+      const isDuplicate =
+        (client_code != null && seenClientCodes.has(client_code)) ||
+        (client_pinfl != null && seenPinfls.has(client_pinfl)) ||
+        (inn != null && seenInns.has(inn)) ||
+        (namePhoneKey != null && seenNamePhone.has(namePhoneKey));
+      if (isDuplicate) {
+        skippedDuplicate += 1;
+        continue;
+      }
+
+      const agentPatches = colMapHasAgentSlots(colIndexByKey)
+        ? buildAgentAssignmentPatchesFromImportRow(row, colIndexByKey, staffLookup)
+        : [];
+
+      await prisma.$transaction(async (tx) => {
+        const client = await tx.client.create({
+          data: {
+            tenant_id: tenantId,
+            name: nameTrimmed,
+            legal_name,
+            phone,
+            phone_normalized: normalizePhoneDigits(phone),
+            address,
+            client_code,
+            client_pinfl,
+            category,
+            client_type_code,
+            credit_limit,
+            is_active,
+            responsible_person,
+            landmark,
+            inn,
+            pdl,
+            logistics_service,
+            license_until,
+            working_hours,
+            region,
+            district,
+            city,
+            neighborhood,
+            zone,
+            street,
+            house_number,
+            apartment,
+            gps_text,
+            latitude,
+            longitude,
+            notes,
+            client_format,
+            sales_channel,
+            product_category_ref,
+            contact_persons: contactPersonsToJson(slots)
+          }
+        });
+        if (agentPatches.length > 0) {
+          await replaceClientAgentAssignments(tx, tenantId, client.id, agentPatches);
         }
       });
       created += 1;
+      if (client_code) seenClientCodes.add(client_code);
+      if (client_pinfl) seenPinfls.add(client_pinfl);
+      if (inn) seenInns.add(inn);
+      if (namePhoneKey) seenNamePhone.add(namePhoneKey);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "xato";
       const short =
@@ -2652,6 +2971,11 @@ async function importClientDataRows(
       `Hech kim qo‘shilmadi: Excel ${headerRowIdx + 2}–${rows.length} qatorlarda «name» bo‘sh yoki --- (${skippedEmpty} qator o‘tkazildi).`
     );
   }
+  if (skippedDuplicate > 0) {
+    out.push(
+      `Dublikat klientlar o‘tkazib yuborildi: ${skippedDuplicate} qator (client_code / PINFL / INN yoki telefon+name bo‘yicha).`
+    );
+  }
   if (totalRowErrors > IMPORT_MAX_ERRORS_RETURNED) {
     out.push(
       `… va yana ${totalRowErrors - IMPORT_MAX_ERRORS_RETURNED} ta qator xatosi (faqat birinchi ${IMPORT_MAX_ERRORS_RETURNED} matn qaytarildi).`
@@ -2665,6 +2989,589 @@ async function importClientDataRows(
   return { created, errors: out };
 }
 
+function importColPresent(colIndexByKey: Record<string, number>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(colIndexByKey, field);
+}
+
+function normalizeImportContactSlots(raw: unknown): ContactPersonSlot[] {
+  return parseContactPersonsJson(raw).map((s) => ({
+    firstName: s.firstName?.trim() || null,
+    lastName: s.lastName?.trim() || null,
+    phone: s.phone?.trim() || null
+  }));
+}
+
+function normalizeImportDateIso(d: Date | null | undefined): string | null {
+  if (!d) return null;
+  return d.toISOString();
+}
+
+function normalizeImportDecimalString(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Prisma.Decimal) return v.toString();
+  const t = String(v).trim();
+  return t ? t : null;
+}
+
+function filterUnchangedImportScalarData(
+  data: Prisma.ClientUpdateInput,
+  existing: {
+    name: string;
+    legal_name: string | null;
+    phone: string | null;
+    phone_normalized: string | null;
+    address: string | null;
+    client_code: string | null;
+    client_pinfl: string | null;
+    category: string | null;
+    client_type_code: string | null;
+    credit_limit: Prisma.Decimal;
+    is_active: boolean;
+    responsible_person: string | null;
+    landmark: string | null;
+    inn: string | null;
+    pdl: string | null;
+    logistics_service: string | null;
+    license_until: Date | null;
+    working_hours: string | null;
+    region: string | null;
+    district: string | null;
+    city: string | null;
+    neighborhood: string | null;
+    zone: string | null;
+    street: string | null;
+    house_number: string | null;
+    apartment: string | null;
+    gps_text: string | null;
+    latitude: Prisma.Decimal | null;
+    longitude: Prisma.Decimal | null;
+    notes: string | null;
+    client_format: string | null;
+    sales_channel: string | null;
+    product_category_ref: string | null;
+    contact_persons: unknown;
+  }
+): Prisma.ClientUpdateInput {
+  const next: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data) as Array<[keyof Prisma.ClientUpdateInput, unknown]>) {
+    if (k === "credit_limit") {
+      if (normalizeImportDecimalString(v) !== existing.credit_limit.toString()) next[k] = v;
+      continue;
+    }
+    if (k === "latitude") {
+      if (normalizeImportDecimalString(v) !== normalizeImportDecimalString(existing.latitude)) next[k] = v;
+      continue;
+    }
+    if (k === "longitude") {
+      if (normalizeImportDecimalString(v) !== normalizeImportDecimalString(existing.longitude)) next[k] = v;
+      continue;
+    }
+    if (k === "license_until") {
+      if (normalizeImportDateIso(v as Date | null | undefined) !== normalizeImportDateIso(existing.license_until)) {
+        next[k] = v;
+      }
+      continue;
+    }
+    if (k === "contact_persons") {
+      const incoming = normalizeImportContactSlots(v);
+      const current = normalizeImportContactSlots(existing.contact_persons);
+      if (JSON.stringify(incoming) !== JSON.stringify(current)) {
+        next[k] = v;
+      }
+      continue;
+    }
+    if (k === "phone_normalized") {
+      const incoming = (v as string | null | undefined) ?? null;
+      if (incoming !== existing.phone_normalized) next[k] = v;
+      continue;
+    }
+    const current = (existing as Record<string, unknown>)[k as string];
+    if ((v ?? null) !== (current ?? null)) {
+      next[k] = v;
+    }
+  }
+  return next as Prisma.ClientUpdateInput;
+}
+
+type ExistingImportAssignmentRow = {
+  slot: number;
+  agent_id: number | null;
+  expeditor_user_id: number | null;
+  expeditor_phone: string | null;
+  visit_weekdays: unknown;
+};
+
+function normalizeExistingImportAssignments(rows: ExistingImportAssignmentRow[]): Array<{
+  slot: number;
+  agent_id: number | null;
+  expeditor_user_id: number | null;
+  expeditor_phone: string | null;
+  visit_weekdays: number[];
+}> {
+  return rows
+    .map((r) => ({
+      slot: r.slot,
+      agent_id: r.agent_id ?? null,
+      expeditor_user_id: r.expeditor_user_id ?? null,
+      expeditor_phone: r.expeditor_phone?.trim() || null,
+      visit_weekdays: parseVisitWeekdaysJson(r.visit_weekdays)
+    }))
+    .filter(
+      (r) =>
+        r.agent_id != null ||
+        r.expeditor_user_id != null ||
+        r.expeditor_phone != null ||
+        r.visit_weekdays.length > 0
+    )
+    .sort((a, b) => a.slot - b.slot);
+}
+
+function normalizeIncomingImportAssignments(raw: AgentAssignmentPatch[]): Array<{
+  slot: number;
+  agent_id: number | null;
+  expeditor_user_id: number | null;
+  expeditor_phone: string | null;
+  visit_weekdays: number[];
+}> {
+  return raw
+    .map((r) => ({
+      slot: r.slot,
+      agent_id: r.agent_id ?? null,
+      expeditor_user_id: r.expeditor_user_id ?? null,
+      expeditor_phone: r.expeditor_phone?.trim() || null,
+      visit_weekdays: parseVisitWeekdaysJson(r.visit_weekdays)
+    }))
+    .filter(
+      (r) =>
+        r.agent_id != null ||
+        r.expeditor_user_id != null ||
+        r.expeditor_phone != null ||
+        r.visit_weekdays.length > 0
+    )
+    .sort((a, b) => a.slot - b.slot);
+}
+
+function importAssignmentsEqual(
+  a: Array<{
+    slot: number;
+    agent_id: number | null;
+    expeditor_user_id: number | null;
+    expeditor_phone: string | null;
+    visit_weekdays: number[];
+  }>,
+  b: Array<{
+    slot: number;
+    agent_id: number | null;
+    expeditor_user_id: number | null;
+    expeditor_phone: string | null;
+    visit_weekdays: number[];
+  }>
+): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function importClientUpdateRows(
+  tenantId: number,
+  rows: unknown[][],
+  headerRowIdx: number,
+  colIndexByKey: Record<string, number>,
+  sheetLabel: string,
+  refResolver: ClientImportRefResolver,
+  staffLookup: ImportStaffLookup
+): Promise<{ updated: number; errors: string[] }> {
+  const errors: string[] = [];
+  let totalRowErrors = 0;
+  const pushErr = (msg: string) => {
+    totalRowErrors += 1;
+    if (errors.length < IMPORT_MAX_ERRORS_RETURNED) errors.push(msg);
+  };
+
+  let updated = 0;
+  let skippedEmpty = 0;
+
+  const firstDataRow = headerRowIdx + 1;
+  const lastRowIdx = Math.min(rows.length - 1, headerRowIdx + IMPORT_MAX_DATA_ROWS);
+
+  if (firstDataRow > rows.length - 1) {
+    return {
+      updated: 0,
+      errors: [
+        `Sarlavha ${headerRowIdx + 1}-qatorda («${sheetLabel}»), lekin undan keyin ma’lumot qatori yo‘q.`
+      ]
+    };
+  }
+
+  const hasAgentSlots = colMapHasAgentSlots(colIndexByKey);
+  const candidateIds = new Set<number>();
+  for (let r = firstDataRow; r <= lastRowIdx; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+    const idVal = parseClientDbIdFromCell(readArrayCell(row, colIndexByKey.client_db_id));
+    if (idVal != null) candidateIds.add(idVal);
+  }
+  const candidateIdList = Array.from(candidateIds);
+  const existingRows =
+    candidateIdList.length > 0
+      ? await prisma.client.findMany({
+          where: {
+            id: { in: candidateIdList },
+            tenant_id: tenantId,
+            merged_into_client_id: null
+          },
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            phone: true,
+            phone_normalized: true,
+            address: true,
+            client_code: true,
+            client_pinfl: true,
+            category: true,
+            client_type_code: true,
+            credit_limit: true,
+            is_active: true,
+            responsible_person: true,
+            landmark: true,
+            inn: true,
+            pdl: true,
+            logistics_service: true,
+            license_until: true,
+            working_hours: true,
+            region: true,
+            district: true,
+            city: true,
+            neighborhood: true,
+            zone: true,
+            street: true,
+            house_number: true,
+            apartment: true,
+            gps_text: true,
+            latitude: true,
+            longitude: true,
+            notes: true,
+            client_format: true,
+            sales_channel: true,
+            product_category_ref: true,
+            contact_persons: true
+          }
+        })
+      : [];
+  const existingById = new Map(existingRows.map((x) => [x.id, x]));
+  const currentAssignmentsByClientId = new Map<
+    number,
+    Array<{
+      slot: number;
+      agent_id: number | null;
+      expeditor_user_id: number | null;
+      expeditor_phone: string | null;
+      visit_weekdays: number[];
+    }>
+  >();
+  if (hasAgentSlots && candidateIdList.length > 0) {
+    const assignmentRows = await prisma.clientAgentAssignment.findMany({
+      where: { tenant_id: tenantId, client_id: { in: candidateIdList } },
+      orderBy: [{ client_id: "asc" }, { slot: "asc" }],
+      select: {
+        client_id: true,
+        slot: true,
+        agent_id: true,
+        expeditor_user_id: true,
+        expeditor_phone: true,
+        visit_weekdays: true
+      }
+    });
+    const grouped = new Map<number, ExistingImportAssignmentRow[]>();
+    for (const row of assignmentRows) {
+      const list = grouped.get(row.client_id) ?? [];
+      list.push({
+        slot: row.slot,
+        agent_id: row.agent_id,
+        expeditor_user_id: row.expeditor_user_id,
+        expeditor_phone: row.expeditor_phone,
+        visit_weekdays: row.visit_weekdays
+      });
+      grouped.set(row.client_id, list);
+    }
+    for (const [clientId, list] of grouped.entries()) {
+      currentAssignmentsByClientId.set(clientId, normalizeExistingImportAssignments(list));
+    }
+  }
+
+  for (let r = firstDataRow; r <= lastRowIdx; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) {
+      skippedEmpty += 1;
+      continue;
+    }
+
+    const idVal = parseClientDbIdFromCell(readArrayCell(row, colIndexByKey.client_db_id));
+    if (idVal == null) {
+      skippedEmpty += 1;
+      continue;
+    }
+
+    try {
+      const data: Prisma.ClientUpdateInput = {};
+
+      if (importColPresent(colIndexByKey, "name")) {
+        const v = readArrayCell(row, colIndexByKey.name);
+        if (v != null && !isPlaceholderCell(v)) data.name = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "legal_name")) {
+        const v = readArrayCell(row, colIndexByKey.legal_name);
+        if (v != null && !isPlaceholderCell(v)) data.legal_name = v.trim();
+        else if (v !== null && isPlaceholderCell(String(v))) data.legal_name = null;
+      }
+      if (importColPresent(colIndexByKey, "phone")) {
+        const v = readArrayCell(row, colIndexByKey.phone);
+        if (v != null && !isPlaceholderCell(v)) {
+          data.phone = v.trim();
+          data.phone_normalized = normalizePhoneDigits(v);
+        }
+      }
+      if (importColPresent(colIndexByKey, "address")) {
+        const v = readArrayCell(row, colIndexByKey.address);
+        if (v != null && !isPlaceholderCell(v)) data.address = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "client_code")) {
+        data.client_code = trimImportClientCode(readArrayCell(row, colIndexByKey.client_code));
+      }
+      if (importColPresent(colIndexByKey, "client_pinfl")) {
+        data.client_pinfl = trimImportPinfl(readArrayCell(row, colIndexByKey.client_pinfl));
+      }
+      if (
+        importColPresent(colIndexByKey, "category_code") ||
+        importColPresent(colIndexByKey, "category_name") ||
+        importColPresent(colIndexByKey, "category")
+      ) {
+        const rawC = readImportRefCell(row, colIndexByKey, ["category_code", "category_name", "category"]);
+        if (rawC != null && !isPlaceholderCell(rawC)) {
+          data.category = refResolver.resolveCategory(rawC);
+        }
+      }
+      if (
+        importColPresent(colIndexByKey, "client_type_code") ||
+        importColPresent(colIndexByKey, "client_type_name")
+      ) {
+        const rawT = readImportRefCell(row, colIndexByKey, ["client_type_code", "client_type_name"]);
+        if (rawT != null && !isPlaceholderCell(rawT)) {
+          data.client_type_code = refResolver.resolveClientType(rawT);
+        }
+      }
+      if (importColPresent(colIndexByKey, "credit_limit")) {
+        data.credit_limit = parseCreditLimit(readArrayCell(row, colIndexByKey.credit_limit));
+      }
+      if (importColPresent(colIndexByKey, "is_active")) {
+        const rawA = readArrayCell(row, colIndexByKey.is_active);
+        if (rawA != null && !isPlaceholderCell(rawA)) data.is_active = parseIsActive(rawA);
+      }
+      if (importColPresent(colIndexByKey, "responsible_person")) {
+        const v = readArrayCell(row, colIndexByKey.responsible_person);
+        if (v != null && !isPlaceholderCell(v)) data.responsible_person = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "landmark")) {
+        const v = readArrayCell(row, colIndexByKey.landmark);
+        if (v != null && !isPlaceholderCell(v)) data.landmark = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "inn")) {
+        const v = readArrayCell(row, colIndexByKey.inn);
+        if (v != null && !isPlaceholderCell(v)) data.inn = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "pdl")) {
+        const v = readArrayCell(row, colIndexByKey.pdl);
+        if (v != null && !isPlaceholderCell(v)) data.pdl = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "logistics_service")) {
+        const v = readArrayCell(row, colIndexByKey.logistics_service);
+        if (v != null && !isPlaceholderCell(v)) data.logistics_service = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "license_until")) {
+        data.license_until = parseOptionalDate(readArrayCell(row, colIndexByKey.license_until));
+      }
+      if (importColPresent(colIndexByKey, "working_hours")) {
+        const v = readArrayCell(row, colIndexByKey.working_hours);
+        if (v != null && !isPlaceholderCell(v)) data.working_hours = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "region")) {
+        const v = readArrayCell(row, colIndexByKey.region);
+        if (v != null && !isPlaceholderCell(v)) data.region = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "district")) {
+        const v = readArrayCell(row, colIndexByKey.district);
+        if (v != null && !isPlaceholderCell(v)) data.district = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "city") || importColPresent(colIndexByKey, "city_code")) {
+        const cityRaw =
+          readArrayCell(row, colIndexByKey.city_code) ?? readArrayCell(row, colIndexByKey.city);
+        if (cityRaw != null && !isPlaceholderCell(cityRaw)) {
+          data.city = refResolver.resolveCity(cityRaw);
+        }
+      }
+      if (importColPresent(colIndexByKey, "neighborhood")) {
+        const v = readArrayCell(row, colIndexByKey.neighborhood);
+        if (v != null && !isPlaceholderCell(v)) data.neighborhood = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "zone")) {
+        const v = readArrayCell(row, colIndexByKey.zone);
+        if (v != null && !isPlaceholderCell(v)) data.zone = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "street")) {
+        const v = readArrayCell(row, colIndexByKey.street);
+        if (v != null && !isPlaceholderCell(v)) data.street = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "house_number")) {
+        const v = readArrayCell(row, colIndexByKey.house_number);
+        if (v != null && !isPlaceholderCell(v)) data.house_number = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "apartment")) {
+        const v = readArrayCell(row, colIndexByKey.apartment);
+        if (v != null && !isPlaceholderCell(v)) data.apartment = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "gps_text")) {
+        const v = readArrayCell(row, colIndexByKey.gps_text);
+        if (v != null && !isPlaceholderCell(v)) data.gps_text = v.trim();
+      }
+      if (importColPresent(colIndexByKey, "latitude")) {
+        data.latitude = parseOptionalLatitudeImport(readArrayCell(row, colIndexByKey.latitude));
+      }
+      if (importColPresent(colIndexByKey, "longitude")) {
+        data.longitude = parseOptionalLongitudeImport(readArrayCell(row, colIndexByKey.longitude));
+      }
+      if (importColPresent(colIndexByKey, "notes")) {
+        const v = readArrayCell(row, colIndexByKey.notes);
+        if (v != null && !isPlaceholderCell(v)) data.notes = v.trim();
+      }
+      if (
+        importColPresent(colIndexByKey, "client_format_code") ||
+        importColPresent(colIndexByKey, "client_format_name") ||
+        importColPresent(colIndexByKey, "client_format")
+      ) {
+        const rawF = readImportRefCell(row, colIndexByKey, [
+          "client_format_code",
+          "client_format_name",
+          "client_format"
+        ]);
+        if (rawF != null && !isPlaceholderCell(rawF)) {
+          data.client_format = refResolver.resolveClientFormat(rawF);
+        }
+      }
+      if (
+        importColPresent(colIndexByKey, "sales_channel_code") ||
+        importColPresent(colIndexByKey, "sales_channel_name") ||
+        importColPresent(colIndexByKey, "sales_channel")
+      ) {
+        const rawS = readImportRefCell(row, colIndexByKey, [
+          "sales_channel_code",
+          "sales_channel_name",
+          "sales_channel"
+        ]);
+        if (rawS != null && !isPlaceholderCell(rawS)) {
+          data.sales_channel = refResolver.resolveSalesChannel(rawS);
+        }
+      }
+      if (importColPresent(colIndexByKey, "product_category_ref")) {
+        const rawP = readArrayCell(row, colIndexByKey.product_category_ref);
+        if (rawP != null && !isPlaceholderCell(rawP)) data.product_category_ref = rawP.trim() || null;
+      }
+
+      const slots: ContactPersonSlot[] = Array.from({ length: IMPORT_CONTACT_PERSON_SLOTS }, () => ({
+        firstName: null,
+        lastName: null,
+        phone: null
+      }));
+      let touchContacts = false;
+      for (let i = 0; i < IMPORT_CONTACT_PERSON_SLOTS; i++) {
+        const p = i + 1;
+        const fnK = `contact${p}_firstName`;
+        if (
+          importColPresent(colIndexByKey, fnK) ||
+          importColPresent(colIndexByKey, `contact${p}_lastName`) ||
+          importColPresent(colIndexByKey, `contact${p}_phone`)
+        ) {
+          touchContacts = true;
+        }
+        slots[i] = {
+          firstName: readArrayCell(row, colIndexByKey[`contact${p}_firstName`]),
+          lastName: readArrayCell(row, colIndexByKey[`contact${p}_lastName`]),
+          phone: readArrayCell(row, colIndexByKey[`contact${p}_phone`])
+        };
+      }
+      if (touchContacts) {
+        data.contact_persons = contactPersonsToJson(slots);
+      }
+
+      const agentPatches = colMapHasAgentSlots(colIndexByKey)
+        ? buildAgentAssignmentPatchesFromImportRow(row, colIndexByKey, staffLookup)
+        : [];
+
+      const existing = existingById.get(idVal);
+      if (!existing) {
+        throw new Error(`NOT_FOUND`);
+      }
+      const nextData = filterUnchangedImportScalarData(data, existing);
+      const hasScalars = Object.keys(nextData).length > 0;
+      const nextAssignments = normalizeIncomingImportAssignments(agentPatches);
+      const currentAssignments = currentAssignmentsByClientId.get(idVal) ?? [];
+      const hasAssignmentChange =
+        agentPatches.length > 0 && !importAssignmentsEqual(nextAssignments, currentAssignments);
+      if (!hasScalars && !hasAssignmentChange) {
+        continue;
+      }
+      if (hasScalars && hasAssignmentChange) {
+        await prisma.$transaction(async (tx) => {
+          await tx.client.update({ where: { id: idVal }, data: nextData });
+          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches);
+        });
+      } else if (hasScalars) {
+        await prisma.client.update({ where: { id: idVal }, data: nextData });
+      } else if (hasAssignmentChange) {
+        await prisma.$transaction(async (tx) => {
+          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches);
+        });
+      }
+      if (hasAssignmentChange) {
+        currentAssignmentsByClientId.set(idVal, nextAssignments);
+      }
+      const rowChanged = hasScalars || hasAssignmentChange;
+      if (rowChanged) {
+        updated += 1;
+      }
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : "xato";
+      if (raw === "NOT_FOUND") {
+        pushErr(`Qator ${r + 1} (Excel): mijoz topilmadi yoki birlashtirilgan (id=${idVal}).`);
+      } else {
+        const short =
+          raw.includes("Unique constraint") || raw.includes("unique constraint")
+            ? "noyob maydon takrorlanmoqda"
+            : raw.length > 180
+              ? `${raw.slice(0, 180)}…`
+              : raw;
+        pushErr(`Qator ${r + 1} (Excel): ${short}`);
+      }
+    }
+  }
+
+  const out = [...errors];
+  if (updated === 0 && errors.length === 0 && skippedEmpty > 0) {
+    out.push(
+      `Hech narsa yangilanmadi: «ИД» bo‘sh qatorlar (${skippedEmpty}) yoki jadval bo‘sh.`
+    );
+  }
+  if (totalRowErrors > IMPORT_MAX_ERRORS_RETURNED) {
+    out.push(
+      `… va yana ${totalRowErrors - IMPORT_MAX_ERRORS_RETURNED} ta qator xatosi (faqat birinchi ${IMPORT_MAX_ERRORS_RETURNED} matn qaytarildi).`
+    );
+  }
+
+  for (const line of refResolver.summarizeMisses()) {
+    out.push(line);
+  }
+
+  return { updated, errors: out };
+}
+
 function buildManualColumnMap(raw: Record<string, number> | undefined): Record<string, number> | null {
   if (raw == null) return null;
   const colIndexByKey: Record<string, number> = {};
@@ -2673,21 +3580,219 @@ function buildManualColumnMap(raw: Record<string, number> | undefined): Record<s
     if (typeof v !== "number" || !Number.isFinite(v) || !Number.isInteger(v) || v < 0) continue;
     colIndexByKey[k] = v;
   }
-  return Object.prototype.hasOwnProperty.call(colIndexByKey, "name") ? colIndexByKey : null;
+  const hasName = Object.prototype.hasOwnProperty.call(colIndexByKey, "name");
+  const hasDbId = Object.prototype.hasOwnProperty.call(colIndexByKey, "client_db_id");
+  return hasName || hasDbId ? colIndexByKey : null;
+}
+
+/** «Пн», «Вт» … — 1=Du … 7=Ya (UI konventsiyasi). */
+function parseRussianVisitDays(raw: string | null): number[] {
+  if (raw == null || isPlaceholderCell(raw)) return [];
+  const tokenMap: Record<string, number> = {
+    пн: 1,
+    понедельник: 1,
+    вт: 2,
+    вторник: 2,
+    ср: 3,
+    среда: 3,
+    чт: 4,
+    четвер: 4,
+    пт: 5,
+    пятница: 5,
+    сб: 6,
+    суббота: 6,
+    вс: 7,
+    воскресенье: 7,
+    вск: 7
+  };
+  const parts = raw
+    .split(/[,;/|]+|\s+/)
+    .map((x) => x.trim().toLowerCase().replace(/\./g, ""))
+    .filter(Boolean);
+  const out: number[] = [];
+  for (const p of parts) {
+    const n = tokenMap[p];
+    if (n != null && n >= 1 && n <= 7) out.push(n);
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+type ImportStaffRole = "agent" | "expeditor";
+
+type ImportStaffLookupUser = {
+  id: number;
+  role: ImportStaffRole;
+  code: string | null;
+  name: string | null;
+  phone: string | null;
+};
+
+type ImportStaffLookup = {
+  byId: Map<number, ImportStaffLookupUser>;
+  byCode: Map<string, ImportStaffLookupUser[]>;
+  byName: Map<string, ImportStaffLookupUser[]>;
+  byPhone: Map<string, ImportStaffLookupUser[]>;
+};
+
+function indexImportStaffLookup(
+  map: Map<string, ImportStaffLookupUser[]>,
+  key: string | null,
+  user: ImportStaffLookupUser
+) {
+  if (!key) return;
+  const normalized = key.trim().toLocaleLowerCase("ru-RU");
+  if (!normalized) return;
+  const list = map.get(normalized) ?? [];
+  list.push(user);
+  map.set(normalized, list);
+}
+
+async function loadImportStaffLookup(tenantId: number): Promise<ImportStaffLookup> {
+  const rows = await prisma.user.findMany({
+    where: { tenant_id: tenantId, is_active: true, role: { in: ["agent", "expeditor"] } },
+    orderBy: { id: "asc" },
+    select: { id: true, role: true, code: true, name: true, phone: true }
+  });
+  const byId = new Map<number, ImportStaffLookupUser>();
+  const byCode = new Map<string, ImportStaffLookupUser[]>();
+  const byName = new Map<string, ImportStaffLookupUser[]>();
+  const byPhone = new Map<string, ImportStaffLookupUser[]>();
+  for (const row of rows) {
+    const role = row.role as ImportStaffRole;
+    if (role !== "agent" && role !== "expeditor") continue;
+    const user: ImportStaffLookupUser = {
+      id: row.id,
+      role,
+      code: row.code ?? null,
+      name: row.name ?? null,
+      phone: row.phone ?? null
+    };
+    byId.set(user.id, user);
+    indexImportStaffLookup(byCode, user.code, user);
+    indexImportStaffLookup(byName, user.name, user);
+    const phoneDigits = normalizePhoneDigits(user.phone);
+    if (phoneDigits) indexImportStaffLookup(byPhone, phoneDigits, user);
+  }
+  return { byId, byCode, byName, byPhone };
+}
+
+function pickImportStaffByAllowedRoles(
+  users: ImportStaffLookupUser[] | undefined,
+  roles: ImportStaffRole[]
+): ImportStaffLookupUser | null {
+  if (!users || users.length === 0) return null;
+  for (const user of users) {
+    if (roles.includes(user.role)) return user;
+  }
+  return null;
+}
+
+function resolveStaffByRefForImport(
+  lookup: ImportStaffLookup,
+  raw: string | null,
+  roles: ImportStaffRole[]
+): number | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const t = raw.trim();
+  if (!t) return null;
+
+  const byCode = pickImportStaffByAllowedRoles(
+    lookup.byCode.get(t.toLocaleLowerCase("ru-RU")),
+    roles
+  );
+  if (byCode) return byCode.id;
+
+  if (/^\d+$/.test(t)) {
+    const id = Number.parseInt(t, 10);
+    const byId = lookup.byId.get(id);
+    if (byId && roles.includes(byId.role)) return byId.id;
+  }
+
+  const byName = pickImportStaffByAllowedRoles(
+    lookup.byName.get(t.toLocaleLowerCase("ru-RU")),
+    roles
+  );
+  if (byName) return byName.id;
+
+  const normPhone = normalizePhoneDigits(t);
+  if (normPhone && normPhone.length >= 9) {
+    const byPhone = pickImportStaffByAllowedRoles(lookup.byPhone.get(normPhone), roles);
+    if (byPhone) return byPhone.id;
+  }
+
+  return null;
+}
+
+function colMapHasAgentSlots(colIndexByKey: Record<string, number>): boolean {
+  for (const k of Object.keys(colIndexByKey)) {
+    if (k.startsWith("import_agent_") || k.startsWith("import_expeditor_")) return true;
+  }
+  return false;
+}
+
+function buildAgentAssignmentPatchesFromImportRow(
+  row: unknown[],
+  colIndexByKey: Record<string, number>,
+  staffLookup: ImportStaffLookup
+): AgentAssignmentPatch[] {
+  const patches: AgentAssignmentPatch[] = [];
+  for (let slot = 1; slot <= CONTACT_SLOTS; slot++) {
+    const agentRaw = readArrayCell(row, colIndexByKey[`import_agent_${slot}`]);
+    const daysRaw = readArrayCell(row, colIndexByKey[`import_agent_${slot}_days`]);
+    const expRaw = readArrayCell(row, colIndexByKey[`import_expeditor_${slot}`]);
+    let agent_id: number | null = null;
+    if (agentRaw) {
+      agent_id = resolveStaffByRefForImport(staffLookup, agentRaw, ["agent"]);
+    }
+    const visit_weekdays = parseRussianVisitDays(daysRaw);
+    let expeditor_user_id: number | null = null;
+    let expeditor_phone: string | null = null;
+    if (expRaw) {
+      expeditor_user_id = resolveStaffByRefForImport(staffLookup, expRaw, [
+        "expeditor",
+        "agent"
+      ]);
+      if (expeditor_user_id == null) {
+        const tr = expRaw.trim();
+        if (/^\+?\d[\d\s\-()]{6,}$/.test(tr)) expeditor_phone = tr;
+      }
+    }
+    const patch: AgentAssignmentPatch = { slot, visit_weekdays };
+    if (agent_id != null) patch.agent_id = agent_id;
+    if (expeditor_user_id != null) patch.expeditor_user_id = expeditor_user_id;
+    if (expeditor_phone) patch.expeditor_phone = expeditor_phone;
+    const hasData =
+      agent_id != null ||
+      expeditor_user_id != null ||
+      (expeditor_phone != null && expeditor_phone.length > 0) ||
+      visit_weekdays.length > 0;
+    if (hasData) patches.push(patch);
+  }
+  return patches;
+}
+
+function parseClientDbIdFromCell(raw: string | null): number | null {
+  if (raw == null || isPlaceholderCell(raw)) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
 }
 
 export async function importClientsFromXlsx(
   tenantId: number,
   buffer: Buffer | Uint8Array,
   opts?: ClientXlsxImportOptions
-): Promise<{ created: number; errors: string[] }> {
+): Promise<ClientXlsxImportResult> {
   const raw = Buffer.from(buffer);
   if (raw.length < 4) {
-    return { created: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
+    return { created: 0, updated: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
   }
   if (raw[0] !== 0x50 || raw[1] !== 0x4b) {
     return {
       created: 0,
+      updated: 0,
       errors: [
         "Bu fayl standart .xlsx (zip) ko‘rinishida emas. Ehtimol .xls yoki boshqa dastur eksporti. Excelda «Fayl → Saqlash tur» dan .xlsx tanlang."
       ]
@@ -2701,6 +3806,7 @@ export async function importClientsFromXlsx(
     const hint = e instanceof Error ? e.message : String(e);
     return {
       created: 0,
+      updated: 0,
       errors: [
         "Fayl o‘qilmadi. Buzilgan .xlsx yoki noto‘g‘ri format. Excelda qayta saqlang (.xlsx) yoki loyiha shablonidan foydalaning.",
         `Texnik: ${hint.slice(0, 200)}`
@@ -2709,10 +3815,11 @@ export async function importClientsFromXlsx(
   }
 
   if (!wb.SheetNames.length) {
-    return { created: 0, errors: ["Jadvalda varaq yo‘q."] };
+    return { created: 0, updated: 0, errors: ["Jadvalda varaq yo‘q."] };
   }
 
   const refResolver = await ClientImportRefResolver.load(tenantId);
+  const staffLookup = await loadImportStaffLookup(tenantId);
 
   const manualMap = buildManualColumnMap(opts?.columnMap);
   if (manualMap != null) {
@@ -2722,12 +3829,13 @@ export async function importClientsFromXlsx(
     if (wantSheet && !wb.SheetNames.includes(wantSheet)) {
       return {
         created: 0,
+        updated: 0,
         errors: [`Varaq topilmadi: «${wantSheet}». Mavjud: ${wb.SheetNames.join(", ")}.`]
       };
     }
     const ws = sheetName ? wb.Sheets[sheetName] : undefined;
     if (!ws) {
-      return { created: 0, errors: ["Varaq o‘qilmadi."] };
+      return { created: 0, updated: 0, errors: ["Varaq o‘qilmadi."] };
     }
     const rows = sheetToRowsMatrix(ws);
     let headerRowIdx =
@@ -2737,10 +3845,33 @@ export async function importClientsFromXlsx(
     if (headerRowIdx < 0 || headerRowIdx >= rows.length) {
       return {
         created: 0,
+        updated: 0,
         errors: [`Sarlavha qatori noto‘g‘ri (0…${Math.max(0, rows.length - 1)}).`]
       };
     }
-    return importClientDataRows(tenantId, rows, headerRowIdx, manualMap, sheetName ?? "", refResolver);
+    const isUpdate = Object.prototype.hasOwnProperty.call(manualMap, "client_db_id");
+    if (isUpdate) {
+      const r = await importClientUpdateRows(
+        tenantId,
+        rows,
+        headerRowIdx,
+        manualMap,
+        sheetName ?? "",
+        refResolver,
+        staffLookup
+      );
+      return { created: 0, updated: r.updated, errors: r.errors };
+    }
+    const r = await importClientDataRows(
+      tenantId,
+      rows,
+      headerRowIdx,
+      manualMap,
+      sheetName ?? "",
+      refResolver,
+      staffLookup
+    );
+    return { created: r.created, updated: 0, errors: r.errors };
   }
 
   const table = findImportTableInWorkbook(wb);
@@ -2756,8 +3887,9 @@ export async function importClientsFromXlsx(
     const preview = sample.join(" | ");
     return {
       created: 0,
+      updated: 0,
       errors: [
-        `Hech bir varaqning dastlabki ${IMPORT_HEADER_SCAN_ROWS} qatorida majburiy ustun (name / наименование va hokazo) topilmadi.`,
+        `Hech bir varaqning dastlabki ${IMPORT_HEADER_SCAN_ROWS} qatorida majburiy ustun (наименование yoki ИД) topilmadi.`,
         preview
           ? `Birinchi varaq, 1-qator (namuna): ${preview}`
           : "Birinchi varaq bo‘sh yoki o‘qilmadi."
@@ -2766,5 +3898,27 @@ export async function importClientsFromXlsx(
   }
 
   const { rows, headerRowIdx, colIndexByKey } = table;
-  return importClientDataRows(tenantId, rows, headerRowIdx, colIndexByKey, table.sheetName, refResolver);
+  const isUpdate = Object.prototype.hasOwnProperty.call(colIndexByKey, "client_db_id");
+  if (isUpdate) {
+    const r = await importClientUpdateRows(
+      tenantId,
+      rows,
+      headerRowIdx,
+      colIndexByKey,
+      table.sheetName,
+      refResolver,
+      staffLookup
+    );
+    return { created: 0, updated: r.updated, errors: r.errors };
+  }
+  const r = await importClientDataRows(
+    tenantId,
+    rows,
+    headerRowIdx,
+    colIndexByKey,
+    table.sheetName,
+    refResolver,
+    staffLookup
+  );
+  return { created: r.created, updated: 0, errors: r.errors };
 }

@@ -33,7 +33,7 @@ import {
   mergeRefSelectOptions,
   optionsToValueLabelMap
 } from "@/lib/ref-select-options";
-import { api } from "@/lib/api";
+import { api, apiBaseURL } from "@/lib/api";
 import { formatGroupedInteger } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
 import { clientsFilterDebugEnabled, logClientsFilters } from "@/lib/clients-filter-debug";
@@ -134,6 +134,7 @@ export default function ClientsPage() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importMapOpen, setImportMapOpen] = useState(false);
+  const [importDialogMode, setImportDialogMode] = useState<"create" | "update">("create");
   const [importStagingFile, setImportStagingFile] = useState<File | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -152,6 +153,7 @@ export default function ClientsPage() {
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [showSessionLoadingHint, setShowSessionLoadingHint] = useState(false);
   const clientsPrefsMigrated = useRef(false);
 
   useEffect(() => {
@@ -171,6 +173,17 @@ export default function ClientsPage() {
       '[clients/filters] Diagnostika: localStorage.setItem("salesdoc.clients.filterDebug","1") keyin sahifani yangilang — har bir so‘rov konsolga chiqadi.'
     );
   }, []);
+
+  useEffect(() => {
+    if (authHydrated) {
+      setShowSessionLoadingHint(false);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setShowSessionLoadingHint(true);
+    }, 3500);
+    return () => window.clearTimeout(t);
+  }, [authHydrated]);
 
   const tablePrefs = useUserTablePrefs({
     tenantSlug,
@@ -286,21 +299,41 @@ export default function ClientsPage() {
       fd.append("columnMap", JSON.stringify(payload.columnMap));
       fd.append("sheetName", payload.sheetName);
       fd.append("headerRowIndex", String(payload.headerRowIndex));
-      const { data } = await api.post<{ created: number; errors: string[] }>(
-        `/api/${tenantSlug}/clients/import`,
+      const importPath = `/api/${tenantSlug}/clients/import`;
+      // Devda katta fayllar Next proxy timeoutiga tushmasligi uchun importni backendga bevosita yuboramiz.
+      const importUrl =
+        process.env.NODE_ENV === "development" && !apiBaseURL
+          ? `http://127.0.0.1:4000${importPath}`
+          : importPath;
+      const { data } = await api.post<{ created: number; updated?: number; errors: string[] }>(
+        importUrl,
         fd
       );
       return data;
     },
     onSuccess: async (data) => {
-      console.info("[clients import] natija", { created: data.created, errors: data.errors });
+      console.info("[clients import] natija", {
+        created: data.created,
+        updated: data.updated,
+        errors: data.errors
+      });
       if (data.errors.length > 0) {
         console.warn("[clients import] qator xatolari", data.errors);
       }
       await qc.invalidateQueries({ queryKey: ["clients", tenantSlug] });
       const errPart =
         data.errors.length > 0 ? ` Ошибки (${data.errors.length}): ${data.errors.slice(0, 5).join("; ")}` : "";
-      setImportMsg(`Добавлено: ${data.created}.${errPart}`);
+      const c = data.created ?? 0;
+      const u = data.updated ?? 0;
+      const summary =
+        c > 0 && u > 0
+          ? `Добавлено: ${c}. Обновлено: ${u}.`
+          : c > 0
+            ? `Добавлено: ${c}.`
+            : u > 0
+              ? `Обновлено: ${u}.`
+              : "Изменений по строкам нет.";
+      setImportMsg(`${summary}${errPart}`);
       setImportMapOpen(false);
       setImportStagingFile(null);
       if (importFileRef.current) importFileRef.current.value = "";
@@ -621,6 +654,7 @@ export default function ClientsPage() {
           }
         }}
         file={importStagingFile}
+        importMode={importDialogMode}
         isSubmitting={importMut.isPending}
         onConfirm={(mappingPayload) => {
           if (!importStagingFile || !tenantSlug) return;
@@ -673,16 +707,61 @@ export default function ClientsPage() {
             }
           }}
         >
-          Шаблон (.xlsx)
+          Шаблон: новые клиенты
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!tenantSlug}
+          onClick={async () => {
+            if (!tenantSlug) return;
+            setImportMsg(null);
+            try {
+              const params = new URLSearchParams();
+              appendClientsFilterParams(params, filterBundleForApi);
+              const res = await api.get(`/api/${tenantSlug}/clients/import-update-template?${params.toString()}`, {
+                responseType: "blob"
+              });
+              const blob = new Blob([res.data], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "clients_update_from_excel.xlsx";
+              a.click();
+              URL.revokeObjectURL(url);
+            } catch {
+              setImportMsg("Не удалось скачать шаблон обновления (права или сеть).");
+            }
+          }}
+        >
+          Шаблон: обновление
         </Button>
         <Button
           type="button"
           size="sm"
           variant="secondary"
           disabled={importMut.isPending || !tenantSlug}
-          onClick={() => importFileRef.current?.click()}
+          onClick={() => {
+            setImportDialogMode("create");
+            importFileRef.current?.click();
+          }}
         >
-          Excel import
+          Импорт (новые)
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={importMut.isPending || !tenantSlug}
+          onClick={() => {
+            setImportDialogMode("update");
+            importFileRef.current?.click();
+          }}
+        >
+          Обновление из Excel
         </Button>
         <Button
           type="button"
@@ -884,7 +963,13 @@ export default function ClientsPage() {
       />
 
       {!authHydrated ? (
-        <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
+        showSessionLoadingHint ? (
+          <div className="max-w-xl rounded-md border border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            Sessiya yuklanishi biroz cho'zildi. Internet va login holatini tekshirib ko'ring.
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Загрузка сессии…</p>
+        )
       ) : !tenantSlug ? (
         <p className="text-sm text-destructive">
           <Link href="/login" className="underline">

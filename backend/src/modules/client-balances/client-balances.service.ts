@@ -139,7 +139,50 @@ export function parseIsoDateEndUtc(iso: string): Date | null {
 }
 
 /** `orders.created_at` — kalendari `Asia/Tashkent` bo‘yicha (konsignatsiya / «дата заказа» filtri). */
-const ORDER_CREATED_LOCAL_TZ = "Asia/Tashkent";
+const ORDER_CREATED_UTC_OFFSET_HOURS = 5; // Asia/Tashkent (UTC+5)
+const LARGE_CLIENT_IDS_CHUNK = 10000;
+const BALANCE_PERF_LOG = process.env.BALANCE_PERF_LOG === "1";
+
+function parseYmd(ymd: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return { y, m: mo, d };
+}
+
+function localDateStartToUtc(ymd: string): Date | null {
+  const p = parseYmd(ymd);
+  if (!p) return null;
+  const ms = Date.UTC(p.y, p.m - 1, p.d, 0, 0, 0, 0) - ORDER_CREATED_UTC_OFFSET_HOURS * 3600 * 1000;
+  return new Date(ms);
+}
+
+function localDateEndToUtc(ymd: string): Date | null {
+  const start = localDateStartToUtc(ymd);
+  if (!start) return null;
+  return new Date(start.getTime() + 24 * 3600 * 1000 - 1);
+}
+
+function makePerfMarker(scope: string) {
+  const startedAt = Date.now();
+  let last = startedAt;
+  return (stage: string, meta?: Record<string, unknown>) => {
+    if (!BALANCE_PERF_LOG) return;
+    const now = Date.now();
+    const deltaMs = now - last;
+    last = now;
+    const totalMs = now - startedAt;
+    console.info(
+      `[perf][${scope}] ${stage} | +${deltaMs}ms (total ${totalMs}ms)${
+        meta ? ` | ${JSON.stringify(meta)}` : ""
+      }`
+    );
+  };
+}
 
 export function buildOrderCreatedLocalDateClause(
   orderDateFrom: string | null | undefined,
@@ -147,17 +190,16 @@ export function buildOrderCreatedLocalDateClause(
 ): Prisma.Sql {
   const from = orderDateFrom?.trim();
   const to = orderDateTo?.trim();
-  const ymd = /^\d{4}-\d{2}-\d{2}$/;
-  const fromOk = Boolean(from && ymd.test(from));
-  const toOk = Boolean(to && ymd.test(to));
-  if (!fromOk && !toOk) return Prisma.empty;
-  if (fromOk && toOk) {
-    return Prisma.sql`AND (o.created_at AT TIME ZONE ${ORDER_CREATED_LOCAL_TZ})::date BETWEEN CAST(${from} AS DATE) AND CAST(${to} AS DATE)`;
+  const fromUtc = from ? localDateStartToUtc(from) : null;
+  const toUtc = to ? localDateEndToUtc(to) : null;
+  if (!fromUtc && !toUtc) return Prisma.empty;
+  if (fromUtc && toUtc) {
+    return Prisma.sql`AND o.created_at >= ${fromUtc} AND o.created_at <= ${toUtc}`;
   }
-  if (fromOk) {
-    return Prisma.sql`AND (o.created_at AT TIME ZONE ${ORDER_CREATED_LOCAL_TZ})::date >= CAST(${from} AS DATE)`;
+  if (fromUtc) {
+    return Prisma.sql`AND o.created_at >= ${fromUtc}`;
   }
-  return Prisma.sql`AND (o.created_at AT TIME ZONE ${ORDER_CREATED_LOCAL_TZ})::date <= CAST(${to} AS DATE)`;
+  return Prisma.sql`AND o.created_at <= ${toUtc}`;
 }
 
 export function buildClientWhere(
@@ -302,7 +344,7 @@ export async function loadPaymentNetNormByClient(
   const map = new Map<number, Map<string, Prisma.Decimal>>();
   if (clientIds.length === 0) return map;
 
-  const chunkSize = 3000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const dateClause = asOfEnd
@@ -402,7 +444,7 @@ export async function loadUnpaidOrderBalanceRawByPaymentRef(
       : Prisma.empty;
 
   const out: Array<{ client_id: number; pref_raw: string | null; sum_unpaid: Prisma.Decimal }> = [];
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<
@@ -458,7 +500,7 @@ async function loadUnpaidOrderBalanceRawByAgentPaymentRef(
   if (clientIds.length === 0) return [];
   const orderDateClause = buildOrderCreatedLocalDateClause(orderDateFrom ?? null, orderDateTo ?? null);
   const out: Array<{ agent_id: number | null; pref_raw: string | null; sum_unpaid: Prisma.Decimal }> = [];
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<
@@ -622,7 +664,7 @@ export async function loadPaymentNetTotalsByTypeGlobally(
 ): Promise<Map<string, Prisma.Decimal>> {
   const merged = new Map<string, Prisma.Decimal>();
   if (clientIds.length === 0) return merged;
-  const chunkSize = 3000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const dateClause = asOfEnd
@@ -681,7 +723,7 @@ async function loadBalancesAsOf(
 ): Promise<Map<number, Prisma.Decimal>> {
   const out = new Map<number, Prisma.Decimal>();
   if (clientIds.length === 0) return out;
-  const chunkSize = 3000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<Array<{ client_id: number; bal: Prisma.Decimal | null }>>`
@@ -708,7 +750,7 @@ async function loadLastPaymentByClient(
 ): Promise<Map<number, Date>> {
   const out = new Map<number, Date>();
   if (clientIds.length === 0) return out;
-  const chunkSize = 3000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const dateClause = asOfEnd
@@ -738,7 +780,7 @@ async function loadLastDeliveryByClient(
 ): Promise<Map<number, Date>> {
   const out = new Map<number, Date>();
   if (clientIds.length === 0) return out;
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<Array<{ client_id: number; lu: Date | null }>>`
@@ -774,7 +816,7 @@ export async function loadDeliveryDebtByClient(
   const map = new Map<number, DeliveryDebtInfo>();
   if (clientIds.length === 0) return map;
   const orderDateClause = buildOrderCreatedLocalDateClause(orderDateFrom ?? null, orderDateTo ?? null);
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<
@@ -874,7 +916,7 @@ async function loadUnpaidDeliveredOrderDebtRows(
   const orderIdClause =
     filterOrderId != null && filterOrderId > 0 ? Prisma.sql`AND o.id = ${filterOrderId}` : Prisma.empty;
   const out: UnpaidDeliveredOrderRow[] = [];
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<
@@ -1157,6 +1199,7 @@ export async function listClientBalancesReport(
   tenantId: number,
   q: ClientBalanceListQuery
 ): Promise<ClientBalanceListResponse> {
+  const perf = makePerfMarker(`client-balances t=${tenantId} view=${q.view}`);
   const page = Math.max(1, q.page);
   const maxL = q.allow_large_export ? 5000 : 200;
   const limit = Math.min(maxL, Math.max(1, q.limit));
@@ -1166,13 +1209,16 @@ export async function listClientBalancesReport(
   const odTo = q.order_date_to?.trim() || null;
   const skipBal = q.view === "clients_delivery";
   const where = buildClientWhere(tenantId, q, { skipBalanceFilter: skipBal });
+  perf("where-ready", { page, limit, hasSearch: Boolean(q.search?.trim()) });
 
   if (q.view === "clients_delivery") {
     const idRows = await prisma.client.findMany({ where, select: { id: true } });
     const ids = idRows.map((r) => r.id);
+    perf("delivery.ids-loaded", { ids: ids.length });
     const filterOid =
       q.delivery_order_id != null && q.delivery_order_id > 0 ? q.delivery_order_id : null;
     let orderRows = await loadUnpaidDeliveredOrderDebtRows(tenantId, ids, odFrom, odTo, filterOid);
+    perf("delivery.orders-loaded", { orderRows: orderRows.length, filterOrderId: filterOid });
     const bf = q.balance_filter?.trim();
     if (bf === "credit") {
       orderRows = [];
@@ -1214,6 +1260,10 @@ export async function listClientBalancesReport(
       loadPaymentNetTotalsByTypeGlobally(tenantId, distinctClientIdsForSummary, asOfEnd),
       loadUnpaidOrderBalanceRawByPaymentRef(tenantId, distinctClientIdsForSummary, odFrom, odTo)
     ]);
+    perf("delivery.summary-built", {
+      pageSlice: pageSlice.length,
+      distinctClients: distinctClientIdsForSummary.length
+    });
     const sprDelivery = paymentRefs.labels;
     const pmEntriesDelivery = paymentRefs.entries;
     const { globalUnpaidNorm: globalUnpaidDelivery } = processUnpaidPayRefRows(
@@ -1260,10 +1310,12 @@ export async function listClientBalancesReport(
       orderBy: { name: "asc" }
     });
     const baseIds = allMinimal.map((c) => c.id);
+    perf("clients-balance-filter.base-loaded", { baseIds: baseIds.length, filter: bfEarly });
     const [deliveryMap, balAsOfAll] = await Promise.all([
       loadDeliveryDebtByClient(tenantId, baseIds, odFrom, odTo),
       asOfEnd && baseIds.length > 0 ? loadBalancesAsOf(tenantId, baseIds, asOfEnd) : Promise.resolve(null)
     ]);
+    perf("clients-balance-filter.derived-loaded", { deliveryMap: deliveryMap.size });
 
     const ledgerOf = (row: (typeof allMinimal)[number]) =>
       balAsOfAll?.get(row.id) ?? row.client_balances[0]?.balance ?? new Prisma.Decimal(0);
@@ -1354,10 +1406,15 @@ export async function listClientBalancesReport(
     select: { id: true, client_balances: { take: 1, select: { balance: true } } }
   });
   const ids = allClientsLedger.map((c) => c.id);
+  perf("clients-all.ids-loaded", { ids: ids.length });
   const [balAsOfMapAll, deliveryMapForSummary] = await Promise.all([
     asOfEnd && ids.length > 0 ? loadBalancesAsOf(tenantId, ids, asOfEnd) : Promise.resolve(null),
     loadDeliveryDebtByClient(tenantId, ids, odFrom, odTo)
   ]);
+  perf("clients-all.summary-sources-loaded", {
+    asOfCount: balAsOfMapAll?.size ?? 0,
+    deliveryMap: deliveryMapForSummary.size
+  });
   let sumMergedTotal = new Prisma.Decimal(0);
   for (const c of allClientsLedger) {
     const ledger = balAsOfMapAll?.get(c.id) ?? c.client_balances[0]?.balance ?? new Prisma.Decimal(0);
@@ -1372,6 +1429,10 @@ export async function listClientBalancesReport(
     loadPaymentNetTotalsByTypeGlobally(tenantId, ids, asOfEnd),
     loadUnpaidOrderBalanceRawByPaymentRef(tenantId, ids, odFrom, odTo)
   ]);
+  perf("clients-all.payment-sources-loaded", {
+    payTypeCount: sprLabels.length,
+    unpaidRows: rawUnpaidAll.length
+  });
   const { byClient: unpaidByClientMethod, globalUnpaidNorm } = processUnpaidPayRefRows(
     rawUnpaidAll,
     pmEntries,
@@ -1384,6 +1445,11 @@ export async function listClientBalancesReport(
       loadPaymentNetNormByClient(tenantId, ids, asOfEnd),
       loadUnpaidOrderBalanceRawByAgentPaymentRef(tenantId, ids, odFrom, odTo)
     ]);
+    perf("agents.aggregates-loaded", {
+      ids: ids.length,
+      payNormClients: payNormByClient.size,
+      unpaidRows: rawAgentUnpaid.length
+    });
     const unpaidByAgentMethod = processUnpaidAgentPayRefRows(rawAgentUnpaid, pmEntries, sprLabels);
     const byAgent = new Map<
       number | null,
@@ -1488,6 +1554,11 @@ export async function listClientBalancesReport(
     loadLastDeliveryByClient(tenantId, pageIds),
     asOfEnd && pageIds.length > 0 ? loadBalancesAsOf(tenantId, pageIds, asOfEnd) : Promise.resolve(null)
   ]);
+  perf("clients-page.loaded", {
+    pageIds: pageIds.length,
+    total,
+    page
+  });
 
   const data: ClientBalanceRow[] = clients.map((c) => {
     const b = deliveryMapPage.get(c.id);

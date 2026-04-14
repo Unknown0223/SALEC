@@ -16,6 +16,26 @@ import {
   type ClientBalancePaymentTypeSummary
 } from "./client-balances.service";
 
+const LARGE_CLIENT_IDS_CHUNK = 10000;
+const BALANCE_PERF_LOG = process.env.BALANCE_PERF_LOG === "1";
+
+function makePerfMarker(scope: string) {
+  const startedAt = Date.now();
+  let last = startedAt;
+  return (stage: string, meta?: Record<string, unknown>) => {
+    if (!BALANCE_PERF_LOG) return;
+    const now = Date.now();
+    const deltaMs = now - last;
+    last = now;
+    const totalMs = now - startedAt;
+    console.info(
+      `[perf][${scope}] ${stage} | +${deltaMs}ms (total ${totalMs}ms)${
+        meta ? ` | ${JSON.stringify(meta)}` : ""
+      }`
+    );
+  };
+}
+
 const agentSelect = {
   select: {
     id: true,
@@ -86,7 +106,7 @@ async function loadConsignmentDebtByClient(
 
   const orderDateClause = buildOrderCreatedLocalDateClause(orderDateFrom, orderDateTo);
 
-  const chunkSize = 2000;
+  const chunkSize = LARGE_CLIENT_IDS_CHUNK;
   for (let i = 0; i < clientIds.length; i += chunkSize) {
     const chunk = clientIds.slice(i, i + chunkSize);
     const rows = await prisma.$queryRaw<
@@ -167,6 +187,7 @@ export async function listConsignmentBalancesReport(
   tenantId: number,
   q: ClientBalanceListQuery
 ): Promise<ConsignmentBalanceListResponse> {
+  const perf = makePerfMarker(`consignment-balances t=${tenantId}`);
   const page = Math.max(1, q.page);
   const maxL = q.allow_large_export ? 5000 : 200;
   const limit = Math.min(maxL, Math.max(1, q.limit));
@@ -186,11 +207,13 @@ export async function listConsignmentBalancesReport(
     select: { id: true }
   });
   const ids = allClients.map((c) => c.id);
+  perf("ids-loaded", { ids: ids.length, page, limit });
 
   const odFrom = q.order_date_from?.trim() || null;
   const odTo = q.order_date_to?.trim() || null;
 
   const debtMap = await loadConsignmentDebtByClient(tenantId, ids, odFrom, odTo);
+  perf("debt-map-loaded", { debtClients: debtMap.size });
 
   const eligible = ids.filter((id) => debtMap.has(id));
 
@@ -221,6 +244,12 @@ export async function listConsignmentBalancesReport(
       loadPaymentNetTotalsByTypeGlobally(tenantId, eligible, asOfEnd),
       loadPaymentNetNormByClient(tenantId, sliceIds, asOfEnd)
     ]);
+  perf("payment-sources-loaded", {
+    eligible: eligible.length,
+    sliceIds: sliceIds.length,
+    payTypeCount: sprLabels.length,
+    unpaidRows: rawUnpaid.length
+  });
 
   const clients =
     sliceIds.length === 0
@@ -238,6 +267,7 @@ export async function listConsignmentBalancesReport(
             agent: { select: agentSelect.select }
           }
         });
+  perf("page-clients-loaded", { clients: clients.length });
 
   const { byClient: unpaidByClientMethod, globalUnpaidNorm } = processUnpaidPayRefRows(
     rawUnpaid,

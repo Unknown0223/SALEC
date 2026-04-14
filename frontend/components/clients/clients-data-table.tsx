@@ -342,8 +342,10 @@ export function ClientsDataTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={colCount} className="px-3 py-8 text-center text-muted-foreground">
-                Клиенты не найдены
+              <td colSpan={colCount} className="px-3 py-8 text-center">
+                <div className="mx-auto max-w-xl rounded-md border border-rose-200/60 bg-rose-50/60 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+                  Hozircha mos ma'lumot topilmadi. Filtrlarni tekshirib ko'ring yoki yangi klient qo'shing.
+                </div>
               </td>
             </tr>
           ) : (

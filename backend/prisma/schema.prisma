@@ -567,6 +567,7 @@ model ClientBalanceMovement {
   user              User?         @relation(fields: [user_id], references: [id])
 
   @@index([client_balance_id])
+  @@index([client_balance_id, created_at(sort: Desc)])
   @@map("client_balance_movements")
 }
 
@@ -870,6 +871,8 @@ model Order {
   @@index([tenant_id, status])
   @@index([tenant_id, expeditor_user_id])
   @@index([tenant_id, status, created_at(sort: Desc)])
+  @@index([tenant_id, client_id, order_type, status])
+  @@index([tenant_id, client_id, created_at(sort: Desc)])
   @@map("orders")
 }
 
@@ -884,6 +887,7 @@ model OrderStatusLog {
   user        User?    @relation(fields: [user_id], references: [id])
 
   @@index([order_id])
+  @@index([order_id, to_status, created_at(sort: Desc)])
   @@map("order_status_logs")
 }
 
@@ -946,6 +950,8 @@ model Payment {
   @@index([tenant_id, deleted_at])
   @@index([cash_desk_id])
   @@index([tenant_id, entry_kind])
+  @@index([tenant_id, client_id, deleted_at, entry_kind])
+  @@index([tenant_id, order_id, deleted_at, entry_kind])
   @@index([expeditor_user_id])
   @@index([ledger_agent_id])
   @@map("client_payments")

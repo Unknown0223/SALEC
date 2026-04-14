@@ -6,6 +6,7 @@
  *   IMPORT_EXCEL_EXPEDITORS
  *   IMPORT_EXCEL_AGENTS
  *   IMPORT_EXCEL_CATEGORIES
+ *   IMPORT_EXCEL_PRODUCTS  («Продукты» — katalog maydonlari)
  *   IMPORT_EXCEL_PRICE_LIST
  *
  * Yoki bitta papka (ixtiyoriy, fayl nomi bo‘yicha qidiradi):
@@ -35,68 +36,23 @@
  *
  * Qisman o‘tkazish (1=true):
  *   IMPORT_EXCEL_SKIP_SUPERVISORS, IMPORT_EXCEL_SKIP_EXPEDITORS, IMPORT_EXCEL_SKIP_AGENTS,
- *   IMPORT_EXCEL_SKIP_CATEGORIES, IMPORT_EXCEL_SKIP_PRICE_LIST
+ *   IMPORT_EXCEL_SKIP_CATEGORIES, IMPORT_EXCEL_SKIP_PRODUCTS, IMPORT_EXCEL_SKIP_PRICE_LIST
  */
 
 import "dotenv/config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { findInDir, resolveBackendPath } from "./lib/excel-bundle-paths";
 import { runCategoriesExcelImport } from "./lib/excel-categories-import";
 import { runPriceListExcelImport } from "./lib/excel-price-list-import";
+import { runProductsExcelImport } from "./lib/excel-products-import";
 import { runStaffExcelImport } from "./lib/excel-staff-import";
 
 const prisma = new PrismaClient();
 
 function truthy(v: string | undefined): boolean {
   return v === "1" || v === "true" || v === "yes";
-}
-
-function resolvePath(p: string | undefined, cwdBackend: string): string | null {
-  if (!p?.trim()) return null;
-  const t = p.trim();
-  if (path.isAbsolute(t)) return t;
-  return path.join(cwdBackend, t);
-}
-
-/** Juda kichik fayllar — odatda buzilgan yoki bo‘sh nusxa */
-const MIN_XLSX_BYTES = 512;
-
-function statSafe(filePath: string): { mtimeMs: number; size: number } {
-  try {
-    const st = fs.statSync(filePath);
-    return { mtimeMs: st.mtimeMs, size: st.size };
-  } catch {
-    return { mtimeMs: 0, size: 0 };
-  }
-}
-
-/**
- * IMPORT_EXCEL_DIR ichidan kalit so‘z bo‘yicha .xlsx.
- * Bir nechta mos kelganda: hajmi ≥ MIN bo‘lganlar orasidan eng yangi, so‘ng eng katta.
- */
-function findInDir(dir: string, keywords: string[]): string | null {
-  if (!fs.existsSync(dir)) return null;
-  const names = fs.readdirSync(dir).filter((f) => /\.xlsx$/i.test(f));
-  const paths = names.map((f) => path.join(dir, f));
-
-  for (const kw of keywords) {
-    const k = kw.toLowerCase();
-    const matches = paths.filter((p) => path.basename(p).toLowerCase().includes(k));
-    if (matches.length === 0) continue;
-
-    const bigEnough = matches.filter((p) => statSafe(p).size >= MIN_XLSX_BYTES);
-    const pool = bigEnough.length > 0 ? bigEnough : matches;
-
-    pool.sort((a, b) => {
-      const sa = statSafe(a);
-      const sb = statSafe(b);
-      if (sb.mtimeMs !== sa.mtimeMs) return sb.mtimeMs - sa.mtimeMs;
-      return sb.size - sa.size;
-    });
-    return pool[0] ?? null;
-  }
-  return null;
 }
 
 async function main() {
@@ -112,12 +68,12 @@ async function main() {
   const excelDir = process.env.IMPORT_EXCEL_DIR?.trim();
 
   const sup =
-    resolvePath(process.env.IMPORT_EXCEL_SUPERVISORS, cwdBackend) ||
+    resolveBackendPath(process.env.IMPORT_EXCEL_SUPERVISORS, cwdBackend) ||
     (excelDir ? findInDir(excelDir, ["супервайз", "supervisor"]) : null) ||
-    resolvePath("scripts/data/excel/supervisors.xlsx", cwdBackend);
+    resolveBackendPath("scripts/data/excel/supervisors.xlsx", cwdBackend);
 
   const exp =
-    resolvePath(process.env.IMPORT_EXCEL_EXPEDITORS, cwdBackend) ||
+    resolveBackendPath(process.env.IMPORT_EXCEL_EXPEDITORS, cwdBackend) ||
     (excelDir
       ? findInDir(excelDir, [
           "активные активные экспед",
@@ -126,24 +82,29 @@ async function main() {
           "expeditor"
         ])
       : null) ||
-    resolvePath("scripts/data/excel/expeditors.xlsx", cwdBackend);
+    resolveBackendPath("scripts/data/excel/expeditors.xlsx", cwdBackend);
 
   const ag =
-    resolvePath(process.env.IMPORT_EXCEL_AGENTS, cwdBackend) ||
+    resolveBackendPath(process.env.IMPORT_EXCEL_AGENTS, cwdBackend) ||
     (excelDir
       ? findInDir(excelDir, ["активные агент", "активные агенты", "агент", "agent"])
       : null) ||
-    resolvePath("scripts/data/excel/agents.xlsx", cwdBackend);
+    resolveBackendPath("scripts/data/excel/agents.xlsx", cwdBackend);
 
   const cat =
-    resolvePath(process.env.IMPORT_EXCEL_CATEGORIES, cwdBackend) ||
+    resolveBackendPath(process.env.IMPORT_EXCEL_CATEGORIES, cwdBackend) ||
     (excelDir ? findInDir(excelDir, ["категория продукта", "категория продук", "категор"]) : null) ||
-    resolvePath("scripts/data/excel/categories.xlsx", cwdBackend);
+    resolveBackendPath("scripts/data/excel/categories.xlsx", cwdBackend);
+
+  const prod =
+    resolveBackendPath(process.env.IMPORT_EXCEL_PRODUCTS, cwdBackend) ||
+    (excelDir ? findInDir(excelDir, ["продукты", "продукт", "products"]) : null) ||
+    resolveBackendPath("scripts/data/excel/products.xlsx", cwdBackend);
 
   const price =
-    resolvePath(process.env.IMPORT_EXCEL_PRICE_LIST, cwdBackend) ||
+    resolveBackendPath(process.env.IMPORT_EXCEL_PRICE_LIST, cwdBackend) ||
     (excelDir ? findInDir(excelDir, ["прайст лист", "прайст", "прайс", "price"]) : null) ||
-    resolvePath("scripts/data/excel/price-list.xlsx", cwdBackend);
+    resolveBackendPath("scripts/data/excel/price-list.xlsx", cwdBackend);
 
   console.log(
     "\n╔════════════════════════════════════════════════════════════════╗\n║  IMPORT EXCEL BUNDLE — xodimlar + kategoriya + prays            ║\n╚════════════════════════════════════════════════════════════════╝"
@@ -154,9 +115,10 @@ async function main() {
   console.log(`  expeditors:  ${exp && fs.existsSync(exp) ? exp : "(yo‘q)"}`);
   console.log(`  agents:      ${ag && fs.existsSync(ag) ? ag : "(yo‘q)"}`);
   console.log(`  categories:  ${cat && fs.existsSync(cat) ? cat : "(yo‘q)"}`);
+  console.log(`  products:    ${prod && fs.existsSync(prod) ? prod : "(yo‘q)"}`);
   console.log(`  price list:  ${price && fs.existsSync(price) ? price : "(yo‘q)"}`);
 
-  const anyFile = [sup, exp, ag, cat, price].some((p) => p && fs.existsSync(p));
+  const anyFile = [sup, exp, ag, cat, prod, price].some((p) => p && fs.existsSync(p));
   if (!anyFile) {
     const downloads =
       process.platform === "win32" && process.env.USERPROFILE
@@ -180,11 +142,12 @@ async function main() {
   const skipExp = truthy(process.env.IMPORT_EXCEL_SKIP_EXPEDITORS);
   const skipAg = truthy(process.env.IMPORT_EXCEL_SKIP_AGENTS);
   const skipCat = truthy(process.env.IMPORT_EXCEL_SKIP_CATEGORIES);
+  const skipProd = truthy(process.env.IMPORT_EXCEL_SKIP_PRODUCTS);
   const skipPrice = truthy(process.env.IMPORT_EXCEL_SKIP_PRICE_LIST);
 
-  if (skipSup || skipExp || skipAg || skipCat || skipPrice) {
+  if (skipSup || skipExp || skipAg || skipCat || skipProd || skipPrice) {
     console.log(
-      `Qisman: skip supervisors=${skipSup} expeditors=${skipExp} agents=${skipAg} categories=${skipCat} price=${skipPrice}`
+      `Qisman: skip supervisors=${skipSup} expeditors=${skipExp} agents=${skipAg} categories=${skipCat} products=${skipProd} price=${skipPrice}`
     );
   }
 
@@ -253,6 +216,22 @@ async function main() {
       skipCat
         ? "\n(o‘tkazildi) Kategoriyalar — IMPORT_EXCEL_SKIP_CATEGORIES=1."
         : "\n(o‘tkazildi) Kategoriyalar fayli yo‘q."
+    );
+  }
+
+  if (!skipProd && prod && fs.existsSync(prod)) {
+    await runProductsExcelImport({
+      prisma,
+      tenantId: tenant.id,
+      tenantSlug: slug,
+      filePath: prod,
+      dry
+    });
+  } else {
+    console.log(
+      skipProd
+        ? "\n(o‘tkazildi) Mahsulotlar (Продукты) — IMPORT_EXCEL_SKIP_PRODUCTS=1."
+        : "\n(o‘tkazildi) Продукты.xlsx topilmadi."
     );
   }
 

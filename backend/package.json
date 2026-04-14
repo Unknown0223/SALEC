@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "postinstall": "prisma generate",
-    "predev": "node scripts/wait-for-postgres.cjs && prisma migrate deploy && prisma generate",
+    "predev": "node scripts/wait-for-postgres.cjs && prisma migrate deploy && node scripts/prisma-generate-if-needed.cjs",
     "dev": "tsx watch src/index.ts",
     "dev:server": "tsx watch src/index.ts",
     "worker:dev": "tsx watch src/worker/index.ts",
@@ -19,6 +19,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:zero-reset": "tsx scripts/db-zero-reset.ts",
+    "db:wipe:all-once": "node scripts/db-wipe-all-once.cjs",
     "import:bundle": "tsx scripts/load-import-bundle.ts",
     "import:active-agents-xlsx": "tsx scripts/import-active-agents-xlsx.ts",
     "import:supervisors-xlsx": "tsx scripts/import-supervisors-xlsx.ts",
@@ -38,7 +39,8 @@
     "import:excel-bundle": "tsx scripts/import-excel-bundle.ts",
     "import:tenant-data": "npm run import:once && npm run import:excel-bundle",
     "territory:sync-codes": "tsx scripts/sync-territory-codes.ts",
-    "seed:agent-gps-once": "tsx scripts/seed-agent-gps-pings-once.ts"
+    "seed:agent-gps-once": "tsx scripts/seed-agent-gps-pings-once.ts",
+    "reset:clients-once": "tsx scripts/reset-clients-once.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

@@ -165,7 +165,7 @@ export function ClientsTableFilters({
               ) : null}
               {fv.city ? (
                 <label className="orders-filter-field-label">
-                  Город (код в БД)
+                  Город
                   <select
                     className={filterPanelSelectClassName}
                     value={cityFilter}

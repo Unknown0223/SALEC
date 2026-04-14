@@ -27,11 +27,20 @@ import type { ClientSalesAnalyticsResponse } from "@/lib/client-sales-analytics-
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { formatDigitsGroupedLoose, formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
+import { optionsToValueLabelMap } from "@/lib/ref-select-options";
 import { ORDER_STATUS_FILTER_OPTIONS, ORDER_STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type ProductCategoryOption = { id: number; name: string; is_active: boolean };
+type ClientReferencesResponse = {
+  category_options?: Array<{ value: string; label: string }>;
+  client_type_options?: Array<{ value: string; label: string }>;
+  client_format_options?: Array<{ value: string; label: string }>;
+  sales_channel_options?: Array<{ value: string; label: string }>;
+  city_options?: Array<{ value: string; label: string }>;
+  region_options?: Array<{ value: string; label: string }>;
+};
 import {
   CalendarDays,
   ChevronRight,
@@ -47,7 +56,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -174,9 +183,25 @@ function parseCoord(s: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function territoryLine(c: ClientDetailApiRow): string {
-  const parts = [c.region, c.city, c.district, c.zone].map((x) => (x ?? "").trim()).filter(Boolean);
+function territoryLine(
+  c: ClientDetailApiRow,
+  maps?: { region?: Record<string, string>; city?: Record<string, string> }
+): string {
+  const parts = [
+    displayRefValue(c.region, maps?.region),
+    displayRefValue(c.city, maps?.city),
+    c.district,
+    c.zone
+  ]
+    .map((x) => (x ?? "").trim())
+    .filter(Boolean);
   return parts.length ? parts.join(" · ") : "";
+}
+
+function displayRefValue(raw: string | null | undefined, map?: Record<string, string>): string | null {
+  const t = raw?.trim();
+  if (!t) return null;
+  return map?.[t] ?? t;
 }
 
 function statusBadgeClass(status: string): string {
@@ -191,6 +216,12 @@ type RequisitesAsideProps = {
   clientId: number;
   territoryWithZone: string;
   addressMerged: string;
+  refDisplayMaps?: {
+    category?: Record<string, string>;
+    clientType?: Record<string, string>;
+    clientFormat?: Record<string, string>;
+    salesChannel?: Record<string, string>;
+  };
   lastAuditPatch:
     | { id: number; action: string; user_login: string | null; created_at: string }
     | undefined;
@@ -202,6 +233,7 @@ function ClientProfileRequisitesAside({
   clientId,
   territoryWithZone,
   addressMerged,
+  refDisplayMaps,
   lastAuditPatch,
   auditLoading
 }: RequisitesAsideProps) {
@@ -209,11 +241,28 @@ function ClientProfileRequisitesAside({
   const digits = phone.replace(/\D/g, "");
   const telHref = digits.length >= 5 ? `tel:${phone.replace(/\s/g, "")}` : null;
 
-  const attrPairs: { k: string; v: string }[] = [{ k: "Категория", v: c.category?.trim() || "—" }];
+  const attrPairs: { k: string; v: string }[] = [
+    { k: "Категория", v: displayRefValue(c.category, refDisplayMaps?.category) ?? "—" }
+  ];
   if (c.product_category_ref?.trim()) attrPairs.push({ k: "Продукт", v: c.product_category_ref.trim() });
-  if (c.sales_channel?.trim()) attrPairs.push({ k: "Канал", v: c.sales_channel.trim() });
-  if (c.client_type_code?.trim()) attrPairs.push({ k: "Тип", v: c.client_type_code.trim() });
-  if (c.client_format?.trim()) attrPairs.push({ k: "Формат", v: c.client_format.trim() });
+  if (c.sales_channel?.trim()) {
+    attrPairs.push({
+      k: "Канал",
+      v: displayRefValue(c.sales_channel, refDisplayMaps?.salesChannel) ?? c.sales_channel.trim()
+    });
+  }
+  if (c.client_type_code?.trim()) {
+    attrPairs.push({
+      k: "Тип",
+      v: displayRefValue(c.client_type_code, refDisplayMaps?.clientType) ?? c.client_type_code.trim()
+    });
+  }
+  if (c.client_format?.trim()) {
+    attrPairs.push({
+      k: "Формат",
+      v: displayRefValue(c.client_format, refDisplayMaps?.clientFormat) ?? c.client_format.trim()
+    });
+  }
 
   const created = new Date(c.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
   const updated = new Date(c.updated_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -428,6 +477,29 @@ function ClientProfileHubInner({ tenantSlug, clientId }: Props) {
     }
   });
 
+  const refsQ = useQuery({
+    queryKey: ["clients-references", tenantSlug, "profile-hub"],
+    staleTime: STALE.reference,
+    enabled: Boolean(tenantSlug),
+    queryFn: async () => {
+      const { data } = await api.get<ClientReferencesResponse>(`/api/${tenantSlug}/clients/references`);
+      return data;
+    }
+  });
+
+  const refDisplayMaps = useMemo(() => {
+    const refs = refsQ.data;
+    if (!refs) return undefined;
+    return {
+      category: optionsToValueLabelMap(refs.category_options),
+      clientType: optionsToValueLabelMap(refs.client_type_options),
+      clientFormat: optionsToValueLabelMap(refs.client_format_options),
+      salesChannel: optionsToValueLabelMap(refs.sales_channel_options),
+      city: optionsToValueLabelMap(refs.city_options),
+      region: optionsToValueLabelMap(refs.region_options)
+    };
+  }, [refsQ.data]);
+
   type ClientAuditMetaResponse = {
     data: Array<{ id: number; action: string; user_login: string | null; created_at: string }>;
   };
@@ -569,14 +641,14 @@ function ClientProfileHubInner({ tenantSlug, clientId }: Props) {
   }
 
   const title = c.client_code?.trim() ? `${c.client_code.trim()} ${c.name}` : c.name;
-  const sub = [territoryLine(c), c.phone?.trim()].filter(Boolean).join(" · ") || undefined;
+  const sub = [territoryLine(c, refDisplayMaps), c.phone?.trim()].filter(Boolean).join(" · ") || undefined;
 
   const lastAuditPatch = clientAuditMetaQ.data?.data.find((r) => r.action === "client.patch");
   const fullAddressLine = [c.neighborhood, c.street, c.house_number, c.apartment]
     .map((x) => (x ?? "").trim())
     .filter(Boolean)
     .join(", ");
-  const territoryWithZone = [territoryLine(c), c.zone?.trim()].filter(Boolean).join(" · ");
+  const territoryWithZone = territoryLine(c, refDisplayMaps);
   const addressMerged = (c.address ?? "").trim() || fullAddressLine;
 
   const chartRows = (analyticsQ.data?.daily ?? []).map((r) => ({
@@ -1246,6 +1318,7 @@ function ClientProfileHubInner({ tenantSlug, clientId }: Props) {
           clientId={clientId}
           territoryWithZone={territoryWithZone}
           addressMerged={addressMerged}
+          refDisplayMaps={refDisplayMaps}
           lastAuditPatch={lastAuditPatch}
           auditLoading={clientAuditMetaQ.isLoading}
         />

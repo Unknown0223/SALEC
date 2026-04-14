@@ -11,7 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { CLIENT_IMPORT_MAPPABLE_FIELDS } from "@/lib/client-import-fields";
-import { rowToHeaderLabels, suggestColumnMapping } from "@/lib/client-import-header-match";
+import {
+  mergeAutoClientImportColumns,
+  rowToHeaderLabels,
+  suggestColumnMapping
+} from "@/lib/client-import-header-match";
 import type { WorkBook, WorkSheet } from "xlsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -29,6 +33,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   file: File | null;
   isSubmitting: boolean;
+  /** «create» — yangi; «update» — ИД ustuni majburiy */
+  importMode?: "create" | "update";
   onConfirm: (payload: ClientImportMappingPayload) => void;
 };
 
@@ -48,6 +54,7 @@ export function ClientImportMappingDialog({
   onOpenChange,
   file,
   isSubmitting,
+  importMode = "create",
   onConfirm
 }: Props) {
   const [parseError, setParseError] = useState<string | null>(null);
@@ -159,12 +166,25 @@ export function ClientImportMappingDialog({
       const n = Number.parseInt(v, 10);
       if (Number.isFinite(n) && n >= 0) columnMap[key] = n;
     }
-    if (columnMap.name === undefined) {
-      setLocalErr("Укажите столбец «Наименование» (name) — обязательно.");
+    const headerCells = matrix[headerRowIdx];
+    const headers = Array.isArray(headerCells)
+      ? headerCells.map((c) => (c == null ? "" : String(c)))
+      : [];
+    const merged = mergeAutoClientImportColumns(headers, columnMap);
+    if (importMode === "create" && merged.client_db_id !== undefined) {
+      delete merged.client_db_id;
+    }
+    if (importMode === "update") {
+      if (merged.client_db_id === undefined) {
+        setLocalErr('Укажите столбец «ИД» (внутренний id клиента в системе) — обязательно для обновления.');
+        return;
+      }
+    } else if (merged.name === undefined) {
+      setLocalErr("Укажите столбец «Наименование» — обязательно для новых клиентов.");
       return;
     }
     onConfirm({
-      columnMap,
+      columnMap: merged,
       sheetName,
       headerRowIndex: headerRowIdx
     });
@@ -178,11 +198,18 @@ export function ClientImportMappingDialog({
       >
         <div className="border-b border-border/80 p-4">
           <DialogHeader>
-            <DialogTitle>Импорт Excel — сопоставление столбцов</DialogTitle>
+            <DialogTitle>
+              {importMode === "update"
+                ? "Обновление клиентов из Excel"
+                : "Импорт Excel — сопоставление столбцов"}
+            </DialogTitle>
             <DialogDescription>
               {file ? (
                 <span className="break-all">
-                  Файл: <strong>{file.name}</strong> — для каждого поля системы выберите столбец в файле.
+                  Файл: <strong>{file.name}</strong>
+                  {importMode === "update"
+                    ? " — строки с «ИД» из системы; пустые ячейки не перезаписывают поля. Столбцы «Агент N» подхватываются автоматически по заголовку."
+                    : " — для каждого поля системы выберите столбец. «Агент 1…10» можно не мапить вручную."}
                 </span>
               ) : (
                 "Файл не выбран."
@@ -297,7 +324,13 @@ export function ClientImportMappingDialog({
               }
               onClick={() => handleConfirm()}
             >
-              {isSubmitting ? "Импорт…" : "Начать импорт"}
+              {isSubmitting
+                ? importMode === "update"
+                  ? "Обновление…"
+                  : "Импорт…"
+                : importMode === "update"
+                  ? "Сохранить (обновить)"
+                  : "Начать импорт"}
             </Button>
           </div>
         </DialogFooter>

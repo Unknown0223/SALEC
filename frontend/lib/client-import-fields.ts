@@ -1,6 +1,7 @@
 /** Поля системы — порядок в модалке импорта клиентов (совпадает с таблицей). */
 export const CLIENT_IMPORT_MAPPABLE_FIELDS: { key: string; label: string }[] = [
-  { key: "name", label: "Наименование (обязательно)" },
+  { key: "client_db_id", label: "ИД в системе (только обновление по Excel)" },
+  { key: "name", label: "Наименование (новый клиент — обязательно)" },
   { key: "legal_name", label: "Юридическое название" },
   { key: "client_code", label: "Код клиента (короткий)" },
   { key: "client_pinfl", label: "ПИНФЛ" },
@@ -8,14 +9,18 @@ export const CLIENT_IMPORT_MAPPABLE_FIELDS: { key: string; label: string }[] = [
   { key: "address", label: "Адрес" },
   { key: "landmark", label: "Ориентир" },
   { key: "inn", label: "ИНН / STIR" },
-  { key: "category", label: "Категория клиента (код)" },
+  { key: "category_name", label: "Категория клиента" },
+  { key: "category_code", label: "Категория клиента (код)" },
+  { key: "client_type_name", label: "Тип клиента" },
   { key: "client_type_code", label: "Тип клиента (код)" },
-  { key: "client_format", label: "Формат (код)" },
-  { key: "sales_channel", label: "Канал продаж (код)" },
+  { key: "client_format_name", label: "Формат" },
+  { key: "client_format_code", label: "Формат (код)" },
+  { key: "sales_channel_name", label: "Торговый канал" },
+  { key: "sales_channel_code", label: "Торговый канал (код)" },
   { key: "region", label: "Область / регион" },
   { key: "district", label: "Район" },
   { key: "city", label: "Город" },
-  { key: "city_code", label: "Город (код) — привязка к территории" },
+  { key: "city_code", label: "Город (код)" },
   { key: "neighborhood", label: "Махалля / квартал" },
   { key: "zone", label: "Зона" },
   { key: "street", label: "Улица" },
@@ -38,8 +43,5 @@ export const CLIENT_IMPORT_MAPPABLE_FIELDS: { key: string; label: string }[] = [
   { key: "contact1_phone", label: "Контакт 1: телефон" },
   { key: "contact2_firstName", label: "Контакт 2: имя" },
   { key: "contact2_lastName", label: "Контакт 2: фамилия" },
-  { key: "contact2_phone", label: "Контакт 2: телефон" },
-  { key: "contact3_firstName", label: "Контакт 3: имя" },
-  { key: "contact3_lastName", label: "Контакт 3: фамилия" },
-  { key: "contact3_phone", label: "Контакт 3: телефон" }
+  { key: "contact2_phone", label: "Контакт 2: телефон" }
 ];

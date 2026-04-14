@@ -8,6 +8,8 @@
  *   (ixtiyoriy) Faol agentlar Excel «Активные агенты»
  *   (ixtiyoriy) Faol eksportlar Excel «Активные экспедиторы»
  *   (ixtiyoriy) Mahsulotlar JSON
+ *   (ixtiyoriy) «Продукты» Excel — PRODUCTS_XLSX_PATH yoki Downloads / scripts/data
+ *   (ixtiyoriy) «Прайст лист» Excel — narxlarni SKU bo‘yicha yozadi (PRICE_LIST_XLSX_PATH yoki Downloads)
  *   (ixtiyoriy) demo_* foydalanuvchilar parolini bir xil qilish
  *
  * Ishlatish (loyiha ildizidan):
@@ -35,6 +37,8 @@
  *
  * Shaharlar (Excel): CITY_XLSX_PATH yoki scripts/data/Данные Город*.xlsx | gorod.xlsx
  * O‘tkazib yuborish: IMPORT_ONCE_NO_CITIES=1
+ * Продукты Excel o‘tkazmaslik: IMPORT_ONCE_NO_PRODUCTS_XLSX=1
+ * Prays Excel o‘tkazmaslik: IMPORT_ONCE_NO_PRICE_LIST_XLSX=1
  */
 
 import "dotenv/config";
@@ -45,6 +49,8 @@ import { resolveCityXlsxPath, runCitiesXlsxImport } from "./lib/cities-xlsx-impo
 import { runLalakuReferenceImport } from "./lib/lalaku-reference-import";
 import { runStaffImportFromCsv } from "./lib/staff-csv-import";
 import { runProductsImportFromJson } from "./lib/import-products-json";
+import { runPriceListExcelImport, resolvePriceListXlsxPath } from "./lib/excel-price-list-import";
+import { runProductsExcelImport, resolveProductsXlsxPath } from "./lib/excel-products-import";
 import { runEnsureDemoStaffLogin } from "./lib/ensure-demo-login";
 import {
   resolveAgentsXlsxPath,
@@ -234,6 +240,28 @@ async function main() {
       }
     }
   }
+  if (!truthy(process.env.IMPORT_ONCE_NO_PRODUCTS_XLSX)) {
+    const prodResolved = resolveProductsXlsxPath(cwdBackend);
+    if (prodResolved.ok) {
+      console.log("\n════════════  QO‘SHIMCHA: mahsulotlar («Продукты» Excel)  ════════════");
+      await runProductsExcelImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        filePath: prodResolved.path,
+        dry
+      });
+    } else if (prodResolved.reason === "missing_env_file") {
+      throw new Error(`PRODUCTS_XLSX_PATH berildi, fayl yo‘q: ${prodResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Продукты.xlsx — topilmadi. PRODUCTS_XLSX_PATH yoki Downloads ga qo‘ying."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_PRODUCTS_XLSX=1 — Продукты Excel.");
+  }
+
   if (productsJson) {
     console.log("\n════════════  QO‘SHIMCHA: mahsulotlar (JSON)  ════════════");
     const abs = path.isAbsolute(productsJson) ? productsJson : path.join(cwdBackend, productsJson);
@@ -245,6 +273,28 @@ async function main() {
   } else {
     console.log("\n(o‘tkazib yuborildi) Mahsulotlar JSON — scripts/data/mahsulotlar.json bo‘sh yoki yo‘q.");
     console.log("Namuna: mahsulotlar.json ga [{ \"sku\", \"name\", \"unit\"? }] qo‘shing.");
+  }
+
+  if (!truthy(process.env.IMPORT_ONCE_NO_PRICE_LIST_XLSX)) {
+    const priceResolved = resolvePriceListXlsxPath(cwdBackend);
+    if (priceResolved.ok) {
+      console.log("\n════════════  QO‘SHIMCHA: prays («Прайст лист» Excel)  ════════════");
+      await runPriceListExcelImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        filePath: priceResolved.path,
+        dry
+      });
+    } else if (priceResolved.reason === "missing_env_file") {
+      throw new Error(`PRICE_LIST_XLSX_PATH berildi, fayl yo‘q: ${priceResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Прайст лист.xlsx — topilmadi. PRICE_LIST_XLSX_PATH yoki Downloads ga qo‘ying."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_PRICE_LIST_XLSX=1 — prays Excel.");
   }
 
   if (!dry && !truthy(process.env.IMPORT_ONCE_SKIP_ENSURE_LOGINS)) {

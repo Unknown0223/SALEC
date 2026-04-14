@@ -1,5 +1,5 @@
 import { unlink } from "fs/promises";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { writeClientImportTempFile } from "../../jobs/import-temp-file";
 import { ensureTenantContext } from "../../lib/tenant-context";
@@ -21,6 +21,7 @@ import {
   addClientBalanceMovement,
   bulkSetClientsActive,
   buildClientImportTemplateBuffer,
+  buildClientUpdateImportTemplateBuffer,
   createClientMinimal,
   exportClientsFilteredCsv,
   getClientDetail,
@@ -35,6 +36,21 @@ import {
 } from "./clients.service";
 
 const catalogRoles = ["admin", "operator"] as const;
+
+async function sendClientUpdateImportTemplateXlsx(
+  reply: FastifyReply,
+  tenantId: number,
+  q: ListClientsQuery
+) {
+  const buf = await buildClientUpdateImportTemplateBuffer(tenantId, q);
+  return reply
+    .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    .header(
+      "Content-Disposition",
+      'attachment; filename="klientlarni_yangilash_Excel_shablon.xlsx"'
+    )
+    .send(buf);
+}
 
 const createClientEquipmentBodySchema = z.object({
   inventory_type: z.string().min(1).max(256),
@@ -320,6 +336,17 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
 }
 
 export async function registerClientRoutes(app: FastifyInstance) {
+  /** Bir segment — ba’zi marshrut/proksi konfiguratsiyalarida `import/update-template` 404 berishi mumkin. */
+  app.get(
+    "/api/:slug/clients/import-update-template",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = parseClientListQuery(request.query as Record<string, string | undefined>);
+      return sendClientUpdateImportTemplateXlsx(reply, request.tenant!.id, q);
+    }
+  );
+
   app.get(
     "/api/:slug/clients",
     { preHandler: [jwtAccessVerify] },
@@ -388,6 +415,16 @@ export async function registerClientRoutes(app: FastifyInstance) {
         .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         .header("Content-Disposition", 'attachment; filename="mijozlar_import_shablon.xlsx"');
       return reply.send(buf);
+    }
+  );
+
+  app.get(
+    "/api/:slug/clients/import/update-template",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = parseClientListQuery(request.query as Record<string, string | undefined>);
+      return sendClientUpdateImportTemplateXlsx(reply, request.tenant!.id, q);
     }
   );
 

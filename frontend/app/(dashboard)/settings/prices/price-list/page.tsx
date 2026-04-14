@@ -8,7 +8,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuthStore, useAuthStoreHydrated } from "@/lib/auth-store";
-import { formatGroupedDecimal, formatNumberGrouped } from "@/lib/format-numbers";
+import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -260,7 +260,7 @@ export default function PriceListPage() {
                             <td key={col.id} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                               {cell && Number.isFinite(num) ? (
                                 <>
-                                  {formatGroupedDecimal(num, 2)}
+                                  {formatNumberGrouped(num, { maxFractionDigits: 0 })}
                                   <span className="ml-1 text-[10px] text-muted-foreground">{cell.currency}</span>
                                 </>
                               ) : (

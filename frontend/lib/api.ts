@@ -46,6 +46,15 @@ export const api = axios.create({
 
 type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
+function redirectToLoginIfBrowser() {
+  if (typeof window === "undefined") return;
+  const current = `${window.location.pathname}${window.location.search}`;
+  const next = `/login?from=${encodeURIComponent(current)}`;
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.assign(next);
+  }
+}
+
 api.interceptors.request.use((config) => {
   if (config.data instanceof FormData) {
     delete config.headers["Content-Type"];
@@ -66,6 +75,16 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
     const status = error.response?.status;
+    const body = (error.response?.data ?? {}) as { error?: string };
+    if (
+      (status === 404 && body.error === "TenantNotFound") ||
+      (status === 403 && body.error === "CrossTenantDenied")
+    ) {
+      const store = useAuthStore.getState();
+      store.clearSession();
+      redirectToLoginIfBrowser();
+      return Promise.reject(error);
+    }
     if (status !== 401 || !original || original._retry) {
       return Promise.reject(error);
     }

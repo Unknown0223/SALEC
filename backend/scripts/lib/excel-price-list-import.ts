@@ -1,10 +1,13 @@
 /**
- * «Прайс лист» Excel: SKU, nom, (ixtiyoriy) kategoriya, narx ustunlari (розница / опт / boshqalar).
+ * «Прайс лист» Excel: SKU, nom, (ixtiyoriy) kategoriya, narx ustunlari (розница / опт / NAQD PUL / …).
  */
 
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { cellNum, cellStr, colIndex, loadFirstSheet, normHeader, sheetHeaderRow } from "./excel-import-helpers";
+import { findInDir } from "./excel-bundle-paths";
 import { normalizeWarehouseLabel } from "./warehouse-resolve-import";
 
 export type PriceListExcelOptions = {
@@ -15,6 +18,10 @@ export type PriceListExcelOptions = {
   dry: boolean;
 };
 
+function normalizePriceTypeLookupKey(v: string): string {
+  return normHeader(v).replace(/[_\s-]+/g, "");
+}
+
 function slugPriceType(h: string): string {
   const s = normHeader(h)
     .replace(/[^\wа-яё]+/g, "_")
@@ -24,9 +31,40 @@ function slugPriceType(h: string): string {
   return s || "price";
 }
 
+/** SKU, nom, qoldiq va boshqa meta ustunlar — narx emas */
+function isNonPriceMetaColumn(hn: string): boolean {
+  if (!hn) return true;
+  const exact = new Set([
+    "код",
+    "артикул",
+    "остаток",
+    "остатки",
+    "количество",
+    "товар ид"
+  ]);
+  if (exact.has(hn)) return true;
+  if (hn.startsWith("название") || hn.startsWith("наименование") || hn.startsWith("номенклатур")) return true;
+  if (hn.startsWith("категория") || hn === "группа" || hn.startsWith("группа ")) return true;
+  if (hn.startsWith("едини") || hn.startsWith("ед ") || hn === "unit" || hn === "изм") return true;
+  if ((hn.includes("штрих") && hn.includes("код")) || hn === "ean" || hn === "gtin") return true;
+  if (hn.includes("икпу") && !hn.includes("цена")) return true;
+  if (hn.includes("сап код") || hn === "сап") return true;
+  if (hn.includes("дата создания") || hn.startsWith("дата ")) return true;
+  if (hn.includes("комментарий") || hn.includes("примечание")) return true;
+  return false;
+}
+
 function detectPriceColumns(headers: string[]): { col0: number; priceType: string }[] {
   const out: { col0: number; priceType: string }[] = [];
-  const used = new Set<string>();
+  const usedTypes = new Set<string>();
+  const usedCols = new Set<number>();
+
+  const tryAdd = (i: number, t: string | null) => {
+    if (t == null || t === "" || usedTypes.has(t)) return;
+    usedTypes.add(t);
+    usedCols.add(i);
+    out.push({ col0: i, priceType: t });
+  };
 
   for (let i = 0; i < headers.length; i++) {
     const raw = headers[i] ?? "";
@@ -46,10 +84,16 @@ function detectPriceColumns(headers: string[]): { col0: number; priceType: strin
       t = slugPriceType(raw);
     }
 
-    if (t && !used.has(t)) {
-      used.add(t);
-      out.push({ col0: i, priceType: t });
-    }
+    tryAdd(i, t);
+  }
+
+  for (let i = 0; i < headers.length; i++) {
+    if (usedCols.has(i)) continue;
+    const raw = headers[i] ?? "";
+    const hn = normHeader(raw);
+    if (!hn) continue;
+    if (isNonPriceMetaColumn(hn)) continue;
+    tryAdd(i, slugPriceType(raw));
   }
 
   return out;
@@ -57,6 +101,41 @@ function detectPriceColumns(headers: string[]): { col0: number; priceType: strin
 
 function truthyEnv(v: string | undefined): boolean {
   return v === "1" || v === "true" || v === "yes";
+}
+
+export type ResolvePriceListXlsxResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: "missing_env_file" | "not_found"; detail?: string };
+
+export function resolvePriceListXlsxPath(cwdBackend: string): ResolvePriceListXlsxResult {
+  const env = (process.env.PRICE_LIST_XLSX_PATH || process.env.IMPORT_EXCEL_PRICE_LIST || "").trim();
+  if (env) {
+    const abs = path.isAbsolute(env) ? env : path.join(cwdBackend, env);
+    if (fs.existsSync(abs)) return { ok: true, path: abs };
+    return { ok: false, reason: "missing_env_file", detail: abs };
+  }
+
+  const dataDir = path.join(cwdBackend, "scripts", "data");
+  const candidates = [
+    path.join(dataDir, "Прайст лист.xlsx"),
+    path.join(dataDir, "Прайст лист (1).xlsx"),
+    path.join(dataDir, "Прайст лист (2).xlsx"),
+    path.join(dataDir, "price-list.xlsx")
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return { ok: true, path: p };
+  }
+
+  const downloads =
+    process.platform === "win32" && process.env.USERPROFILE
+      ? path.join(process.env.USERPROFILE, "Downloads")
+      : null;
+  if (downloads) {
+    const found = findInDir(downloads, ["прайст лист", "прайст", "прайс", "price list", "pricelist"]);
+    if (found) return { ok: true, path: found };
+  }
+
+  return { ok: false, reason: "not_found" };
 }
 
 export async function runPriceListExcelImport(opts: PriceListExcelOptions): Promise<void> {
@@ -75,6 +154,7 @@ export async function runPriceListExcelImport(opts: PriceListExcelOptions): Prom
     ]),
     name: colIndex(headers, [
       "наименование",
+      "название товар",
       "название",
       "названия",
       "товар",
@@ -93,7 +173,47 @@ export async function runPriceListExcelImport(opts: PriceListExcelOptions): Prom
     );
   }
 
-  const priceCols = detectPriceColumns(headers);
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { settings: true }
+  });
+  const references =
+    tenant?.settings && typeof tenant.settings === "object"
+      ? (tenant.settings as Record<string, unknown>).references
+      : null;
+  const priceTypeEntries = Array.isArray(
+    references && typeof references === "object"
+      ? (references as Record<string, unknown>).price_type_entries
+      : null
+  )
+    ? ((references as Record<string, unknown>).price_type_entries as unknown[])
+    : [];
+  const canonicalPriceTypeByNorm = new Map<string, string>();
+  for (const item of priceTypeEntries) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (row.active === false) continue;
+    const code = typeof row.code === "string" ? row.code.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const canonical = code || name;
+    if (!canonical) continue;
+    if (name) canonicalPriceTypeByNorm.set(normalizePriceTypeLookupKey(name), canonical);
+    if (code) canonicalPriceTypeByNorm.set(normalizePriceTypeLookupKey(code), canonical);
+  }
+
+  const priceColsDetected = detectPriceColumns(headers);
+  const priceCols: { col0: number; priceType: string }[] = [];
+  const seenTypes = new Set<string>();
+  for (const p of priceColsDetected) {
+    const rawHeader = headers[p.col0] ?? "";
+    const canonical =
+      canonicalPriceTypeByNorm.get(normalizePriceTypeLookupKey(rawHeader)) ??
+      canonicalPriceTypeByNorm.get(normalizePriceTypeLookupKey(p.priceType)) ??
+      p.priceType;
+    if (seenTypes.has(canonical)) continue;
+    seenTypes.add(canonical);
+    priceCols.push({ col0: p.col0, priceType: canonical });
+  }
   if (priceCols.length === 0) {
     throw new Error(
       `Excel price (${filePath}): narx ustunlari topilmadi (розница/опт/цена/price). Sarlavhalar: ${headers.join(" | ")}`
