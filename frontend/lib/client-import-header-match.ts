@@ -11,7 +11,7 @@ const HEADER_ALIASES: Record<string, string> = {
   telefon: "phone",
   tel: "phone",
   manzil: "address",
-  kategoriya: "category",
+  kategoriya: "category_name",
   kredit: "credit_limit",
   kredit_limiti: "credit_limit",
   faol: "is_active",
@@ -34,7 +34,7 @@ const HEADER_ALIASES: Record<string, string> = {
   xonadon: "apartment",
   gps: "gps_text",
   izoh: "notes",
-  format: "client_format",
+  format: "client_format_name",
   legal_name: "legal_name",
   yuridik_nomi: "legal_name",
   имя: "name",
@@ -50,9 +50,9 @@ const HEADER_ALIASES: Record<string, string> = {
   фио: "name",
   телефон: "phone",
   адрес: "address",
-  категория: "category",
-  категория_клиента: "category",
-  категория_клиента_код: "category",
+  категория: "category_name",
+  категория_клиента: "category_name",
+  категория_клиента_код: "category_code",
   кредит: "credit_limit",
   кредитный_лимит: "credit_limit",
   активен: "is_active",
@@ -69,16 +69,16 @@ const HEADER_ALIASES: Record<string, string> = {
   зона: "zone",
   город_туман: "city",
   тип_клиента_код: "client_type_code",
-  тип_клиента: "client_type_code",
+  тип_клиента: "client_type_name",
   код_типа_клиента: "client_type_code",
-  формат_код: "client_format",
-  формат_клиента: "client_format",
-  торговый_канал: "sales_channel",
-  торговый_канал_код: "sales_channel",
-  канал_продаж: "sales_channel",
-  канал_продаж_код: "sales_channel",
-  savdo_kanali: "sales_channel",
-  sales_channel: "sales_channel",
+  формат_код: "client_format_code",
+  формат_клиента: "client_format_name",
+  торговый_канал: "sales_channel_name",
+  торговый_канал_код: "sales_channel_code",
+  канал_продаж: "sales_channel_name",
+  канал_продаж_код: "sales_channel_code",
+  savdo_kanali: "sales_channel_name",
+  sales_channel: "sales_channel_name",
   улица: "street",
   дом: "house_number",
   квартира: "apartment",
@@ -109,7 +109,47 @@ function normalizeHeaderLabel(h: string): string {
     .replace(/[()]/g, "")
     .replace(/\s*[/\\]+\s*/g, "_")
     .replace(/\s+/g, "_")
+    .replace(/[_-]{2,}/g, "_")
+    .replace(/^_+|_+$/g, "")
     .replace(/[''`«»]/g, "");
+}
+
+function parseImportSlotFromHeader(n: string, stem: "агент" | "экспедитор"): number | null {
+  const m = new RegExp(`^${stem}_?(\\d+)$`).exec(n);
+  if (m) {
+    const slot = Number.parseInt(m[1], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return slot;
+  }
+  if (stem === "экспедитор") {
+    const mShort =
+      /^эксп(?:[._]+|\s*)(\d+)$/.exec(n) ||
+      /^эксп(\d+)$/.exec(n);
+    if (mShort) {
+      const slot = Number.parseInt(mShort[1], 10);
+      if (Number.isFinite(slot) && slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return slot;
+    }
+  }
+  return null;
+}
+
+function parseImportAgentDaysSlotFromHeader(n: string): number | null {
+  const m1 = /^агент_?(\d+)_?(день|дни|день_посещения|дни_посещения)$/.exec(n);
+  if (m1) {
+    const slot = Number.parseInt(m1[1], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return slot;
+  }
+  const mDay = /^(день|дни)_?(\d+)$/.exec(n);
+  if (mDay) {
+    const slot = Number.parseInt(mDay[2], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return slot;
+  }
+  const mVisit = /^(день|дни)_посещения_?(\d+)$/.exec(n);
+  if (mVisit) {
+    const slot = Number.parseInt(mVisit[2], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return slot;
+  }
+  if (n === "день" || n === "дни" || n === "день_посещения" || n === "дни_посещения") return 1;
+  return null;
 }
 
 export function headerToClientImportKey(header: string): string | null {
@@ -138,21 +178,12 @@ const AGENT_IMPORT_SLOTS = 10;
 /** «Агент 1», «Агент 1 день», «Экспедитор 1» — backend `import_agent_*` kalitlari. */
 export function headerToAgentImportKey(header: string): string | null {
   const n = normalizeHeaderLabel(header);
-  const m1 = /^агент_(\d+)$/.exec(n);
-  if (m1) {
-    const slot = Number.parseInt(m1[1], 10);
-    if (slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return `import_agent_${slot}`;
-  }
-  const m2 = /^агент_(\d+)_день$/.exec(n);
-  if (m2) {
-    const slot = Number.parseInt(m2[1], 10);
-    if (slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return `import_agent_${slot}_days`;
-  }
-  const m3 = /^экспедитор_(\d+)$/.exec(n);
-  if (m3) {
-    const slot = Number.parseInt(m3[1], 10);
-    if (slot >= 1 && slot <= AGENT_IMPORT_SLOTS) return `import_expeditor_${slot}`;
-  }
+  const agentSlot = parseImportSlotFromHeader(n, "агент");
+  if (agentSlot != null) return `import_agent_${agentSlot}`;
+  const daySlot = parseImportAgentDaysSlotFromHeader(n);
+  if (daySlot != null) return `import_agent_${daySlot}_days`;
+  const expeditorSlot = parseImportSlotFromHeader(n, "экспедитор");
+  if (expeditorSlot != null) return `import_expeditor_${expeditorSlot}`;
   return null;
 }
 

@@ -11,7 +11,7 @@ const baseURL =
     : process.env.NODE_ENV === "development"
       ? typeof window !== "undefined"
         ? ""
-        : process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:4000"
+        : process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:18080"
       : typeof window !== "undefined"
         ? window.location.origin
         : "";
@@ -31,7 +31,7 @@ export function resolveApiOrigin(): string {
   if (typeof window !== "undefined") {
     return window.location.origin;
   }
-  return process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:4000";
+  return process.env.INTERNAL_API_BASE?.trim() || "http://127.0.0.1:18080";
 }
 
 function authRefreshAbsoluteUrl(): string {

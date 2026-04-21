@@ -18,9 +18,7 @@ import type {
 import type { ClientBalanceTerritoryOptions } from "@/lib/client-balances-types";
 import type { TerritoryNode } from "@/lib/territory-tree";
 import {
-  buildClientTerritoryFilterLevels,
-  buildPaymentTerritorySelectOptions,
-  type ClientTerritoryFilterField
+  buildZoneRegionCityCascadeOptions
 } from "@/lib/territory-client-filters";
 import { downloadXlsxSheet } from "@/lib/download-xlsx";
 import { getUserFacingError } from "@/lib/error-utils";
@@ -28,14 +26,31 @@ import { formatNumberGrouped } from "@/lib/format-numbers";
 import { STALE } from "@/lib/query-stale";
 import { cn } from "@/lib/utils";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { CalendarDays, FileSpreadsheet, Filter, RefreshCw, Search, Table2 } from "lucide-react";
+import { AlertCircle, CalendarDays, FileSpreadsheet, Filter, RefreshCw, Search, Table2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type StaffPick = { id: number; fio: string; code?: string | null };
+type StaffPick = {
+  id: number;
+  fio: string;
+  code?: string | null;
+  /** Agent / ekspektor / boshqalar — filial bo‘yicha toraytirish uchun */
+  branch?: string | null;
+  supervisor_user_id?: number | null;
+  trade_direction?: string | null;
+  expeditor_assignment_rules?: {
+    trade_directions?: string[];
+    agent_ids?: number[];
+    price_types?: string[];
+    warehouse_ids?: number[];
+    territories?: string[];
+    weekdays?: number[];
+  };
+};
 
 type FilterForm = {
   branch_ids: Set<string>;
+  supervisor_user_id: string;
   agent_id: string;
   expeditor_user_id: string;
   category: string;
@@ -56,6 +71,7 @@ type FilterForm = {
 const defaultForm = (): FilterForm => {
   return {
     branch_ids: new Set(),
+    supervisor_user_id: "",
     agent_id: "",
     expeditor_user_id: "",
     category: "",
@@ -73,42 +89,91 @@ const defaultForm = (): FilterForm => {
   };
 };
 
-function readTerritoryFormField(form: FilterForm, field: ClientTerritoryFilterField): string {
-  switch (field) {
-    case "zone":
-      return form.territory_zone;
-    case "region":
-      return form.territory_region;
-    case "city":
-      return form.territory_city;
-    case "district":
-      return form.territory_district;
-    case "neighborhood":
-      return form.territory_neighborhood;
-    default:
-      return "";
-  }
+function normTrim(s: string | null | undefined): string {
+  return (s ?? "").trim();
 }
 
-function patchTerritoryFormField(
-  form: FilterForm,
-  field: ClientTerritoryFilterField,
-  value: string
-): FilterForm {
-  switch (field) {
-    case "zone":
-      return { ...form, territory_zone: value };
-    case "region":
-      return { ...form, territory_region: value };
-    case "city":
-      return { ...form, territory_city: value };
-    case "district":
-      return { ...form, territory_district: value };
-    case "neighborhood":
-      return { ...form, territory_neighborhood: value };
-    default:
-      return form;
+type ConsignmentAgentSkip = Partial<{
+  branch: true;
+  supervisor: true;
+  agent: true;
+  tradeDirection: true;
+  expeditor: true;
+}>;
+
+function agentMatchesExpeditor(agent: StaffPick, exp: StaffPick | undefined): boolean {
+  if (!exp) return true;
+  const rules = exp.expeditor_assignment_rules;
+  if (!rules || typeof rules !== "object") return true;
+  const agentIds = rules.agent_ids ?? [];
+  const tds = rules.trade_directions ?? [];
+  const hasRestrict = agentIds.length > 0 || tds.length > 0;
+  if (!hasRestrict) return true;
+  if (agentIds.length > 0 && agentIds.includes(agent.id)) return true;
+  const td = normTrim(agent.trade_direction);
+  if (tds.length > 0 && td) {
+    if (tds.some((x) => normTrim(x) === td)) return true;
   }
+  if (tds.length > 0 && !td) return false;
+  return agentIds.length > 0 ? false : true;
+}
+
+function buildConsignmentTerritoryScopeParams(form: FilterForm): string {
+  const p = new URLSearchParams();
+  if (form.branch_ids.size > 0) p.set("branch_ids", Array.from(form.branch_ids).join(","));
+  if (form.agent_id.trim()) p.set("agent_id", form.agent_id.trim());
+  if (form.expeditor_user_id.trim()) p.set("expeditor_user_id", form.expeditor_user_id.trim());
+  if (form.supervisor_user_id.trim()) p.set("supervisor_user_id", form.supervisor_user_id.trim());
+  if (form.trade_direction.trim()) p.set("trade_direction", form.trade_direction.trim());
+  if (form.category.trim()) p.set("category", form.category.trim());
+  if (form.status) p.set("status", form.status);
+  return p.toString();
+}
+
+function expeditorMatchesConsignmentBranches(exp: StaffPick, branchIds: Set<string>): boolean {
+  if (branchIds.size === 0) return true;
+  const rules = exp.expeditor_assignment_rules;
+  const hasAgentOrTdRules =
+    rules &&
+    typeof rules === "object" &&
+    ((rules.agent_ids?.length ?? 0) > 0 || (rules.trade_directions?.length ?? 0) > 0);
+  if (hasAgentOrTdRules) return true;
+  const eb = normTrim(exp.branch);
+  if (!eb) return true;
+  for (const b of Array.from(branchIds)) {
+    if (normTrim(b) === eb) return true;
+  }
+  return false;
+}
+
+function filterConsignmentAgents(
+  agents: StaffPick[],
+  expeditors: StaffPick[] | undefined,
+  d: FilterForm,
+  skip: ConsignmentAgentSkip
+): StaffPick[] {
+  const branchSkip = skip.branch;
+  const bid = d.branch_ids;
+  const supRaw = skip.supervisor ? "" : d.supervisor_user_id;
+  const supId = Number.parseInt(supRaw, 10);
+  const td = skip.tradeDirection ? "" : normTrim(d.trade_direction);
+  const agId = skip.agent ? NaN : Number.parseInt(d.agent_id, 10);
+  const exp =
+    skip.expeditor || !normTrim(d.expeditor_user_id)
+      ? undefined
+      : expeditors?.find((e) => String(e.id) === d.expeditor_user_id);
+
+  return agents.filter((a) => {
+    if (Number.isFinite(agId) && a.id !== agId) return false;
+    if (!branchSkip && bid.size > 0) {
+      const ab = normTrim(a.branch);
+      if (!ab || !bid.has(ab)) return false;
+    }
+    if (Number.isFinite(supId) && (a.supervisor_user_id ?? -1) !== supId) return false;
+    if (td && normTrim(a.trade_direction) !== td) return false;
+    if (!agentMatchesExpeditor(a, exp)) return false;
+    return true;
+  });
 }
 
 function parseAmount(s: string): number {
@@ -141,11 +206,32 @@ function clientDisplayId(r: ConsignmentBalanceRow): string {
   return c ? c : String(r.client_id);
 }
 
+function normPayColumnLabel(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 function amountForPaymentLabel(
   amounts: ConsignmentBalanceRow["payment_amounts"] | undefined,
-  label: string
+  label: string,
+  fallbackIndex?: number
 ): string {
-  return amounts?.find((x) => x.label === label)?.amount ?? "0";
+  if (!amounts?.length) return "0";
+  const want = normPayColumnLabel(label);
+  const hit = amounts.find((x) => normPayColumnLabel(x.label) === want);
+  if (hit) return hit.amount;
+  if (
+    typeof fallbackIndex === "number" &&
+    Number.isInteger(fallbackIndex) &&
+    fallbackIndex >= 0 &&
+    fallbackIndex < amounts.length
+  ) {
+    return amounts[fallbackIndex]?.amount ?? "0";
+  }
+  return "0";
 }
 
 function MoneyCell({
@@ -234,6 +320,7 @@ function buildQuery(
   p.set("limit", String(limit));
   if (largeExport) p.set("large_export", "1");
   if (search.trim()) p.set("search", search.trim());
+  if (form.supervisor_user_id.trim()) p.set("supervisor_user_id", form.supervisor_user_id.trim());
   if (form.agent_id.trim()) p.set("agent_id", form.agent_id.trim());
   if (form.expeditor_user_id.trim()) p.set("expeditor_user_id", form.expeditor_user_id.trim());
   if (form.trade_direction.trim()) p.set("trade_direction", form.trade_direction.trim());
@@ -295,7 +382,7 @@ async function downloadConsignmentExcel(rows: ConsignmentBalanceRow[], paymentCo
     r.total_debt,
     r.total_paid,
     r.balance,
-    ...payHeaders.map((lab) => amountForPaymentLabel(r.payment_amounts, lab))
+    ...payHeaders.map((lab, idx) => amountForPaymentLabel(r.payment_amounts, lab, idx))
   ]);
   await downloadXlsxSheet(
     `balansy-konsignatsiya-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -307,6 +394,9 @@ async function downloadConsignmentExcel(rows: ConsignmentBalanceRow[], paymentCo
 
 const filterFieldLabelClass =
   "text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
+
+const filterFieldLabelCompactClass =
+  "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground";
 
 export function ConsignmentBalancesWorkspace() {
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
@@ -346,13 +436,16 @@ export function ConsignmentBalancesWorkspace() {
     }
   });
 
+  const consignmentTerritoryScope = useMemo(() => buildConsignmentTerritoryScopeParams(draft), [draft]);
+
   const territoryQ = useQuery({
-    queryKey: ["client-balances-territory", tenantSlug, "consignment"],
+    queryKey: ["client-balances-territory", tenantSlug, "consignment", consignmentTerritoryScope],
     enabled: Boolean(tenantSlug) && hydrated,
     staleTime: STALE.reference,
     queryFn: async () => {
+      const qs = consignmentTerritoryScope.trim();
       const { data } = await api.get<{ data: ClientBalanceTerritoryOptions }>(
-        `/api/${tenantSlug}/client-balances/territory-options`
+        `/api/${tenantSlug}/client-balances/territory-options${qs ? `?${qs}` : ""}`
       );
       return data.data;
     }
@@ -369,6 +462,8 @@ export function ConsignmentBalancesWorkspace() {
         districts?: string[];
         zones?: string[];
         neighborhoods?: string[];
+        categories?: string[];
+        category_options?: Array<string | { value?: string; label?: string }>;
         region_options?: { value: string; label: string }[];
         city_options?: { value: string; label: string }[];
       }>(`/api/${tenantSlug}/clients/references`);
@@ -411,6 +506,15 @@ export function ConsignmentBalancesWorkspace() {
       return data.data;
     }
   });
+  const supervisorsQ = useQuery({
+    queryKey: ["supervisors", tenantSlug, "consignment-balances"],
+    enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data } = await api.get<{ data: StaffPick[] }>(`/api/${tenantSlug}/supervisors?is_active=true`);
+      return data.data;
+    }
+  });
 
   const filterOptQ = useQuery({
     queryKey: ["agents-filter-options", tenantSlug, "consignment-balances"],
@@ -429,9 +533,14 @@ export function ConsignmentBalancesWorkspace() {
     setPage(1);
   }, [draft]);
 
-  const resetDraftToApplied = useCallback(() => {
-    setDraft({ ...applied });
-  }, [applied]);
+  const resetFiltersFull = useCallback(() => {
+    const fresh = defaultForm();
+    setDraft(fresh);
+    setApplied(fresh);
+    setPage(1);
+  }, []);
+
+  const compactFilterSelectClass = cn(filterPanelSelectClassName, "h-9 min-w-0 max-w-full text-xs");
 
   const totalPages = listQ.data ? Math.max(1, Math.ceil(listQ.data.total / listQ.data.limit)) : 1;
   const listErrorDetail = useMemo(() => {
@@ -441,32 +550,246 @@ export function ConsignmentBalancesWorkspace() {
 
   const to = territoryQ.data;
 
-  const territoryFilterSpecs = useMemo(
-    () => buildClientTerritoryFilterLevels(profileQ.data?.territory_levels),
-    [profileQ.data?.territory_levels]
+  const territoryCascade = useMemo(
+    () =>
+      buildZoneRegionCityCascadeOptions(
+        clientRefsQ.data,
+        to,
+        profileQ.data?.territory_nodes,
+        {
+          zone: draft.territory_zone,
+          region: draft.territory_region,
+          city: draft.territory_city
+        }
+      ),
+    [
+      clientRefsQ.data,
+      to,
+      profileQ.data?.territory_nodes,
+      draft.territory_zone,
+      draft.territory_region,
+      draft.territory_city
+    ]
   );
 
-  const tradeDirectionSelectValues = useMemo(() => {
-    const fromAgents = filterOptQ.data?.trade_directions ?? [];
-    const fromProfile = profileQ.data?.trade_directions ?? [];
-    const s = new Set<string>();
-    for (const x of fromAgents) {
-      const t = x.trim();
-      if (t) s.add(t);
+  const consignmentZoneKeys = useMemo(
+    () => territoryCascade.zones.map((o) => o.value).join("\u0001"),
+    [territoryCascade.zones]
+  );
+  const consignmentRegionKeys = useMemo(
+    () => territoryCascade.regions.map((o) => o.value).join("\u0001"),
+    [territoryCascade.regions]
+  );
+  const consignmentCityKeys = useMemo(
+    () => territoryCascade.cities.map((o) => o.value).join("\u0001"),
+    [territoryCascade.cities]
+  );
+
+  useEffect(() => {
+    const z = normTrim(draft.territory_zone);
+    if (!z) return;
+    const allowed = new Set(
+      consignmentZoneKeys
+        .split("\u0001")
+        .map((x) => normTrim(x))
+        .filter(Boolean)
+    );
+    if (!allowed.has(z)) setDraft((d) => ({ ...d, territory_zone: "", territory_region: "", territory_city: "" }));
+  }, [consignmentZoneKeys, draft.territory_zone]);
+
+  useEffect(() => {
+    const r = normTrim(draft.territory_region);
+    if (!r) return;
+    const allowed = new Set(
+      consignmentRegionKeys
+        .split("\u0001")
+        .map((x) => normTrim(x))
+        .filter(Boolean)
+    );
+    if (!allowed.has(r)) setDraft((d) => ({ ...d, territory_region: "", territory_city: "" }));
+  }, [consignmentRegionKeys, draft.territory_region]);
+
+  useEffect(() => {
+    const c = normTrim(draft.territory_city);
+    if (!c) return;
+    const allowed = new Set(
+      consignmentCityKeys
+        .split("\u0001")
+        .map((x) => normTrim(x))
+        .filter(Boolean)
+    );
+    if (!allowed.has(c)) setDraft((d) => ({ ...d, territory_city: "" }));
+  }, [consignmentCityKeys, draft.territory_city]);
+
+  const categoryFilterOpts = useMemo(() => {
+    const fromOptions = (clientRefsQ.data?.category_options ?? [])
+      .map((o) => (typeof o === "string" ? o : (o?.label ?? o?.value ?? "")))
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+    const fromList = (clientRefsQ.data?.categories ?? []).map((x) => String(x).trim()).filter(Boolean);
+    return Array.from(new Set([...fromOptions, ...fromList])).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [clientRefsQ.data]);
+
+  const agentsSrc = agentsQ.data ?? [];
+  const expeditorsSrc = expeditorsQ.data ?? [];
+
+  const consignmentCascade = useMemo(() => {
+    const d = draft;
+    return {
+      forAgentSelect: filterConsignmentAgents(agentsSrc, expeditorsSrc, d, { agent: true }),
+      forSupervisorSelect: filterConsignmentAgents(agentsSrc, expeditorsSrc, d, { supervisor: true }),
+      forBranchSelect: filterConsignmentAgents(agentsSrc, expeditorsSrc, d, { branch: true }),
+      forTradeDirectionSelect: filterConsignmentAgents(agentsSrc, expeditorsSrc, d, { tradeDirection: true }),
+      forExpeditorSelect: filterConsignmentAgents(agentsSrc, expeditorsSrc, d, { expeditor: true })
+    };
+  }, [agentsSrc, expeditorsSrc, draft]);
+
+  const filteredAgents = consignmentCascade.forAgentSelect;
+
+  const filteredSupervisors = useMemo(() => {
+    const supIds = new Set(
+      consignmentCascade.forSupervisorSelect
+        .map((a) => a.supervisor_user_id)
+        .filter((x): x is number => x != null && Number.isFinite(Number(x)))
+    );
+    const all = supervisorsQ.data ?? [];
+    const bid = draft.branch_ids;
+    const branchFiltered =
+      bid.size === 0 ? all : all.filter((s) => s.branch && bid.has(s.branch));
+    if (supIds.size === 0) return branchFiltered;
+    return branchFiltered.filter((s) => supIds.has(s.id));
+  }, [supervisorsQ.data, draft.branch_ids, consignmentCascade.forSupervisorSelect]);
+
+  const branchAllowed = useMemo(() => {
+    const fromAgents = new Set<string>();
+    for (const a of consignmentCascade.forBranchSelect) {
+      const b = normTrim(a.branch);
+      if (b) fromAgents.add(b);
     }
-    for (const x of fromProfile) {
-      const t = x.trim();
-      if (t) s.add(t);
+    const territoryBranches = to?.branches ?? [];
+    let set: Set<string>;
+    if (territoryBranches.length === 0) {
+      set = fromAgents;
+    } else {
+      const allowedTerr = new Set(territoryBranches.map(normTrim));
+      const list = Array.from(fromAgents).filter((b) => allowedTerr.has(b));
+      set =
+        list.length > 0 ? new Set(list) : new Set(territoryBranches.map(normTrim).filter(Boolean));
     }
-    return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [filterOptQ.data?.trade_directions, profileQ.data?.trade_directions]);
+    const key = JSON.stringify(Array.from(set).sort((a, b) => a.localeCompare(b, "ru")));
+    return { set, key };
+  }, [consignmentCascade.forBranchSelect, to?.branches]);
+
+  useEffect(() => {
+    const allowed = branchAllowed.set;
+    setDraft((d) => {
+      const next = new Set<string>();
+      for (const b of Array.from(d.branch_ids)) {
+        const k = normTrim(b);
+        if (allowed.has(k)) next.add(k);
+      }
+      const prevList = Array.from(d.branch_ids);
+      if (next.size === d.branch_ids.size && prevList.every((x) => next.has(normTrim(x)))) {
+        return d;
+      }
+      return { ...d, branch_ids: next };
+    });
+  }, [branchAllowed.key]);
 
   const branchItems = useMemo(() => {
-    const rows = (to?.branches ?? []).map((b) => ({ id: b, title: b }));
+    const rows = Array.from(branchAllowed.set)
+      .sort((a, b) => a.localeCompare(b, "ru"))
+      .map((b) => ({ id: b, title: b }));
     const q = branchSearch.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) => r.title.toLowerCase().includes(q));
-  }, [to?.branches, branchSearch]);
+  }, [branchAllowed.key, branchSearch]);
+
+  const tradeDirectionSelectValues = useMemo(() => {
+    const fromCascade = new Set<string>();
+    for (const a of consignmentCascade.forTradeDirectionSelect) {
+      const t = normTrim(a.trade_direction);
+      if (t) fromCascade.add(t);
+    }
+    const dirs = Array.from(fromCascade).sort((a, b) => a.localeCompare(b, "ru"));
+    if (dirs.length > 0) return dirs;
+    const s = new Set<string>();
+    for (const x of filterOptQ.data?.trade_directions ?? []) {
+      const t = normTrim(x);
+      if (t) s.add(t);
+    }
+    for (const x of profileQ.data?.trade_directions ?? []) {
+      const t = normTrim(x);
+      if (t) s.add(t);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [
+    consignmentCascade.forTradeDirectionSelect,
+    filterOptQ.data?.trade_directions,
+    profileQ.data?.trade_directions
+  ]);
+
+  const filteredExpeditors = useMemo(() => {
+    const bid = draft.branch_ids;
+    return (expeditorsQ.data ?? []).filter((e) => {
+      if (!consignmentCascade.forExpeditorSelect.some((a) => agentMatchesExpeditor(a, e))) return false;
+      return expeditorMatchesConsignmentBranches(e, bid);
+    });
+  }, [expeditorsQ.data, consignmentCascade.forExpeditorSelect, draft.branch_ids]);
+
+  useEffect(() => {
+    if (!draft.supervisor_user_id) return;
+    const valid = filteredSupervisors.some((s) => String(s.id) === draft.supervisor_user_id);
+    if (!valid) setDraft((d) => ({ ...d, supervisor_user_id: "" }));
+  }, [filteredSupervisors, draft.supervisor_user_id]);
+
+  useEffect(() => {
+    if (!draft.agent_id) return;
+    const valid = filteredAgents.some((a) => String(a.id) === draft.agent_id);
+    if (!valid) setDraft((d) => ({ ...d, agent_id: "" }));
+  }, [filteredAgents, draft.agent_id]);
+
+  useEffect(() => {
+    const t = normTrim(draft.trade_direction);
+    if (!t) return;
+    if (!tradeDirectionSelectValues.includes(t)) setDraft((d) => ({ ...d, trade_direction: "" }));
+  }, [tradeDirectionSelectValues, draft.trade_direction]);
+
+  useEffect(() => {
+    if (!draft.expeditor_user_id) return;
+    const valid = filteredExpeditors.some((e) => String(e.id) === draft.expeditor_user_id);
+    if (!valid) setDraft((d) => ({ ...d, expeditor_user_id: "" }));
+  }, [filteredExpeditors, draft.expeditor_user_id]);
+
+  useEffect(() => {
+    console.info("[consignment-balances filters] cascade", {
+      territoryScope: consignmentTerritoryScope || null,
+      branches: draft.branch_ids.size,
+      supervisor: draft.supervisor_user_id || null,
+      agent: draft.agent_id || null,
+      expeditor: draft.expeditor_user_id || null,
+      tradeDirection: draft.trade_direction || null,
+      filteredAgents: filteredAgents.length,
+      filteredSupervisors: filteredSupervisors.length,
+      filteredExpeditors: filteredExpeditors.length,
+      territoryZones: territoryCascade.zones.length,
+      territoryRegions: territoryCascade.regions.length,
+      territoryCities: territoryCascade.cities.length
+    });
+  }, [
+    consignmentTerritoryScope,
+    draft.branch_ids,
+    draft.supervisor_user_id,
+    draft.agent_id,
+    draft.expeditor_user_id,
+    draft.trade_direction,
+    filteredAgents.length,
+    filteredSupervisors.length,
+    filteredExpeditors.length,
+    territoryCascade.zones.length,
+    territoryCascade.regions.length,
+    territoryCascade.cities.length
+  ]);
 
   const runExcelExport = useCallback(async () => {
     if (!tenantSlug) return;
@@ -487,6 +810,34 @@ export function ConsignmentBalancesWorkspace() {
   const summary = listQ.data?.summary;
   const paymentColumnLabels = (summary?.payment_by_type ?? []).map((x) => x.label);
 
+  useEffect(() => {
+    if (!listQ.data) return;
+    let pageBalance = 0;
+    const pagePayment: Record<string, number> = {};
+    let nonZeroRows = 0;
+    for (const row of listQ.data.data) {
+      const rowBalance = parseAmount(row.balance);
+      pageBalance += rowBalance;
+      let rowNonZero = rowBalance !== 0;
+      for (const p of row.payment_amounts ?? []) {
+        const n = parseAmount(p.amount);
+        pagePayment[p.label] = (pagePayment[p.label] ?? 0) + n;
+        if (n !== 0) rowNonZero = true;
+      }
+      if (rowNonZero) nonZeroRows += 1;
+    }
+    console.info("[consignment-balances table debug]", {
+      page: listQ.data.page,
+      limit: listQ.data.limit,
+      total: listQ.data.total,
+      summaryBalance: listQ.data.summary.total_debt,
+      summaryPaymentByType: listQ.data.summary.payment_by_type,
+      pageBalance,
+      pagePayment,
+      pageNonZeroRows: nonZeroRows
+    });
+  }, [listQ.data]);
+
   return (
     <PageShell>
       <PageHeader
@@ -496,11 +847,11 @@ export function ConsignmentBalancesWorkspace() {
 
       <div className="space-y-4 pb-12">
         <Card className="border border-border bg-card shadow-sm">
-          <CardContent className="space-y-4 p-3 sm:p-4 sm:pt-3.5">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:gap-8">
+          <CardContent className="space-y-3 p-3 sm:p-4 sm:pt-3.5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:gap-8">
               <div className="min-w-0 flex-1">
-                <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr))]">
-                  <div className="space-y-1.5 sm:min-w-0">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+                  <div className="space-y-1 sm:min-w-0 sm:col-span-2 xl:col-span-2">
                     <SearchableMultiSelectPanel<string>
                       label="Филиалы"
                       className="w-full"
@@ -522,50 +873,76 @@ export function ConsignmentBalancesWorkspace() {
                       minPopoverWidth={260}
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Агент</Label>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Супервайзер</Label>
                     <FilterSelect
                       emptyLabel="Все"
-                      className={filterPanelSelectClassName}
+                      className={compactFilterSelectClass}
+                      value={draft.supervisor_user_id}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          supervisor_user_id: e.target.value
+                        }))
+                      }
+                    >
+                      {filteredSupervisors.map((u) => (
+                        <option key={u.id} value={String(u.id)}>
+                          {u.fio}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Агент</Label>
+                    <FilterSelect
+                      emptyLabel="Все"
+                      className={compactFilterSelectClass}
                       value={draft.agent_id}
                       onChange={(e) => setDraft((d) => ({ ...d, agent_id: e.target.value }))}
                     >
-                      {(agentsQ.data ?? []).map((a) => (
+                      {filteredAgents.map((a) => (
                         <option key={a.id} value={String(a.id)}>
                           {a.fio}
                         </option>
                       ))}
                     </FilterSelect>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Экспедитор</Label>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Экспедитор</Label>
                     <FilterSelect
                       emptyLabel="Все"
-                      className={filterPanelSelectClassName}
+                      className={compactFilterSelectClass}
                       value={draft.expeditor_user_id}
                       onChange={(e) => setDraft((d) => ({ ...d, expeditor_user_id: e.target.value }))}
                     >
-                      {(expeditorsQ.data ?? []).map((a) => (
+                      {filteredExpeditors.map((a) => (
                         <option key={a.id} value={String(a.id)}>
                           {a.fio}
                         </option>
                       ))}
                     </FilterSelect>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Категория</Label>
-                    <Input
-                      className="h-9 bg-background text-sm"
-                      placeholder="Текст"
-                      value={draft.category}
-                      onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Статус</Label>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Категория</Label>
                     <FilterSelect
                       emptyLabel="Все"
-                      className={filterPanelSelectClassName}
+                      className={compactFilterSelectClass}
+                      value={draft.category}
+                      onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
+                    >
+                      {categoryFilterOpts.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Статус</Label>
+                    <FilterSelect
+                      emptyLabel="Все"
+                      className={compactFilterSelectClass}
                       value={draft.status}
                       onChange={(e) =>
                         setDraft((d) => ({ ...d, status: e.target.value as FilterForm["status"] }))
@@ -575,11 +952,11 @@ export function ConsignmentBalancesWorkspace() {
                       <option value="inactive">Неактивные</option>
                     </FilterSelect>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className={filterFieldLabelClass}>Направление торговли</Label>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Направление торговли</Label>
                     <FilterSelect
                       emptyLabel="Все"
-                      className={filterPanelSelectClassName}
+                      className={compactFilterSelectClass}
                       value={draft.trade_direction}
                       onChange={(e) => setDraft((d) => ({ ...d, trade_direction: e.target.value }))}
                     >
@@ -590,34 +967,64 @@ export function ConsignmentBalancesWorkspace() {
                       ))}
                     </FilterSelect>
                   </div>
-                  {territoryFilterSpecs.map((spec) => {
-                    const opts = buildPaymentTerritorySelectOptions(
-                      spec.field,
-                      clientRefsQ.data,
-                      to,
-                      profileQ.data?.territory_nodes,
-                      readTerritoryFormField(draft, spec.field)
-                    );
-                    return (
-                      <div key={`${spec.field}-${spec.visIndex}`} className="space-y-1.5">
-                        <Label className={filterFieldLabelClass}>{spec.label}</Label>
-                        <FilterSelect
-                          emptyLabel="Все"
-                          className={filterPanelSelectClassName}
-                          value={readTerritoryFormField(draft, spec.field)}
-                          onChange={(e) =>
-                            setDraft((d) => patchTerritoryFormField(d, spec.field, e.target.value))
-                          }
-                        >
-                          {opts.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </FilterSelect>
-                      </div>
-                    );
-                  })}
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Зона</Label>
+                    <FilterSelect
+                      emptyLabel="Все"
+                      className={compactFilterSelectClass}
+                      value={draft.territory_zone}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          territory_zone: e.target.value,
+                          territory_region: "",
+                          territory_city: ""
+                        }))
+                      }
+                    >
+                      {territoryCascade.zones.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Область</Label>
+                    <FilterSelect
+                      emptyLabel="Все"
+                      className={compactFilterSelectClass}
+                      value={draft.territory_region}
+                      onChange={(e) =>
+                        setDraft((d) => ({
+                          ...d,
+                          territory_region: e.target.value,
+                          territory_city: ""
+                        }))
+                      }
+                    >
+                      {territoryCascade.regions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className={filterFieldLabelCompactClass}>Город</Label>
+                    <FilterSelect
+                      emptyLabel="Все"
+                      className={compactFilterSelectClass}
+                      value={draft.territory_city}
+                      onChange={(e) => setDraft((d) => ({ ...d, territory_city: e.target.value }))}
+                    >
+                      {territoryCascade.cities.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  </div>
                 </div>
               </div>
 
@@ -627,14 +1034,8 @@ export function ConsignmentBalancesWorkspace() {
                   <p className="text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     Применить период к
                   </p>
-                  <div className="grid grid-cols-3 gap-1 sm:gap-2">
-                    <div className="flex flex-col items-center gap-1.5 text-center">
-                      <span
-                        className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
-                        title="Фильтр по дате заказа"
-                      >
-                        Дата заказа
-                      </span>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:justify-between">
+                    <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
                       <input
                         type="checkbox"
                         className="h-4 w-4 shrink-0 rounded border-border accent-primary"
@@ -644,14 +1045,9 @@ export function ConsignmentBalancesWorkspace() {
                         }
                         aria-label="Дата заказа"
                       />
-                    </div>
-                    <div className="flex flex-col items-center gap-1.5 text-center">
-                      <span
-                        className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
-                        title="Срок от (лицензия)"
-                      >
-                        Срок от
-                      </span>
+                      <span title="Фильтр по дате заказа">Дата заказа</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
                       <input
                         type="checkbox"
                         className="h-4 w-4 shrink-0 rounded border-border accent-primary"
@@ -661,14 +1057,9 @@ export function ConsignmentBalancesWorkspace() {
                         }
                         aria-label="Срок от (лицензия)"
                       />
-                    </div>
-                    <div className="flex flex-col items-center gap-1.5 text-center">
-                      <span
-                        className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground"
-                        title="Срок до (лицензия)"
-                      >
-                        Срок до
-                      </span>
+                      <span title="Срок от (лицензия)">Срок от</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
                       <input
                         type="checkbox"
                         className="h-4 w-4 shrink-0 rounded border-border accent-primary"
@@ -678,7 +1069,8 @@ export function ConsignmentBalancesWorkspace() {
                         }
                         aria-label="Срок до (лицензия)"
                       />
-                    </div>
+                      <span title="Срок до (лицензия)">Срок до</span>
+                    </label>
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -719,7 +1111,7 @@ export function ConsignmentBalancesWorkspace() {
                 <button
                   type="button"
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 gap-1.5")}
-                  onClick={resetDraftToApplied}
+                  onClick={resetFiltersFull}
                 >
                   <Filter className="h-4 w-4" />
                   Сброс
@@ -881,53 +1273,65 @@ export function ConsignmentBalancesWorkspace() {
                       </td>
                     </tr>
                   ) : (
-                    rows.map((r) => (
-                      <tr key={r.client_id} className="border-b border-border/60 hover:bg-muted/25">
-                        <td className="sticky left-0 z-[1] bg-card px-2 py-2 text-xs tabular-nums shadow-[1px_0_0_0_hsl(var(--border))]">
-                          <Link
-                            href={`/clients/${r.client_id}/balances`}
-                            className="font-medium text-primary underline-offset-2 hover:underline"
-                          >
-                            {clientDisplayId(r)}
-                          </Link>
-                        </td>
-                        <td className="max-w-[10rem] truncate px-2 py-2" title={r.client_name}>
-                          {r.client_name}
-                        </td>
-                        <td className="max-w-[8rem] truncate px-2 py-2">{r.agent_name ?? "—"}</td>
-                        <td className="px-2 py-2 text-xs">{r.agent_code ?? "—"}</td>
-                        <td className="max-w-[8rem] truncate px-2 py-2">{r.supervisor_name ?? "—"}</td>
-                        <td className="max-w-[10rem] truncate px-2 py-2" title={r.company_name ?? ""}>
-                          {r.company_name ?? "—"}
-                        </td>
-                        <td className="max-w-[8rem] truncate px-2 py-2">{r.trade_direction ?? "—"}</td>
-                        <td className="px-2 py-2 text-xs tabular-nums">{r.inn ?? "—"}</td>
-                        <td className="px-2 py-2 text-xs tabular-nums">{r.phone ?? "—"}</td>
-                        <td
-                          className={cn(
-                            "px-2 py-2 text-xs tabular-nums",
-                            r.overdue_days != null && r.overdue_days > 0 && "font-medium text-destructive"
-                          )}
-                        >
-                          {formatDateOnly(r.due_date)}
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">{r.overdue_days ?? "—"}</td>
-                        <td className="px-2 py-2">
-                          <MoneyCell value={r.total_debt} />
-                        </td>
-                        <td className="px-2 py-2">
-                          <MoneyCell value={r.total_paid} />
-                        </td>
-                        <td className="px-2 py-2">
-                          <MoneyCell value={r.balance} />
-                        </td>
-                        {paymentColumnLabels.map((lab) => (
-                          <td key={lab} className="px-2 py-2">
-                            <MoneyCell value={amountForPaymentLabel(r.payment_amounts, lab)} />
+                    <>
+                      {rows.map((r) => (
+                        <tr key={r.client_id} className="border-b border-border/60 hover:bg-muted/25">
+                          <td className="sticky left-0 z-[1] bg-card px-2 py-2 text-xs tabular-nums shadow-[1px_0_0_0_hsl(var(--border))]">
+                            <Link
+                              href={`/clients/${r.client_id}/balances`}
+                              className="font-medium text-primary underline-offset-2 hover:underline"
+                            >
+                              {clientDisplayId(r)}
+                            </Link>
                           </td>
-                        ))}
-                      </tr>
-                    ))
+                          <td className="max-w-[10rem] truncate px-2 py-2" title={r.client_name}>
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>{r.client_name}</span>
+                              {applied.status === "" && r.is_active === false && parseAmount(r.balance) !== 0 ? (
+                                <span
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-300"
+                                  title="Неактивный клиент с ненулевым балансом"
+                                >
+                                  <AlertCircle className="h-3 w-3" />
+                                </span>
+                              ) : null}
+                            </span>
+                          </td>
+                          <td className="max-w-[8rem] truncate px-2 py-2">{r.agent_name ?? "—"}</td>
+                          <td className="px-2 py-2 text-xs">{r.agent_code ?? "—"}</td>
+                          <td className="max-w-[8rem] truncate px-2 py-2">{r.supervisor_name ?? "—"}</td>
+                          <td className="max-w-[10rem] truncate px-2 py-2" title={r.company_name ?? ""}>
+                            {r.company_name ?? "—"}
+                          </td>
+                          <td className="max-w-[8rem] truncate px-2 py-2">{r.trade_direction ?? "—"}</td>
+                          <td className="px-2 py-2 text-xs tabular-nums">{r.inn ?? "—"}</td>
+                          <td className="px-2 py-2 text-xs tabular-nums">{r.phone ?? "—"}</td>
+                          <td
+                            className={cn(
+                              "px-2 py-2 text-xs tabular-nums",
+                              r.overdue_days != null && r.overdue_days > 0 && "font-medium text-destructive"
+                            )}
+                          >
+                            {formatDateOnly(r.due_date)}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">{r.overdue_days ?? "—"}</td>
+                          <td className="px-2 py-2">
+                            <MoneyCell value={r.total_debt} />
+                          </td>
+                          <td className="px-2 py-2">
+                            <MoneyCell value={r.total_paid} />
+                          </td>
+                          <td className="px-2 py-2">
+                            <MoneyCell value={r.balance} />
+                          </td>
+                          {paymentColumnLabels.map((lab, idx) => (
+                            <td key={lab} className="px-2 py-2">
+                              <MoneyCell value={amountForPaymentLabel(r.payment_amounts, lab, idx)} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </>
                   )}
                 </tbody>
               </table>

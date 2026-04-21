@@ -24,6 +24,7 @@
     "import:active-agents-xlsx": "tsx scripts/import-active-agents-xlsx.ts",
     "import:supervisors-xlsx": "tsx scripts/import-supervisors-xlsx.ts",
     "import:expeditors-xlsx": "tsx scripts/import-expeditors-xlsx.ts",
+    "import:staff:triple": "tsx scripts/import-staff-triple-xlsx.ts",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "audit:retention": "tsx scripts/audit-retention.ts",
@@ -34,13 +35,16 @@
     "provision:admin": "tsx scripts/provision-tenant-admin.ts",
     "import:once": "tsx scripts/import-once.ts",
     "sync:staff-xlsx": "node scripts/sync-staff-xlsx-from-downloads.cjs",
+    "analyze:staff-xlsx": "tsx scripts/analyze-user-staff-xlsx.ts",
+    "validate:staff-xlsx": "tsx scripts/analyze-user-staff-xlsx.ts",
     "import:cities-xlsx": "tsx scripts/import-cities-xlsx.ts",
     "import:territory-excel": "tsx scripts/import-territory-excel.ts",
     "import:excel-bundle": "tsx scripts/import-excel-bundle.ts",
     "import:tenant-data": "npm run import:once && npm run import:excel-bundle",
     "territory:sync-codes": "tsx scripts/sync-territory-codes.ts",
     "seed:agent-gps-once": "tsx scripts/seed-agent-gps-pings-once.ts",
-    "reset:clients-once": "tsx scripts/reset-clients-once.ts"
+    "reset:clients-once": "tsx scripts/reset-clients-once.ts",
+    "seed:orders-full-test-once": "tsx scripts/seed-orders-full-test-once.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

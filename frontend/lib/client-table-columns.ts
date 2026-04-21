@@ -9,15 +9,6 @@ export type ClientColumnDef = {
   label: string;
 };
 
-const agentCols: ClientColumnDef[] = [];
-for (let i = 1; i <= 10; i++) {
-  agentCols.push(
-    { id: `agent_${i}`, label: i === 1 ? "Агент" : `Агент ${i}` },
-    { id: `agent_${i}_day`, label: i === 1 ? "День" : `День ${i}` },
-    { id: `expeditor_${i}`, label: i === 1 ? "Экспедитор" : `Эксп. ${i}` }
-  );
-}
-
 /** Klientlar jadvali — siz bergan ustunlar tartibi */
 export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "name", label: "Наименование" },
@@ -25,6 +16,7 @@ export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "legal_name", label: "Юридическое название" },
   { id: "address", label: "Адрес" },
   { id: "phone", label: "Телефон" },
+  { id: "agent_assignments_badge", label: "Агент" },
   { id: "contact_person", label: "Контактное лицо" },
   { id: "landmark", label: "Ориентир" },
   { id: "inn", label: "ИНН" },
@@ -32,14 +24,13 @@ export const CLIENT_TABLE_COLUMNS: ClientColumnDef[] = [
   { id: "trade_channel_code", label: "Торговый канал" },
   { id: "client_category_code", label: "Категория клиента" },
   { id: "client_type_code", label: "Тип клиента" },
-  { id: "format_code", label: "Формат" },
-  { id: "client_region", label: "Территория (область)" },
+  { id: "format_code", label: "Формат клиента" },
+  { id: "client_region", label: "Область" },
   { id: "client_district", label: "Район" },
   { id: "client_zone", label: "Зона" },
   { id: "city_code", label: "Город" },
   { id: "latitude", label: "Широта" },
   { id: "longitude", label: "Долгота" },
-  ...agentCols,
   { id: "_actions", label: "Действия" }
 ];
 
@@ -63,16 +54,15 @@ export function getDefaultColumnVisibility(): Record<string, boolean> {
       "legal_name",
       "address",
       "phone",
+      "agent_assignments_badge",
       "client_category_code",
+      "client_type_code",
       "format_code",
       "client_region",
       "client_zone",
       "city_code",
       "landmark",
       "inn",
-      "agent_1",
-      "agent_1_day",
-      "expeditor_1",
       "_actions"
     ].includes(c.id);
   }

@@ -24,6 +24,7 @@ import { STALE } from "@/lib/query-stale";
 import { Box, Coins, Package, Search } from "lucide-react";
 
 type CategoryRow = { id: number; name: string; parent_id: number | null; is_active: boolean };
+type AgentPick = { id: number; fio: string; login: string; is_active: boolean };
 
 type ProductRow = {
   id: number;
@@ -74,6 +75,7 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
   const qc = useQueryClient();
 
   const [warehouseId, setWarehouseId] = useState("");
+  const [agentFilterId, setAgentFilterId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [comment, setComment] = useState("");
   const [priceType, setPriceType] = useState("");
@@ -99,16 +101,33 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
   const flatCats = categoriesQ.data ?? [];
 
   const warehousesQ = useQuery({
-    queryKey: ["warehouses", tenantSlug],
+    queryKey: ["warehouses", tenantSlug, "receipt-new", agentFilterId],
     queryFn: async () => {
+      const params = new URLSearchParams();
+      if (agentFilterId.trim()) params.set("selected_agent_id", agentFilterId.trim());
+      const qs = params.toString();
       const { data } = await api.get<{ data: { id: number; name: string }[] }>(
-        `/api/${tenantSlug}/warehouses`
+        `/api/${tenantSlug}/warehouses${qs ? `?${qs}` : ""}`
       );
       return data.data;
     },
     enabled: Boolean(tenantSlug),
     staleTime: STALE.reference
   });
+  const agentsQ = useQuery({
+    queryKey: ["agents", tenantSlug, "receipt-new"],
+    queryFn: async () => {
+      const { data } = await api.get<{ data: AgentPick[] }>(`/api/${tenantSlug}/agents?is_active=true`);
+      return (data.data ?? []).filter((a) => a.is_active);
+    },
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference
+  });
+  useEffect(() => {
+    if (!warehouseId.trim()) return;
+    const ok = (warehousesQ.data ?? []).some((w) => String(w.id) === warehouseId.trim());
+    if (!ok) setWarehouseId("");
+  }, [warehouseId, warehousesQ.data]);
 
   const suppliersQ = useQuery({
     queryKey: ["suppliers", tenantSlug],
@@ -408,6 +427,21 @@ export function GoodsReceiptNewWorkspace({ tenantSlug }: Props) {
                   {(suppliersQ.data ?? []).map((s) => (
                     <option key={s.id} value={String(s.id)}>
                       {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Агент (фильтр склада)</Label>
+                <select
+                  className={selectClass}
+                  value={agentFilterId}
+                  onChange={(e) => setAgentFilterId(e.target.value)}
+                >
+                  <option value="">— все —</option>
+                  {(agentsQ.data ?? []).map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.fio} ({a.login})
                     </option>
                   ))}
                 </select>

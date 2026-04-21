@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getErrorCode } from "../../lib/app-error";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { parseSelectedMastersFromQuery, resolveConstraintScope } from "../linkage/linkage.service";
+import { getExchangeSourceAvailability } from "./exchange-source-limits.service";
 import { getOrderCreateContextBundle } from "./order-create-context.service";
 import {
   bulkUpdateOrderExpeditor,
@@ -47,11 +49,61 @@ const createBodySchema = z
         qty: z.number().positive()
       })
     )
-    .min(1),
-  payment_method_ref: z.string().trim().max(64).optional().nullable()
+    .default([]),
+  payment_method_ref: z.string().trim().max(64).optional().nullable(),
+  source_order_ids: z.array(z.number().int().positive()).optional(),
+  minus_lines: z
+    .array(
+      z.object({
+        order_id: z.number().int().positive(),
+        product_id: z.number().int().positive(),
+        qty: z.number().positive()
+      })
+    )
+    .optional(),
+  plus_lines: z
+    .array(
+      z.object({
+        product_id: z.number().int().positive(),
+        qty: z.number().positive()
+      })
+    )
+    .optional(),
+  reason_ref: z.string().trim().max(256).optional().nullable()
 })
   .superRefine((data, ctx) => {
     const ot = data.order_type ?? "order";
+    if (ot === "exchange") {
+      if (!data.source_order_ids?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Manba zakazlar (source_order_ids) majburiy",
+          path: ["source_order_ids"]
+        });
+      }
+      if (!data.minus_lines?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Kamayuvchi qatorlar (minus_lines) majburiy",
+          path: ["minus_lines"]
+        });
+      }
+      if (!data.plus_lines?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Qo‘shiluvchi qatorlar (plus_lines) majburiy",
+          path: ["plus_lines"]
+        });
+      }
+      return;
+    }
+    if (!data.items.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Kamida bitta qator kerak",
+        path: ["items"]
+      });
+    }
     if (ot !== "order") return;
     if (data.agent_id == null || data.agent_id < 1) {
       ctx.addIssue({
@@ -146,6 +198,7 @@ export async function registerOrderRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
+      const selected = parseSelectedMastersFromQuery(q);
       const pageNum = Math.max(1, Number.parseInt(q.page ?? "1", 10) || 1);
       const limitNum = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
       const status = q.status?.trim() || undefined;
@@ -195,11 +248,13 @@ export async function registerOrderRoutes(app: FastifyInstance) {
           status,
           client_id,
           search,
-          warehouse_id,
-          agent_id: agent_ids?.length ? undefined : agent_id,
+          warehouse_id: warehouse_id ?? (selected.selected_warehouse_id ?? undefined),
+          agent_id: agent_ids?.length
+            ? undefined
+            : agent_id ?? (selected.selected_agent_id ?? undefined),
           agent_ids,
           include_no_agent: include_no_agent || undefined,
-          expeditor_user_id,
+          expeditor_user_id: expeditor_user_id ?? (selected.selected_expeditor_user_id ?? undefined),
           client_category,
           product_id,
           date_from,
@@ -222,8 +277,55 @@ export async function registerOrderRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const bundle = await getOrderCreateContextBundle(request.tenant!.id);
+      const q = request.query as Record<string, string | undefined>;
+      const selected = parseSelectedMastersFromQuery(q);
+      const bundle = await getOrderCreateContextBundle(request.tenant!.id, selected);
       return reply.send(bundle);
+    }
+  );
+
+  /** Obmen manbalari: polki qoldiq − avvalgi obmen minuslari (har `order_id`+`product_id`). */
+  app.get(
+    "/api/:slug/orders/exchange-source-availability",
+    { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const q = request.query as Record<string, string | undefined>;
+      const clientId = Number.parseInt(q.client_id ?? "0", 10);
+      if (!Number.isFinite(clientId) || clientId < 1) {
+        return reply.status(400).send({ error: "ClientIdRequired" });
+      }
+      const selected = parseSelectedMastersFromQuery(q);
+      const scope = await resolveConstraintScope(request.tenant!.id, selected);
+      if (scope.constrained && !scope.client_ids.includes(clientId)) {
+        return reply.status(400).send({ error: "BadClientScope" });
+      }
+      const raw = q.order_ids?.trim();
+      if (!raw) {
+        return reply.status(400).send({ error: "OrderIdsRequired" });
+      }
+      const parsed = raw
+        .split(/[, ]+/)
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      const uniq = [...new Set(parsed)];
+      if (uniq.length < 1) {
+        return reply.status(400).send({ error: "OrderIdsRequired" });
+      }
+      try {
+        const data = await getExchangeSourceAvailability(request.tenant!.id, clientId, uniq);
+        return reply.send({ data });
+      } catch (e) {
+        const code = e instanceof Error ? e.message : "";
+        if (code === "BAD_CLIENT") return reply.status(400).send({ error: "BadClient" });
+        if (code === "BAD_ORDER" || code === "ORDER_NOT_DELIVERED") {
+          return reply.status(400).send({
+            error: "BadOrder",
+            message: "Barcha manba zakazlar yetkazilgan (delivered) bo‘lishi kerak."
+          });
+        }
+        throw e;
+      }
     }
   );
 
@@ -615,6 +717,71 @@ export async function registerOrderRoutes(app: FastifyInstance) {
         }
         if (msg === "BAD_BONUS_GIFT_OVERRIDE") {
           return reply.status(400).send({ error: "BadBonusGiftOverride" });
+        }
+        if (msg === "EXCHANGE_PAYLOAD_REQUIRED") {
+          return reply.status(400).send({ error: "ExchangePayloadRequired" });
+        }
+        if (msg === "EXCHANGE_REQUIRES_AGENT") {
+          return reply.status(400).send({ error: "ExchangeRequiresAgent" });
+        }
+        if (msg === "EXCHANGE_SOURCE_ORDERS_REQUIRED") {
+          return reply.status(400).send({ error: "ExchangeSourceOrdersRequired" });
+        }
+        if (msg === "EXCHANGE_LINES_REQUIRED") {
+          return reply.status(400).send({ error: "ExchangeLinesRequired" });
+        }
+        if (msg === "EXCHANGE_DUPLICATE_MINUS_LINE") {
+          return reply.status(400).send({ error: "ExchangeDuplicateMinusLine" });
+        }
+        if (msg === "EXCHANGE_DUPLICATE_PLUS_LINE") {
+          return reply.status(400).send({ error: "ExchangeDuplicatePlusLine" });
+        }
+        if (msg === "EXCHANGE_MINUS_ORDER_NOT_IN_SOURCE") {
+          return reply.status(400).send({ error: "ExchangeMinusOrderNotInSource" });
+        }
+        if (msg === "EXCHANGE_MINUS_OVER_LIMIT") {
+          const ex = e as Error & { order_id?: number; product_id?: number; max_qty?: string };
+          return reply.status(400).send({
+            error: "ExchangeMinusOverLimit",
+            order_id: ex.order_id,
+            product_id: ex.product_id,
+            max_qty: ex.max_qty
+          });
+        }
+        if (msg === "EXCHANGE_NO_INTERCHANGEABLE_GROUP") {
+          return reply.status(400).send({ error: "ExchangeNoInterchangeableGroup" });
+        }
+        if (msg === "EXCHANGE_INTERCHANGEABLE_INCOMPLETE") {
+          return reply.status(400).send({ error: "ExchangeInterchangeableIncomplete" });
+        }
+        if (msg === "EXCHANGE_PRICE_TYPE_NOT_IN_GROUP") {
+          return reply.status(400).send({ error: "ExchangePriceTypeNotInGroup" });
+        }
+        if (msg === "EXCHANGE_MINUS_NOT_IN_GROUP") {
+          return reply.status(400).send({ error: "ExchangeMinusNotInGroup" });
+        }
+        if (msg === "EXCHANGE_PLUS_NOT_INTERCHANGEABLE") {
+          const ex = e as Error & { product_id?: number };
+          return reply.status(400).send({
+            error: "ExchangePlusNotInterchangeable",
+            product_id: ex.product_id
+          });
+        }
+        if (msg === "EXCHANGE_BAD_SOURCE_LINE") {
+          return reply.status(400).send({ error: "ExchangeBadSourceLine" });
+        }
+        if (msg === "LINKAGE_CLIENT_FORBIDDEN") {
+          return reply.status(403).send({ error: "LinkageClientForbidden" });
+        }
+        if (msg === "LINKAGE_WAREHOUSE_FORBIDDEN") {
+          return reply.status(403).send({ error: "LinkageWarehouseForbidden" });
+        }
+        if (msg === "LINKAGE_PRODUCT_FORBIDDEN") {
+          const ex = e as Error & { product_id?: number };
+          return reply.status(403).send({
+            error: "LinkageProductForbidden",
+            product_id: ex.product_id
+          });
         }
         throw e;
       }

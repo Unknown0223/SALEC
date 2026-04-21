@@ -238,6 +238,7 @@ export type PaymentListQuery = {
   page: number;
   limit: number;
   client_id?: number;
+  client_ids?: number[];
   order_id?: number;
   date_from?: string;
   date_to?: string;
@@ -246,6 +247,7 @@ export type PaymentListQuery = {
   amount_max?: number;
   agent_id?: number;
   expeditor_user_id?: number;
+  expeditor_user_ids?: number[];
   payment_type?: string;
   trade_direction?: string;
   territory_region?: string;
@@ -258,6 +260,7 @@ export type PaymentListQuery = {
   /** Filtr: `deleted` — faqat arxiv (deleted_at bor) */
   payment_status?: "pending_confirmation" | "confirmed" | "deleted";
   cash_desk_ids?: number[];
+  warehouse_ids?: number[];
   /** payment — faqat to‘lovlar; client_expense — «расходы клиента» */
   entry_kind?: "payment" | "client_expense";
   /** Sanani qaysi maydonga qo‘llash (filtr) */
@@ -386,6 +389,9 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
   }
 
   if (q.client_id != null && q.client_id > 0) andParts.push({ client_id: q.client_id });
+  if (q.client_ids != null && q.client_ids.length > 0) {
+    andParts.push({ client_id: { in: q.client_ids } });
+  }
   if (q.order_id != null && q.order_id > 0) andParts.push({ order_id: q.order_id });
 
   const ek = q.entry_kind;
@@ -428,6 +434,14 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
     const exId = q.expeditor_user_id;
     andParts.push({
       OR: [{ order: { expeditor_user_id: exId } }, { expeditor_user_id: exId }]
+    });
+  }
+  if (q.expeditor_user_ids != null && q.expeditor_user_ids.length > 0) {
+    andParts.push({
+      OR: [
+        { order: { expeditor_user_id: { in: q.expeditor_user_ids } } },
+        { expeditor_user_id: { in: q.expeditor_user_ids } }
+      ]
     });
   }
 
@@ -501,6 +515,9 @@ function buildPaymentListWhere(tenantId: number, q: PaymentListQuery): Prisma.Pa
 
   if (q.cash_desk_ids != null && q.cash_desk_ids.length > 0) {
     andParts.push({ cash_desk_id: { in: q.cash_desk_ids } });
+  }
+  if (q.warehouse_ids != null && q.warehouse_ids.length > 0) {
+    andParts.push({ order: { warehouse_id: { in: q.warehouse_ids } } });
   }
 
   return andParts.length === 1 ? andParts[0]! : { AND: andParts };

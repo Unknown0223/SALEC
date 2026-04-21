@@ -1,5 +1,6 @@
 import { getBackgroundQueue } from "../../jobs/background-queue";
 import { BACKGROUND_QUEUE_NAME } from "../../jobs/constants";
+import type { ClientImportProgress, ClientXlsxImportResult } from "../clients/clients.service";
 import { notifyOrderParticipantsStatusChange } from "../notifications/notifications.service";
 
 /** Worker: `order_status_notify` — zakaz statusi o‘zgaganda in-app bildirishnomalar. */
@@ -55,6 +56,9 @@ export type ClientImportEnqueueOpts = {
   sheetName?: string;
   headerRowIndex?: number;
   columnMap?: Record<string, number>;
+  importMode?: "create" | "update";
+  duplicateKeyFields?: string[];
+  updateApplyFields?: string[];
 };
 
 export async function enqueueClientsImportJob(
@@ -72,7 +76,10 @@ export async function enqueueClientsImportJob(
       file_path: filePath,
       sheetName: opts?.sheetName,
       headerRowIndex: opts?.headerRowIndex,
-      columnMap: opts?.columnMap
+      columnMap: opts?.columnMap,
+      importMode: opts?.importMode,
+      duplicateKeyFields: opts?.duplicateKeyFields,
+      updateApplyFields: opts?.updateApplyFields
     },
     { removeOnComplete: 1000, removeOnFail: 5000 }
   );
@@ -169,11 +176,76 @@ export type JobStatusPayload = {
   id: string;
   name: string;
   state: string;
-  progress: unknown;
+  progress: JobProgressPayload;
   returnvalue: unknown;
   failedReason: string | undefined;
   data: unknown;
 };
+
+export type JobProgressPayload =
+  | ClientImportProgress
+  | {
+      stage: string;
+      percent: number;
+      processedRows: number;
+      totalRows: number;
+      message?: string;
+    };
+
+function normalizeClientImportProgress(
+  state: string,
+  rawProgress: unknown,
+  returnvalue: unknown
+): JobProgressPayload {
+  if (rawProgress != null && typeof rawProgress === "object" && !Array.isArray(rawProgress)) {
+    const p = rawProgress as Record<string, unknown>;
+    const percent = Number(p.percent);
+    const processedRows = Number(p.processedRows);
+    const totalRows = Number(p.totalRows);
+    if (Number.isFinite(percent) && Number.isFinite(processedRows) && Number.isFinite(totalRows)) {
+      return {
+        stage: typeof p.stage === "string" ? p.stage : state,
+        percent: Math.max(0, Math.min(100, Math.round(percent))),
+        processedRows: Math.max(0, Math.floor(processedRows)),
+        totalRows: Math.max(0, Math.floor(totalRows)),
+        message: typeof p.message === "string" ? p.message : undefined
+      };
+    }
+  }
+
+  if (state === "completed") {
+    const rv = returnvalue as ClientXlsxImportResult | undefined;
+    const st = rv?.importStats;
+    if (st && st.totalRows > 0) {
+      return {
+        stage: "done",
+        percent: 100,
+        processedRows: Math.max(0, Math.floor(st.processedRows)),
+        totalRows: Math.max(0, Math.floor(st.totalRows)),
+        message:
+          `Готово: ${st.processedRows} / ${st.totalRows} строк; новых: ${rv?.created ?? 0}, обновлено: ${rv?.updated ?? 0}` +
+          (st.skippedDuplicate > 0 ? `; дубликатов: ${st.skippedDuplicate}` : "") +
+          (st.skippedEmpty > 0 ? `; пустых: ${st.skippedEmpty}` : "")
+      };
+    }
+    const fallbackTotal = Math.max(0, Number((rv?.created ?? 0) + (rv?.updated ?? 0)));
+    return {
+      stage: "done",
+      percent: 100,
+      processedRows: fallbackTotal,
+      totalRows: fallbackTotal > 0 ? fallbackTotal : 0
+    };
+  }
+  if (state === "failed") {
+    return { stage: "failed", percent: 100, processedRows: 0, totalRows: 0 };
+  }
+  return {
+    stage: state === "active" ? "writing" : "queued",
+    percent: state === "active" ? 15 : 0,
+    processedRows: 0,
+    totalRows: 0
+  };
+}
 
 export async function getBackgroundJobForTenant(
   jobId: string,
@@ -194,7 +266,15 @@ export async function getBackgroundJobForTenant(
     id: String(job.id),
     name: job.name,
     state,
-    progress: job.progress,
+    progress:
+      job.name === "import_clients_xlsx"
+        ? normalizeClientImportProgress(state, job.progress, job.returnvalue)
+        : {
+            stage: state,
+            percent: state === "completed" || state === "failed" ? 100 : 0,
+            processedRows: 0,
+            totalRows: 0
+          },
     returnvalue: job.returnvalue,
     failedReason: job.failedReason,
     data: sanitizeJobDataForResponse(job.name, job.data)

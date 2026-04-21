@@ -15,6 +15,10 @@ export type ClientBalanceListQuery = {
   view: ClientBalanceViewMode;
   page: number;
   limit: number;
+  /** Jadval sort ustuni (masalan `balance`, `pay:Naqd`) */
+  sort_by?: string;
+  /** Sort yo‘nalishi */
+  sort_dir?: "asc" | "desc";
   /** Excel / to‘liq eksport — limit yuqori chegarasi */
   allow_large_export?: boolean;
   search?: string;
@@ -62,6 +66,7 @@ export type ClientBalanceRow = {
   client_id: number;
   client_code: string | null;
   name: string;
+  is_active: boolean;
   legal_name: string | null;
   agent_id: number | null;
   agent_name: string | null;
@@ -205,7 +210,7 @@ export function buildOrderCreatedLocalDateClause(
 export function buildClientWhere(
   tenantId: number,
   q: ClientBalanceListQuery,
-  opts?: { skipBalanceFilter?: boolean }
+  opts?: { skipBalanceFilter?: boolean; skipTerritoryFilters?: boolean }
 ): Prisma.ClientWhereInput {
   const andParts: Prisma.ClientWhereInput[] = [
     { tenant_id: tenantId },
@@ -214,7 +219,15 @@ export function buildClientWhere(
 
   const st = q.status?.trim();
   if (st === "active") andParts.push({ is_active: true });
-  else if (st === "inactive") andParts.push({ is_active: false });
+  else if (st === "inactive") {
+    andParts.push({ is_active: false });
+    andParts.push({
+      OR: [
+        { client_balances: { some: { balance: { lt: 0 } } } },
+        { client_balances: { some: { balance: { gt: 0 } } } }
+      ]
+    });
+  }
 
   if (q.agent_id != null && q.agent_id > 0) {
     andParts.push({ agent_id: q.agent_id });
@@ -275,20 +288,22 @@ export function buildClientWhere(
     andParts.push({ license_until: { lte: cTo } });
   }
 
-  if (q.territory_region?.trim()) {
-    andParts.push({ region: { contains: q.territory_region.trim(), mode: "insensitive" } });
-  }
-  if (q.territory_city?.trim()) {
-    andParts.push({ city: { contains: q.territory_city.trim(), mode: "insensitive" } });
-  }
-  if (q.territory_district?.trim()) {
-    andParts.push({ district: { contains: q.territory_district.trim(), mode: "insensitive" } });
-  }
-  if (q.territory_zone?.trim()) {
-    andParts.push({ zone: { contains: q.territory_zone.trim(), mode: "insensitive" } });
-  }
-  if (q.territory_neighborhood?.trim()) {
-    andParts.push({ neighborhood: { contains: q.territory_neighborhood.trim(), mode: "insensitive" } });
+  if (!opts?.skipTerritoryFilters) {
+    if (q.territory_region?.trim()) {
+      andParts.push({ region: { contains: q.territory_region.trim(), mode: "insensitive" } });
+    }
+    if (q.territory_city?.trim()) {
+      andParts.push({ city: { contains: q.territory_city.trim(), mode: "insensitive" } });
+    }
+    if (q.territory_district?.trim()) {
+      andParts.push({ district: { contains: q.territory_district.trim(), mode: "insensitive" } });
+    }
+    if (q.territory_zone?.trim()) {
+      andParts.push({ zone: { contains: q.territory_zone.trim(), mode: "insensitive" } });
+    }
+    if (q.territory_neighborhood?.trim()) {
+      andParts.push({ neighborhood: { contains: q.territory_neighborhood.trim(), mode: "insensitive" } });
+    }
   }
 
   const pt = q.agent_payment_type?.trim();
@@ -322,6 +337,9 @@ export function buildClientWhere(
   return { AND: andParts };
 }
 
+/** Kassir / tizim tasdiqlamagan kirimlar qarzni yopgan hisoblanmaydi (`workflow_status`). */
+const PAYMENT_COUNTS_FOR_RECEIVABLE_NET = Prisma.sql`AND COALESCE(p.workflow_status, 'confirmed') <> 'pending_confirmation'`;
+
 const agentInclude = {
   select: {
     id: true,
@@ -335,11 +353,16 @@ const agentInclude = {
   }
 } as const;
 
-/** client_id → (normPayTypeKey → net), как в KPI — по точному payment_type с нормализацией ключа */
+/**
+ * client_id → (normPayTypeKey → net).
+ * `client_payments.payment_type` saqlanishi kod (masalan `cash`) yoki nom bo‘lishi mumkin;
+ * spravochnik ustunlari esa `payment_method_entries[].name` — ikkalasini ham katalog nomiga map qilamiz.
+ */
 export async function loadPaymentNetNormByClient(
   tenantId: number,
   clientIds: number[],
-  asOfEnd: Date | null
+  asOfEnd: Date | null,
+  entries: PaymentMethodEntryDto[]
 ): Promise<Map<number, Map<string, Prisma.Decimal>>> {
   const map = new Map<number, Map<string, Prisma.Decimal>>();
   if (clientIds.length === 0) return map;
@@ -362,15 +385,20 @@ export async function loadPaymentNetNormByClient(
       WHERE p.tenant_id = ${tenantId}
         AND p.client_id IN (${Prisma.join(chunk)})
         AND p.deleted_at IS NULL
+        ${PAYMENT_COUNTS_FOR_RECEIVABLE_NET}
         ${dateClause}
       GROUP BY p.client_id, p.payment_type
     `;
     for (const r of rows) {
-      const nk = normPayTypeKey(r.payment_type ?? "");
-      let inner = map.get(r.client_id);
+      const cid = sqlIntIdToNumber(r.client_id);
+      if (!Number.isFinite(cid)) continue;
+      const resolved =
+        resolvePaymentMethodRefToLabel(r.payment_type, entries) ?? (r.payment_type ?? "").trim();
+      const nk = normPayTypeKey(resolved);
+      let inner = map.get(cid);
       if (!inner) {
         inner = new Map();
-        map.set(r.client_id, inner);
+        map.set(cid, inner);
       }
       const cur = inner.get(nk) ?? new Prisma.Decimal(0);
       inner.set(nk, cur.add(r.net));
@@ -563,14 +591,17 @@ export function processUnpaidPayRefRows(
 
   for (const r of rows) {
     if (sprLabels.length === 0) continue;
+    const cid = sqlIntIdToNumber(r.client_id);
+    if (!Number.isFinite(cid)) continue;
     const label = resolvePaymentMethodRefToLabel(r.pref_raw, entries);
-    const nk = label ? normPayTypeKey(label) : firstNk;
+    const rawNk = label ? normPayTypeKey(label) : firstNk;
     if (!label && !firstNk) continue;
+    const nk = sprNormKeyForBuckets(rawNk, sprLabels);
 
-    let inner = byClient.get(r.client_id);
+    let inner = byClient.get(cid);
     if (!inner) {
       inner = new Map();
-      byClient.set(r.client_id, inner);
+      byClient.set(cid, inner);
     }
     bump(inner, nk, r.sum_unpaid);
     bump(globalUnpaidNorm, nk, r.sum_unpaid);
@@ -591,9 +622,14 @@ function processUnpaidAgentPayRefRows(
   for (const r of rows) {
     if (sprLabels.length === 0) continue;
     const label = resolvePaymentMethodRefToLabel(r.pref_raw, entries);
-    const nk = label ? normPayTypeKey(label) : firstNk;
+    const rawNk = label ? normPayTypeKey(label) : firstNk;
     if (!label && !firstNk) continue;
-    const aid = r.agent_id ?? null;
+    const nk = sprNormKeyForBuckets(rawNk, sprLabels);
+    const aid =
+      r.agent_id == null ? null : (() => {
+        const n = sqlIntIdToNumber(r.agent_id);
+        return Number.isFinite(n) ? n : null;
+      })();
     let inner = byAgent.get(aid);
     if (!inner) {
       inner = new Map();
@@ -611,8 +647,8 @@ export function paymentAmountsNetMinusUnpaid(
   unpaidNorm: Map<string, Prisma.Decimal> | undefined
 ): ClientBalancePaymentTypeSummary[] {
   if (sprLabels.length === 0) return [];
-  const net = netNorm ?? new Map<string, Prisma.Decimal>();
-  const u = unpaidNorm ?? new Map<string, Prisma.Decimal>();
+  const net = foldPaymentBucketMap(sprLabels, netNorm);
+  const u = foldPaymentBucketMap(sprLabels, unpaidNorm);
   return sprLabels.map((l) => {
     const nk = normPayTypeKey(l);
     const a = net.get(nk) ?? new Prisma.Decimal(0);
@@ -643,8 +679,9 @@ function paymentAmountsForOrderDebtByMethod(
 ): ClientBalancePaymentTypeSummary[] {
   if (sprLabels.length === 0) return [];
   const label = resolvePaymentMethodRefToLabel(paymentRefRaw, entries);
-  let targetNk = label ? normPayTypeKey(label) : "";
-  if (!targetNk) targetNk = normPayTypeKey(sprLabels[0]);
+  let rawNk = label ? normPayTypeKey(label) : "";
+  if (!rawNk) rawNk = normPayTypeKey(sprLabels[0]);
+  const targetNk = sprNormKeyForBuckets(rawNk, sprLabels);
   return sprLabels.map((l) => {
     const nk = normPayTypeKey(l);
     const amt = nk === targetNk ? orderUnpaid.neg() : new Prisma.Decimal(0);
@@ -656,11 +693,79 @@ function normPayTypeKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-/** Filtrlangan mijozlar bo‘yicha `payment_type` bo‘linmasi (to‘liq matn, DB dagi kabi) */
+function readSortDir(q: ClientBalanceListQuery): 1 | -1 {
+  return q.sort_dir === "desc" ? -1 : 1;
+}
+
+function moneySortValueFromPaymentAmounts(
+  amounts: ClientBalancePaymentTypeSummary[] | undefined,
+  sortBy: string,
+  sprLabels: string[]
+): number {
+  if (!sortBy.startsWith("pay:")) return 0;
+  if (!amounts || amounts.length === 0) return 0;
+  const wanted = normPayTypeKey(sortBy.slice(4));
+  const idxByLabel = sprLabels.findIndex((x) => normPayTypeKey(x) === wanted);
+  if (idxByLabel >= 0 && idxByLabel < amounts.length) {
+    const v = Number(amounts[idxByLabel]?.amount ?? "0");
+    return Number.isFinite(v) ? v : 0;
+  }
+  const hit = amounts.find((x) => normPayTypeKey(x.label) === wanted);
+  const v = Number(hit?.amount ?? "0");
+  return Number.isFinite(v) ? v : 0;
+}
+
+function compareNumForSort(a: number, b: number, dir: 1 | -1): number {
+  return (a - b) * dir;
+}
+
+/**
+ * `$queryRaw` / `pg` ba'zan INTEGER ustunini `bigint` qaytaradi; `Map<number, …>` kaliti bilan
+ * Prisma `c.id` (`number`) mos kelmasa — qator bo‘yicha yig‘indilar yo‘qoladi, svodka esa global mapda qoladi.
+ */
+export function sqlIntIdToNumber(raw: unknown): number {
+  if (raw == null) return NaN;
+  if (typeof raw === "bigint") return Number(raw);
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : NaN;
+  }
+  return NaN;
+}
+
+/** Spravochnik ustunlaridan biriga tushmasa — birinchi ustunga (legacy / notanish ref). */
+function sprNormKeyForBuckets(nk: string, sprLabels: string[]): string {
+  if (sprLabels.length === 0) return nk;
+  const firstNk = normPayTypeKey(sprLabels[0]);
+  const t = nk.trim() ? normPayTypeKey(nk) : firstNk;
+  const ok = sprLabels.some((l) => normPayTypeKey(l) === t);
+  return ok ? t : firstNk;
+}
+
+function foldPaymentBucketMap(
+  sprLabels: string[],
+  src: Map<string, Prisma.Decimal> | undefined
+): Map<string, Prisma.Decimal> {
+  if (sprLabels.length === 0) return src ?? new Map();
+  const out = new Map<string, Prisma.Decimal>();
+  const m = src ?? new Map();
+  for (const [k, v] of m) {
+    const dest = sprNormKeyForBuckets(k, sprLabels);
+    out.set(dest, (out.get(dest) ?? new Prisma.Decimal(0)).add(v));
+  }
+  return out;
+}
+
+/**
+ * Filtrlangan mijozlar bo‘yicha `payment_type` bo‘yicha yig‘indi.
+ * Kalitlar — katalogdagi ko‘rinadigan nom (`payment_method_entries[].name`), kod/id bilan moslashadi.
+ */
 export async function loadPaymentNetTotalsByTypeGlobally(
   tenantId: number,
   clientIds: number[],
-  asOfEnd: Date | null
+  asOfEnd: Date | null,
+  entries: PaymentMethodEntryDto[]
 ): Promise<Map<string, Prisma.Decimal>> {
   const merged = new Map<string, Prisma.Decimal>();
   if (clientIds.length === 0) return merged;
@@ -679,13 +784,15 @@ export async function loadPaymentNetTotalsByTypeGlobally(
       WHERE p.tenant_id = ${tenantId}
         AND p.client_id IN (${Prisma.join(chunk)})
         AND p.deleted_at IS NULL
+        ${PAYMENT_COUNTS_FOR_RECEIVABLE_NET}
         ${dateClause}
       GROUP BY p.payment_type
     `;
     for (const r of rows) {
       const rawKey = (r.payment_type ?? "").trim();
-      const cur = merged.get(rawKey) ?? new Prisma.Decimal(0);
-      merged.set(rawKey, cur.add(r.net));
+      const catalogKey = resolvePaymentMethodRefToLabel(r.payment_type, entries) ?? rawKey;
+      const cur = merged.get(catalogKey) ?? new Prisma.Decimal(0);
+      merged.set(catalogKey, cur.add(r.net));
     }
   }
   return merged;
@@ -737,7 +844,9 @@ async function loadBalancesAsOf(
       GROUP BY cb.client_id
     `;
     for (const r of rows) {
-      out.set(r.client_id, r.bal ?? new Prisma.Decimal(0));
+      const cid = sqlIntIdToNumber(r.client_id);
+      if (!Number.isFinite(cid)) continue;
+      out.set(cid, r.bal ?? new Prisma.Decimal(0));
     }
   }
   return out;
@@ -768,7 +877,10 @@ async function loadLastPaymentByClient(
       GROUP BY client_id
     `;
     for (const r of rows) {
-      if (r.lp) out.set(r.client_id, r.lp);
+      if (r.lp) {
+        const cid = sqlIntIdToNumber(r.client_id);
+        if (Number.isFinite(cid)) out.set(cid, r.lp);
+      }
     }
   }
   return out;
@@ -798,7 +910,10 @@ async function loadLastDeliveryByClient(
       GROUP BY o.client_id
     `;
     for (const r of rows) {
-      if (r.lu) out.set(r.client_id, r.lu);
+      if (r.lu) {
+        const cid = sqlIntIdToNumber(r.client_id);
+        if (Number.isFinite(cid)) out.set(cid, r.lu);
+      }
     }
   }
   return out;
@@ -874,7 +989,9 @@ export async function loadDeliveryDebtByClient(
       WHERE gross_unpaid > 0
     `;
     for (const r of rows) {
-      map.set(r.client_id, {
+      const cid = sqlIntIdToNumber(r.client_id);
+      if (!Number.isFinite(cid)) continue;
+      map.set(cid, {
         debt: r.gross_unpaid,
         lastDel: r.last_unpaid_delivery,
         firstDel: r.first_unpaid_delivery
@@ -966,10 +1083,13 @@ async function loadUnpaidDeliveredOrderDebtRows(
     `;
     for (const r of rows) {
       if (r.unpaid.gt(0)) {
+        const cid = sqlIntIdToNumber(r.client_id);
+        const oid = sqlIntIdToNumber(r.order_id);
+        if (!Number.isFinite(cid) || !Number.isFinite(oid)) continue;
         out.push({
-          order_id: r.order_id,
+          order_id: oid,
           order_number: r.order_number,
-          client_id: r.client_id,
+          client_id: cid,
           unpaid: r.unpaid,
           delivered_at: r.delivered_at,
           payment_method_ref: r.payment_method_ref
@@ -988,6 +1108,7 @@ function mapClientRow(
   c: {
     id: number;
     name: string;
+    is_active: boolean;
     legal_name: string | null;
     client_code: string | null;
     inn: string | null;
@@ -1055,6 +1176,7 @@ function mapClientRow(
     client_id: c.id,
     client_code: c.client_code,
     name: c.name,
+    is_active: c.is_active,
     legal_name: c.legal_name,
     agent_id: ag?.id ?? null,
     agent_name: ag?.name ?? null,
@@ -1078,6 +1200,7 @@ function mapDeliveryOrderRow(
   c: {
     id: number;
     name: string;
+    is_active: boolean;
     legal_name: string | null;
     client_code: string | null;
     inn: string | null;
@@ -1112,6 +1235,7 @@ function mapDeliveryOrderRow(
     client_id: c.id,
     client_code: c.client_code,
     name: c.name,
+    is_active: c.is_active,
     legal_name: c.legal_name,
     agent_id: ag?.id ?? null,
     agent_name: ag?.name ?? null,
@@ -1139,34 +1263,45 @@ function mapDeliveryOrderRow(
   };
 }
 
-export async function listClientBalanceTerritoryOptions(tenantId: number): Promise<ClientBalanceTerritoryOptions> {
+export async function listClientBalanceTerritoryOptions(
+  tenantId: number,
+  scope?: ClientBalanceListQuery
+): Promise<ClientBalanceTerritoryOptions> {
+  const clientScopeWhere: Prisma.ClientWhereInput = scope
+    ? buildClientWhere(tenantId, scope, { skipBalanceFilter: true, skipTerritoryFilters: true })
+    : { tenant_id: tenantId, merged_into_client_id: null };
+
+  const withField = (field: Prisma.ClientWhereInput): Prisma.ClientWhereInput => ({
+    AND: [clientScopeWhere, field]
+  });
+
   const [regions, cities, districts, zones, neighborhoods, branches] = await Promise.all([
     prisma.client.findMany({
-      where: { tenant_id: tenantId, merged_into_client_id: null, region: { not: null } },
+      where: withField({ region: { not: null } }),
       select: { region: true },
       distinct: ["region"],
       orderBy: { region: "asc" }
     }),
     prisma.client.findMany({
-      where: { tenant_id: tenantId, merged_into_client_id: null, city: { not: null } },
+      where: withField({ city: { not: null } }),
       select: { city: true },
       distinct: ["city"],
       orderBy: { city: "asc" }
     }),
     prisma.client.findMany({
-      where: { tenant_id: tenantId, merged_into_client_id: null, district: { not: null } },
+      where: withField({ district: { not: null } }),
       select: { district: true },
       distinct: ["district"],
       orderBy: { district: "asc" }
     }),
     prisma.client.findMany({
-      where: { tenant_id: tenantId, merged_into_client_id: null, zone: { not: null } },
+      where: withField({ zone: { not: null } }),
       select: { zone: true },
       distinct: ["zone"],
       orderBy: { zone: "asc" }
     }),
     prisma.client.findMany({
-      where: { tenant_id: tenantId, merged_into_client_id: null, neighborhood: { not: null } },
+      where: withField({ neighborhood: { not: null } }),
       select: { neighborhood: true },
       distinct: ["neighborhood"],
       orderBy: { neighborhood: "asc" }
@@ -1177,7 +1312,7 @@ export async function listClientBalanceTerritoryOptions(tenantId: number): Promi
         role: "agent",
         is_active: true,
         branch: { not: null },
-        clients_as_agent: { some: { merged_into_client_id: null } }
+        clients_as_agent: { some: clientScopeWhere }
       },
       select: { branch: true },
       distinct: ["branch"],
@@ -1223,6 +1358,26 @@ export async function listClientBalancesReport(
     if (bf === "credit") {
       orderRows = [];
     }
+    const paymentRefs = await loadTenantPaymentRefs(tenantId);
+    const sprDelivery = paymentRefs.labels;
+    const pmEntriesDelivery = paymentRefs.entries;
+    const sortBy = q.sort_by?.trim() ?? "";
+    const sortDir = readSortDir(q);
+    if (sortBy === "balance") {
+      orderRows.sort((a, b) => compareNumForSort(Number(a.unpaid.neg().toString()), Number(b.unpaid.neg().toString()), sortDir));
+    } else if (sortBy.startsWith("pay:")) {
+      const wanted = normPayTypeKey(sortBy.slice(4));
+      const firstNk = sprDelivery.length > 0 ? normPayTypeKey(sprDelivery[0]) : "";
+      orderRows.sort((a, b) => {
+        const aLabel = resolvePaymentMethodRefToLabel(a.payment_method_ref, pmEntriesDelivery);
+        const bLabel = resolvePaymentMethodRefToLabel(b.payment_method_ref, pmEntriesDelivery);
+        const aNk = aLabel ? normPayTypeKey(aLabel) : firstNk;
+        const bNk = bLabel ? normPayTypeKey(bLabel) : firstNk;
+        const aVal = aNk === wanted ? Number(a.unpaid.neg().toString()) : 0;
+        const bVal = bNk === wanted ? Number(b.unpaid.neg().toString()) : 0;
+        return compareNumForSort(aVal, bVal, sortDir);
+      });
+    }
     const total = orderRows.length;
     const pageSlice = orderRows.slice((page - 1) * limit, page * limit);
     const sliceClientIds = [...new Set(pageSlice.map((r) => r.client_id))];
@@ -1235,7 +1390,7 @@ export async function listClientBalancesReport(
 
     const distinctClientIdsForSummary = [...new Set(orderRows.map((r) => r.client_id))];
 
-    const [[clients, paymentRefs, lastPays], netTotalsMap, rawUnpaidSummary] = await Promise.all([
+    const [[clients, lastPays], netTotalsMap, rawUnpaidSummary] = await Promise.all([
       Promise.all([
         (async () => {
           if (sliceClientIds.length === 0) return [];
@@ -1244,6 +1399,7 @@ export async function listClientBalancesReport(
             select: {
               id: true,
               name: true,
+              is_active: true,
               legal_name: true,
               client_code: true,
               inn: true,
@@ -1254,18 +1410,15 @@ export async function listClientBalancesReport(
             }
           });
         })(),
-        loadTenantPaymentRefs(tenantId),
         loadLastPaymentByClient(tenantId, sliceClientIds, asOfEnd)
       ]),
-      loadPaymentNetTotalsByTypeGlobally(tenantId, distinctClientIdsForSummary, asOfEnd),
+      loadPaymentNetTotalsByTypeGlobally(tenantId, distinctClientIdsForSummary, asOfEnd, pmEntriesDelivery),
       loadUnpaidOrderBalanceRawByPaymentRef(tenantId, distinctClientIdsForSummary, odFrom, odTo)
     ]);
     perf("delivery.summary-built", {
       pageSlice: pageSlice.length,
       distinctClients: distinctClientIdsForSummary.length
     });
-    const sprDelivery = paymentRefs.labels;
-    const pmEntriesDelivery = paymentRefs.entries;
     const { globalUnpaidNorm: globalUnpaidDelivery } = processUnpaidPayRefRows(
       rawUnpaidSummary,
       pmEntriesDelivery,
@@ -1327,10 +1480,6 @@ export async function listClientBalancesReport(
       return l.gt(0) && unpaid.lte(0);
     });
 
-    const total = eligible.length;
-    const sliceRows = eligible.slice((page - 1) * limit, page * limit);
-    const sliceIds = sliceRows.map((r) => r.id);
-
     let sumMerged = new Prisma.Decimal(0);
     for (const row of eligible) {
       const l = ledgerOf(row);
@@ -1339,9 +1488,9 @@ export async function listClientBalancesReport(
     const totalBalanceStr = sumMerged.toString();
 
     const eligibleIds = eligible.map((r) => r.id);
-    const [{ labels: sprLabels, entries: pmEntries }, netGlobalByType, rawUnpaidEligible] = await Promise.all([
-      loadTenantPaymentRefs(tenantId),
-      loadPaymentNetTotalsByTypeGlobally(tenantId, eligibleIds, asOfEnd),
+    const { labels: sprLabels, entries: pmEntries } = await loadTenantPaymentRefs(tenantId);
+    const [netGlobalByType, rawUnpaidEligible] = await Promise.all([
+      loadPaymentNetTotalsByTypeGlobally(tenantId, eligibleIds, asOfEnd, pmEntries),
       loadUnpaidOrderBalanceRawByPaymentRef(tenantId, eligibleIds, odFrom, odTo)
     ]);
     const { byClient: unpaidByMethod, globalUnpaidNorm } = processUnpaidPayRefRows(
@@ -1351,6 +1500,42 @@ export async function listClientBalancesReport(
     );
     const summaryPaymentByType = buildSummaryNetMinusUnpaid(sprLabels, netGlobalByType, globalUnpaidNorm);
 
+    const sortBy = q.sort_by?.trim() ?? "";
+    const sortDir = readSortDir(q);
+    let orderedEligible = eligible;
+    if (sortBy === "balance") {
+      orderedEligible = [...eligible].sort((a, b) => {
+        const aBal = Number(
+          mergeLedgerWithUnpaidDelivered(ledgerOf(a), deliveryMap.get(a.id)).toString()
+        );
+        const bBal = Number(
+          mergeLedgerWithUnpaidDelivered(ledgerOf(b), deliveryMap.get(b.id)).toString()
+        );
+        return compareNumForSort(aBal, bBal, sortDir);
+      });
+    } else if (sortBy.startsWith("pay:")) {
+      const payNormAll = await loadPaymentNetNormByClient(tenantId, eligibleIds, asOfEnd, pmEntries);
+      orderedEligible = [...eligible].sort((a, b) => {
+        const aAmounts = paymentAmountsNetMinusUnpaid(
+          sprLabels,
+          payNormAll.get(a.id),
+          unpaidByMethod.get(a.id)
+        );
+        const bAmounts = paymentAmountsNetMinusUnpaid(
+          sprLabels,
+          payNormAll.get(b.id),
+          unpaidByMethod.get(b.id)
+        );
+        const aVal = moneySortValueFromPaymentAmounts(aAmounts, sortBy, sprLabels);
+        const bVal = moneySortValueFromPaymentAmounts(bAmounts, sortBy, sprLabels);
+        return compareNumForSort(aVal, bVal, sortDir);
+      });
+    }
+
+    const total = orderedEligible.length;
+    const sliceRows = orderedEligible.slice((page - 1) * limit, page * limit);
+    const sliceIds = sliceRows.map((r) => r.id);
+
     const [clients, pagePayNorm, lastPays, lastOrds, pageBalAsOf] = await Promise.all([
       (async () => {
         if (sliceIds.length === 0) return [];
@@ -1359,6 +1544,7 @@ export async function listClientBalancesReport(
           select: {
             id: true,
             name: true,
+            is_active: true,
             legal_name: true,
             client_code: true,
             inn: true,
@@ -1369,7 +1555,7 @@ export async function listClientBalancesReport(
           }
         });
       })(),
-      loadPaymentNetNormByClient(tenantId, sliceIds, asOfEnd),
+      loadPaymentNetNormByClient(tenantId, sliceIds, asOfEnd, pmEntries),
       loadLastPaymentByClient(tenantId, sliceIds, asOfEnd),
       loadLastDeliveryByClient(tenantId, sliceIds),
       asOfEnd && sliceIds.length > 0 ? loadBalancesAsOf(tenantId, sliceIds, asOfEnd) : Promise.resolve(null)
@@ -1424,9 +1610,9 @@ export async function listClientBalancesReport(
   }
   const totalBalanceStr = sumMergedTotal.toString();
 
-  const [{ labels: sprLabels, entries: pmEntries }, netGlobalByType, rawUnpaidAll] = await Promise.all([
-    loadTenantPaymentRefs(tenantId),
-    loadPaymentNetTotalsByTypeGlobally(tenantId, ids, asOfEnd),
+  const { labels: sprLabels, entries: pmEntries } = await loadTenantPaymentRefs(tenantId);
+  const [netGlobalByType, rawUnpaidAll] = await Promise.all([
+    loadPaymentNetTotalsByTypeGlobally(tenantId, ids, asOfEnd, pmEntries),
     loadUnpaidOrderBalanceRawByPaymentRef(tenantId, ids, odFrom, odTo)
   ]);
   perf("clients-all.payment-sources-loaded", {
@@ -1441,16 +1627,11 @@ export async function listClientBalancesReport(
   const summaryPaymentByType = buildSummaryNetMinusUnpaid(sprLabels, netGlobalByType, globalUnpaidNorm);
 
   if (q.view === "agents") {
-    const [payNormByClient, rawAgentUnpaid] = await Promise.all([
-      loadPaymentNetNormByClient(tenantId, ids, asOfEnd),
-      loadUnpaidOrderBalanceRawByAgentPaymentRef(tenantId, ids, odFrom, odTo)
-    ]);
+    const payNormByClient = await loadPaymentNetNormByClient(tenantId, ids, asOfEnd, pmEntries);
     perf("agents.aggregates-loaded", {
       ids: ids.length,
-      payNormClients: payNormByClient.size,
-      unpaidRows: rawAgentUnpaid.length
+      payNormClients: payNormByClient.size
     });
-    const unpaidByAgentMethod = processUnpaidAgentPayRefRows(rawAgentUnpaid, pmEntries, sprLabels);
     const byAgent = new Map<
       number | null,
       {
@@ -1474,7 +1655,11 @@ export async function listClientBalancesReport(
     for (const c of clientsForAgg) {
       const aid = c.agent_id ?? null;
       const ledger = c.client_balances[0]?.balance ?? new Prisma.Decimal(0);
-      const bal = balAsOfMapAll?.get(c.id) ?? ledger;
+      const base = balAsOfMapAll?.get(c.id) ?? ledger;
+      const del = deliveryMapForSummary.get(c.id);
+      const blendPass = del && del.debt.gt(0) ? del : null;
+      /** «По клиентам» qatori bilan bir xil: ledger + yetkazilgan, yopilmagan zakazlar qarzi. */
+      const bal = mergeLedgerWithUnpaidDelivered(base, blendPass ?? undefined);
       const inner = payNormByClient.get(c.id);
       const cur = byAgent.get(aid) ?? {
         clients: 0,
@@ -1491,9 +1676,9 @@ export async function listClientBalancesReport(
           cur.payAgg.set(nk, (cur.payAgg.get(nk) ?? new Prisma.Decimal(0)).add(v));
         }
       }
-      const uAgent = unpaidByAgentMethod.get(aid);
-      if (uAgent) {
-        for (const [nk, v] of uAgent) {
+      const uClient = unpaidByClientMethod.get(c.id);
+      if (uClient) {
+        for (const [nk, v] of uClient) {
           cur.unpaidAgg.set(nk, (cur.unpaidAgg.get(nk) ?? new Prisma.Decimal(0)).add(v));
         }
       }
@@ -1511,8 +1696,25 @@ export async function listClientBalancesReport(
         clients_count: v.clients,
         balance: v.balance.toString(),
         payment_amounts: paymentAmountsNetMinusUnpaid(sprLabels, v.payAgg, v.unpaidAgg)
-      }))
-      .sort((a, b) => new Prisma.Decimal(a.balance).cmp(new Prisma.Decimal(b.balance)));
+      }));
+
+    const sortBy = q.sort_by?.trim() ?? "";
+    const sortDir = readSortDir(q);
+    if (sortBy === "balance") {
+      agentRows.sort((a, b) =>
+        compareNumForSort(Number(a.balance), Number(b.balance), sortDir)
+      );
+    } else if (sortBy.startsWith("pay:")) {
+      agentRows.sort((a, b) =>
+        compareNumForSort(
+          moneySortValueFromPaymentAmounts(a.payment_amounts, sortBy, sprLabels),
+          moneySortValueFromPaymentAmounts(b.payment_amounts, sortBy, sprLabels),
+          sortDir
+        )
+      );
+    } else {
+      agentRows.sort((a, b) => new Prisma.Decimal(a.balance).cmp(new Prisma.Decimal(b.balance)));
+    }
 
     const total = agentRows.length;
     const slice = agentRows.slice((page - 1) * limit, page * limit);
@@ -1526,30 +1728,72 @@ export async function listClientBalancesReport(
     };
   }
 
-  const total = await prisma.client.count({ where });
-  const clients = await prisma.client.findMany({
-    where,
-    orderBy: { name: "asc" },
-    skip: (page - 1) * limit,
-    take: limit,
-    select: {
-      id: true,
-      name: true,
-      legal_name: true,
-      client_code: true,
-      inn: true,
-      phone: true,
-      license_until: true,
-      agent: { select: agentInclude.select },
-      client_balances: { take: 1, select: { balance: true } }
+  const sortBy = q.sort_by?.trim() ?? "";
+  const sortDir = readSortDir(q);
+  let sortedIds = ids;
+  const ledgerById = new Map(
+    allClientsLedger.map((x) => [x.id, x.client_balances[0]?.balance ?? new Prisma.Decimal(0)])
+  );
+  if (q.view === "clients" && (sortBy === "balance" || sortBy.startsWith("pay:"))) {
+    if (sortBy === "balance") {
+      sortedIds = [...ids].sort((a, b) => {
+        const aLedger = balAsOfMapAll?.get(a) ?? ledgerById.get(a) ?? new Prisma.Decimal(0);
+        const bLedger = balAsOfMapAll?.get(b) ?? ledgerById.get(b) ?? new Prisma.Decimal(0);
+        const aBal = Number(
+          mergeLedgerWithUnpaidDelivered(aLedger, deliveryMapForSummary.get(a)).toString()
+        );
+        const bBal = Number(
+          mergeLedgerWithUnpaidDelivered(bLedger, deliveryMapForSummary.get(b)).toString()
+        );
+        return compareNumForSort(aBal, bBal, sortDir);
+      });
+    } else {
+      const payNormAll = await loadPaymentNetNormByClient(tenantId, ids, asOfEnd, pmEntries);
+      sortedIds = [...ids].sort((a, b) => {
+        const aAmounts = paymentAmountsNetMinusUnpaid(
+          sprLabels,
+          payNormAll.get(a),
+          unpaidByClientMethod.get(a)
+        );
+        const bAmounts = paymentAmountsNetMinusUnpaid(
+          sprLabels,
+          payNormAll.get(b),
+          unpaidByClientMethod.get(b)
+        );
+        const aVal = moneySortValueFromPaymentAmounts(aAmounts, sortBy, sprLabels);
+        const bVal = moneySortValueFromPaymentAmounts(bAmounts, sortBy, sprLabels);
+        return compareNumForSort(aVal, bVal, sortDir);
+      });
     }
-  });
+  }
 
-  const pageIds = clients.map((c) => c.id);
+  const total = ids.length;
+  const pageIds = sortedIds.slice((page - 1) * limit, page * limit);
+  const clients =
+    pageIds.length === 0
+      ? []
+      : await prisma.client.findMany({
+          where: { id: { in: pageIds } },
+          select: {
+            id: true,
+            name: true,
+            is_active: true,
+            legal_name: true,
+            client_code: true,
+            inn: true,
+            phone: true,
+            license_until: true,
+            agent: { select: agentInclude.select },
+            client_balances: { take: 1, select: { balance: true } }
+          }
+        });
+
+  const clientsById = new Map(clients.map((c) => [c.id, c]));
+  const orderedClients = pageIds.map((id) => clientsById.get(id)!).filter(Boolean);
   const deliveryMapPage =
     q.view === "clients" && pageIds.length > 0 ? deliveryMapForSummary : new Map<number, DeliveryDebtInfo>();
   const [pagePayNorm, lastPays, lastOrds, pageBalAsOf] = await Promise.all([
-    loadPaymentNetNormByClient(tenantId, pageIds, asOfEnd),
+    loadPaymentNetNormByClient(tenantId, pageIds, asOfEnd, pmEntries),
     loadLastPaymentByClient(tenantId, pageIds, asOfEnd),
     loadLastDeliveryByClient(tenantId, pageIds),
     asOfEnd && pageIds.length > 0 ? loadBalancesAsOf(tenantId, pageIds, asOfEnd) : Promise.resolve(null)
@@ -1560,7 +1804,7 @@ export async function listClientBalancesReport(
     page
   });
 
-  const data: ClientBalanceRow[] = clients.map((c) => {
+  const data: ClientBalanceRow[] = orderedClients.map((c) => {
     const b = deliveryMapPage.get(c.id);
     const blend = b && b.debt.gt(0) ? b : null;
     return mapClientRow(

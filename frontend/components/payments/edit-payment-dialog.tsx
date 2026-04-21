@@ -24,12 +24,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 type CashDeskRow = { id: number; name: string; is_active: boolean };
+type LinkageScope = {
+  selected_agent_id: number | null;
+  selected_cash_desk_id?: number | null;
+  selected_expeditor_user_id?: number | null;
+  constrained: boolean;
+  cash_desk_ids: number[];
+  expeditor_ids: number[];
+};
 
 type StaffPick = { id: number; fio: string; login?: string; code?: string | null };
 
 type PaymentDetailRow = {
   id: number;
   client_id: number;
+  agent_id?: number | null;
   order_id: number | null;
   amount: string;
   payment_type: string;
@@ -94,6 +103,7 @@ export function EditPaymentDialog({
   const [orderId, setOrderId] = useState("");
   const [expeditorUserId, setExpeditorUserId] = useState("");
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
   const detailQ = useQuery({
     queryKey: ["payment-detail", tenantSlug, paymentId],
@@ -145,6 +155,37 @@ export function EditPaymentDialog({
   const profileRefs = profileQ.data;
   const p = detailQ.data?.payment;
   const isVoided = Boolean(p?.deleted_at);
+  const selectedAgentIdNum = p?.agent_id ?? null;
+  const selectedCashDeskIdNum = cashDeskId.trim() ? Number.parseInt(cashDeskId.trim(), 10) : NaN;
+  const selectedExpeditorIdNum = expeditorUserId.trim() ? Number.parseInt(expeditorUserId.trim(), 10) : NaN;
+  const linkageQ = useQuery({
+    queryKey: [
+      "linkage-options",
+      tenantSlug,
+      "edit-payment",
+      selectedAgentIdNum,
+      Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0 ? selectedCashDeskIdNum : null,
+      Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0 ? selectedExpeditorIdNum : null
+    ],
+    enabled: Boolean(tenantSlug) && hydrated && open && p != null,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedAgentIdNum != null && selectedAgentIdNum > 0) {
+        params.set("selected_agent_id", String(selectedAgentIdNum));
+      }
+      if (Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0) {
+        params.set("selected_cash_desk_id", String(selectedCashDeskIdNum));
+      }
+      if (Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0) {
+        params.set("selected_expeditor_user_id", String(selectedExpeditorIdNum));
+      }
+      const qs = params.toString();
+      if (!qs) return null;
+      const { data } = await api.get<{ data: LinkageScope }>(`/api/${tenantSlug}/linkage/options?${qs}`);
+      return data.data;
+    }
+  });
 
   const payOpts = useMemo(
     () =>
@@ -158,6 +199,20 @@ export function EditPaymentDialog({
   }, [detailQ.data?.allocated_total]);
 
   const showExpeditor = Boolean(p && p.order_id == null);
+  const filteredCashDesks = useMemo(() => {
+    const all = cashDesksQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.cash_desk_ids);
+    return all.filter((d) => allowed.has(d.id));
+  }, [cashDesksQ.data, linkageQ.data]);
+  const filteredExpeditors = useMemo(() => {
+    const all = expeditorsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.expeditor_ids);
+    return all.filter((d) => allowed.has(d.id));
+  }, [expeditorsQ.data, linkageQ.data]);
 
   useEffect(() => {
     if (!open || !p) return;
@@ -170,6 +225,20 @@ export function EditPaymentDialog({
     setExpeditorUserId(p.expeditor_user_id != null && p.expeditor_user_id > 0 ? String(p.expeditor_user_id) : "");
     setFormErr(null);
   }, [open, p, payOpts]);
+  useEffect(() => {
+    if (!cashDeskId.trim()) return;
+    if (!filteredCashDesks.some((d) => String(d.id) === cashDeskId.trim())) {
+      setCashDeskId("");
+      setSelectionNotice("Kassa tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [cashDeskId, filteredCashDesks]);
+  useEffect(() => {
+    if (!expeditorUserId.trim()) return;
+    if (!filteredExpeditors.some((d) => String(d.id) === expeditorUserId.trim())) {
+      setExpeditorUserId("");
+      setSelectionNotice("Dastavchi tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [expeditorUserId, filteredExpeditors]);
 
   const patchMut = useMutation({
     mutationFn: async () => {
@@ -266,6 +335,11 @@ export function EditPaymentDialog({
                 <span className="font-semibold tabular-nums">{allocated}</span>. Summa shundan kam bo‘lmasin.
               </p>
             ) : null}
+            {selectionNotice ? (
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-900 dark:text-amber-100">
+                {selectionNotice}
+              </p>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="ep-amount">Summa</Label>
               <Input
@@ -306,7 +380,7 @@ export function EditPaymentDialog({
                 disabled={patchMut.isPending}
                 emptyLabel="—"
               >
-                {(cashDesksQ.data ?? []).map((d) => (
+                {filteredCashDesks.map((d) => (
                   <option key={d.id} value={String(d.id)}>
                     {d.name}
                   </option>
@@ -349,7 +423,7 @@ export function EditPaymentDialog({
                   disabled={patchMut.isPending}
                   emptyLabel="—"
                 >
-                  {(expeditorsQ.data ?? []).map((r) => (
+                  {filteredExpeditors.map((r) => (
                     <option key={r.id} value={String(r.id)}>
                       {(r.login ? `${r.login} · ` : "") + r.fio}
                     </option>

@@ -86,6 +86,9 @@ type AgentKpi = {
   payments_count: number;
   payments_sum: string;
   returns_count: number;
+  exchange_minus_qty?: string;
+  exchange_plus_qty?: string;
+  net_exchange_qty?: string;
 };
 type StatusDist = { status: string; count: number };
 
@@ -924,11 +927,34 @@ function ReportsContent() {
                     type="button"
                     onClick={() => {
                       const rows = agentsQ.data!.map((a) => [
-                        a.user_name, a.clients_count, a.order_count, parseFloat(a.total_orders),
-                        parseFloat(a.avg_order_sum), a.returns_count
+                        a.user_name,
+                        a.clients_count,
+                        a.order_count,
+                        parseFloat(a.total_orders),
+                        parseFloat(a.avg_order_sum),
+                        a.returns_count,
+                        parseFloat(a.exchange_minus_qty ?? "0"),
+                        parseFloat(a.exchange_plus_qty ?? "0"),
+                        parseFloat(a.net_exchange_qty ?? "0")
                       ]);
                       void exportReportsToXlsx(`agent-kpi-${formatDate(new Date())}`, [
-                        { name: "Agent KPI", data: [["Agent", "Mijozlar", "Zakazlar", "Summa", "Avg", "Qaytarish"], ...rows] }
+                        {
+                          name: "Agent KPI",
+                          data: [
+                            [
+                              "Agent",
+                              "Mijozlar",
+                              "Zakazlar",
+                              "Summa",
+                              "Avg",
+                              "Qaytarish",
+                              "Obmen minus",
+                              "Obmen plus",
+                              "Obmen net"
+                            ],
+                            ...rows
+                          ]
+                        }
                       ]);
                     }}
                     className="h-8 rounded-md px-3 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
@@ -939,7 +965,7 @@ function ReportsContent() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[750px] border-collapse text-sm">
+                  <table className="w-full min-w-[980px] border-collapse text-sm">
                     <thead className="app-table-thead text-xs">
                       <tr>
                         <th className="px-3 py-2 text-left">Agent</th>
@@ -948,6 +974,11 @@ function ReportsContent() {
                         <th className="px-3 py-2 text-right">Summa</th>
                         <th className="px-3 py-2 text-right">O‘rt. zakaz</th>
                         <th className="px-3 py-2 text-right">Qaytarish</th>
+                        <th className="px-3 py-2 text-right" title="Обмен по документам">
+                          Obm −
+                        </th>
+                        <th className="px-3 py-2 text-right">Obm +</th>
+                        <th className="px-3 py-2 text-right">Obm net</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -964,6 +995,15 @@ function ReportsContent() {
                           <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(a.avg_order_sum)}</td>
                           <td className={`px-3 py-2 text-right tabular-nums ${a.returns_count > 0 ? "text-amber-600" : "text-muted-foreground"}`}>
                             {fmt(a.returns_count)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {fmt(parseFloat(a.exchange_minus_qty ?? "0"))}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {fmt(parseFloat(a.exchange_plus_qty ?? "0"))}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium">
+                            {fmt(parseFloat(a.net_exchange_qty ?? "0"))}
                           </td>
                         </tr>
                       ))}

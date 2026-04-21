@@ -10,10 +10,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import * as XLSX from "xlsx";
 
 const AGENT_HEADER_ALIASES: Record<string, string[]> = {
-  fio: ["ф.и.о", "фио"],
+  fio: ["ф.и.о", "фио", "пользователь", "имя пользователя"],
   product: ["продукт"],
   agentType: ["тип агента"],
-  code: ["код"],
+  code: ["код", "код агента", "код пользователя"],
   pinfl: ["пинфл"],
   consignment: ["консигнация"],
   apk: ["версия apk"],
@@ -33,10 +33,10 @@ const AGENT_HEADER_ALIASES: Record<string, string[]> = {
 };
 
 const EXPEDITOR_HEADER_ALIASES: Record<string, string[]> = {
-  fio: ["ф.и.о", "фио"],
+  fio: ["ф.и.о", "фио", "пользователь", "имя пользователя"],
   authShort: ["авторизоваться"],
   phone: ["телефон"],
-  code: ["код"],
+  code: ["код", "код экспедитора", "код пользователя"],
   warehouse: ["склад"],
   apk: ["версия apk"],
   pinfl: ["пинфл"],
@@ -51,9 +51,20 @@ const EXPEDITOR_HEADER_ALIASES: Record<string, string[]> = {
 };
 
 const SUPERVISOR_HEADER_ALIASES: Record<string, string[]> = {
-  fio: ["ф.и.о", "фио"],
-  agentsCol: ["агент"],
-  code: ["код"],
+  fio: ["ф.и.о", "фио", "супервайзер", "сотрудник", "фио сотрудника", "полное имя"],
+  /** SVR qatori: vergul bilan bir nechta agent FIO yoki kod («тип агента» bilan aralashmasin — substring qat’iy chegarada) */
+  agentsCol: [
+    "агенты супервайзера",
+    "подчиненные агенты",
+    "назначенные агенты",
+    "список агентов",
+    "фио агентов",
+    "агент (фио)",
+    "агенты",
+    "агентов",
+    "агент"
+  ],
+  code: ["код", "код супервайзера", "код пользователя"],
   login: ["логин"],
   pinfl: ["пинфл"],
   branch: ["филиал"],
@@ -68,8 +79,31 @@ function normHeader(s: string): string {
   return s
     .trim()
     .toLowerCase()
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/ё/g, "е");
+    .replace(/ё/g, "е")
+    .replace(/\.+$/g, "");
+}
+
+/** So‘zning ichidagi harf (агент ⊂ тип агента) noto‘g‘ri moslashmasin. */
+function isWordChar(c: string): boolean {
+  return /[0-9a-zа-яёії]/i.test(c);
+}
+
+/** Qat’iy tenglik yoki substring faqat «so‘z chegarasi» bilan (тип агента ≠ агент ustuni). */
+function headerMatchesField(cellNorm: string, aliasRaw: string): boolean {
+  const a = normHeader(aliasRaw);
+  if (!cellNorm || !a) return false;
+  if (cellNorm === a) return true;
+  if (a.length <= 3) return false;
+  if (cellNorm.startsWith(`${a} `) || cellNorm.startsWith(`${a}(`) || cellNorm.startsWith(`${a},`)) return true;
+  if (cellNorm.includes(` ${a} `) || cellNorm.endsWith(` ${a}`)) return true;
+  const idx = cellNorm.indexOf(a);
+  if (idx === -1) return false;
+  const before = idx === 0 ? " " : cellNorm[idx - 1]!;
+  const after = idx + a.length >= cellNorm.length ? " " : cellNorm[idx + a.length]!;
+  if (isWordChar(before) || isWordChar(after)) return false;
+  return true;
 }
 
 function buildHeaderMap(
@@ -79,11 +113,12 @@ function buildHeaderMap(
   const map: Record<string, number> = {};
   const cells = headerRow.map((c) => (c == null ? "" : String(c)));
   for (let i = 0; i < cells.length; i++) {
-    const key = normHeader(cells[i]);
-    if (!key) continue;
+    const cellNorm = normHeader(cells[i]);
+    if (!cellNorm) continue;
     for (const [field, als] of Object.entries(aliases)) {
-      for (const a of als) {
-        if (key === normHeader(a)) {
+      if (map[field] !== undefined) continue;
+      for (const alias of als) {
+        if (headerMatchesField(cellNorm, alias)) {
           map[field] = i;
           break;
         }
@@ -97,7 +132,20 @@ function cell(row: unknown[], idx: number | undefined): string {
   if (idx === undefined || idx < 0 || idx >= row.length) return "";
   const v = row[idx];
   if (v == null) return "";
-  return String(v).replace(/\u00a0/g, " ").trim();
+  return String(v)
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .trim();
+}
+
+/** FIO / kod taqqoslash: bo‘shliq, registr, yashirin belgilar. */
+function normPersonKey(s: string): string {
+  return s
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 /** Agent / eksportdagi FIO — [...] ichida odam nomi */
@@ -311,12 +359,35 @@ function readMatrix(abs: string): { sheetName: string; matrix: unknown[][] } {
   return { sheetName, matrix };
 }
 
+export type StaffImportXlsxKind = "agent" | "expeditor" | "supervisor";
+
+const STAFF_KIND_TO_ALIASES: Record<StaffImportXlsxKind, Record<string, string[]>> = {
+  agent: AGENT_HEADER_ALIASES,
+  expeditor: EXPEDITOR_HEADER_ALIASES,
+  supervisor: SUPERVISOR_HEADER_ALIASES
+};
+
+/** CLI / tahlil: 1-qator ustunlari import bilan qanday maylonga tushishini ko‘rsatadi */
+export function debugStaffImportHeaderMap(
+  headerRow: unknown[],
+  kind: StaffImportXlsxKind
+): { fieldToColumnIndex: Record<string, number>; normalizedCells: string[] } {
+  const fieldToColumnIndex = buildHeaderMap(headerRow, STAFF_KIND_TO_ALIASES[kind]);
+  const normalizedCells = (headerRow as unknown[]).map((c) => normHeader(c == null ? "" : String(c)));
+  return { fieldToColumnIndex, normalizedCells };
+}
+
 // ─── resolve path helpers ─────────────────────────────────────────
 
 export type AgentsXlsxResolvedPath =
   | { ok: true; path: string }
   | { ok: false; reason: "none" }
   | { ok: false; reason: "missing_env_file"; detail: string };
+
+function downloadsDir(): string | null {
+  const d = (process.env.USERPROFILE || process.env.HOME || "").trim();
+  return d ? path.join(d, "Downloads") : null;
+}
 
 function resolveXlsxPath(
   cwdBackend: string,
@@ -335,35 +406,192 @@ function resolveXlsxPath(
   return { ok: false, reason: "none" };
 }
 
-/** AGENTS_XLSX_PATH yoki scripts/data/ dagi standart nomlar */
+function withDownloadsFallback(names: string[]): string[] {
+  const dl = downloadsDir();
+  if (!dl) return names;
+  const extra = names.flatMap((p) => {
+    const base = path.basename(p);
+    return [p, path.join(dl, base)];
+  });
+  /** scripts/data ustun, keyin Downloads */
+  return extra;
+}
+
+/** AGENTS_XLSX_PATH yoki scripts/data / Downloads dagi standart nomlar */
 export function resolveAgentsXlsxPath(cwdBackend: string, envPath: string | undefined): AgentsXlsxResolvedPath {
-  return resolveXlsxPath(cwdBackend, envPath, [
-    path.join(cwdBackend, "scripts/data/active-agents.xlsx"),
-    path.join(cwdBackend, "scripts/data/Активные агенты.xlsx"),
-    path.join(cwdBackend, "scripts/data/Активные агенты (2).xlsx")
-  ]);
+  return resolveXlsxPath(
+    cwdBackend,
+    envPath,
+    withDownloadsFallback([
+      path.join(cwdBackend, "scripts/data/staff-agents.xlsx"),
+      path.join(cwdBackend, "scripts/data/active-agents.xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные агенты (3).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные агенты (2).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные агенты (1).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные агенты.xlsx")
+    ])
+  );
 }
 
 export function resolveExpeditorsXlsxPath(
   cwdBackend: string,
   envPath: string | undefined
 ): AgentsXlsxResolvedPath {
-  return resolveXlsxPath(cwdBackend, envPath, [
-    path.join(cwdBackend, "scripts/data/active-expeditors.xlsx"),
-    path.join(cwdBackend, "scripts/data/Активные экспедиторы.xlsx"),
-    path.join(cwdBackend, "scripts/data/Активные Активные экспедиторы (2).xlsx")
-  ]);
+  return resolveXlsxPath(
+    cwdBackend,
+    envPath,
+    withDownloadsFallback([
+      path.join(cwdBackend, "scripts/data/staff-expeditors.xlsx"),
+      path.join(cwdBackend, "scripts/data/active-expeditors.xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные Активные экспедиторы (3).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные Активные экспедиторы (1).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные Активные экспедиторы (2).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные экспедиторы (1).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные экспедиторы (2).xlsx"),
+      path.join(cwdBackend, "scripts/data/Активные экспедиторы.xlsx")
+    ])
+  );
 }
 
 export function resolveSupervisorsXlsxPath(
   cwdBackend: string,
   envPath: string | undefined
 ): AgentsXlsxResolvedPath {
-  return resolveXlsxPath(cwdBackend, envPath, [
-    path.join(cwdBackend, "scripts/data/active-supervisors.xlsx"),
-    path.join(cwdBackend, "scripts/data/Супервайзеры.xlsx"),
-    path.join(cwdBackend, "scripts/data/Супервайзеры (1).xlsx")
-  ]);
+  return resolveXlsxPath(
+    cwdBackend,
+    envPath,
+    withDownloadsFallback([
+      path.join(cwdBackend, "scripts/data/staff-supervisors.xlsx"),
+      path.join(cwdBackend, "scripts/data/active-supervisors.xlsx"),
+      path.join(cwdBackend, "scripts/data/Супервайзеры (4).xlsx"),
+      path.join(cwdBackend, "scripts/data/Супервайзеры (3).xlsx"),
+      path.join(cwdBackend, "scripts/data/Супервайзеры (1).xlsx"),
+      path.join(cwdBackend, "scripts/data/Супервайзеры (2).xlsx"),
+      path.join(cwdBackend, "scripts/data/Супервайзеры.xlsx")
+    ])
+  );
+}
+
+type TenantAgentLookup = {
+  byCodeNorm: Map<string, number>;
+  byNameNorm: Map<string, number>;
+  byLoginNorm: Map<string, number>;
+  agents: Array<{
+    id: number;
+    code: string | null;
+    name: string | null;
+    login: string;
+    first_name: string | null;
+    last_name: string | null;
+  }>;
+};
+
+async function loadTenantAgentLookup(prisma: PrismaClient, tenantId: number): Promise<TenantAgentLookup> {
+  const agents = await prisma.user.findMany({
+    where: { tenant_id: tenantId, role: "agent" },
+    select: { id: true, code: true, name: true, login: true, first_name: true, last_name: true }
+  });
+  const byCodeNorm = new Map<string, number>();
+  const byNameNorm = new Map<string, number>();
+  const byLoginNorm = new Map<string, number>();
+  const putName = (raw: string | null | undefined, id: number) => {
+    const k = normPersonKey(raw ?? "");
+    if (k.length > 0) byNameNorm.set(k, id);
+  };
+  for (const a of agents) {
+    if (a.code) {
+      const c = a.code.toUpperCase().replace(/\s+/g, "").trim();
+      if (c) byCodeNorm.set(c, a.id);
+    }
+    const lg = normPersonKey(a.login.replace(/\s+/g, ""));
+    if (lg) byLoginNorm.set(lg, a.id);
+    putName(a.name, a.id);
+    putName([a.first_name, a.last_name].filter(Boolean).join(" "), a.id);
+    const bracket = (a.name ?? "").match(/\[([^\]]+)\]/);
+    if (bracket) putName(bracket[1], a.id);
+  }
+  return { byCodeNorm, byNameNorm, byLoginNorm, agents };
+}
+
+function resolveAgentIdFromLookup(lookup: TenantAgentLookup, token: string): number | null {
+  const raw = token.replace(/\u00a0/g, " ").replace(/[\u200b-\u200d\ufeff]/g, "").trim();
+  if (!raw) return null;
+  const { displayName } = parseNameFromFio(raw);
+  const nameKey = normPersonKey(displayName || raw);
+  if (nameKey && lookup.byNameNorm.has(nameKey)) {
+    return lookup.byNameNorm.get(nameKey) ?? null;
+  }
+  const codeCompact = raw.toUpperCase().replace(/\s+/g, "").trim();
+  if (codeCompact.length >= 2 && codeCompact.length <= 48 && lookup.byCodeNorm.has(codeCompact)) {
+    return lookup.byCodeNorm.get(codeCompact) ?? null;
+  }
+  const loginKey = normPersonKey(raw.replace(/\s+/g, ""));
+  if (loginKey && lookup.byLoginNorm.has(loginKey)) {
+    return lookup.byLoginNorm.get(loginKey) ?? null;
+  }
+
+  if (nameKey.length >= 4) {
+    for (const a of lookup.agents) {
+      const an = normPersonKey(a.name ?? "");
+      if (!an) continue;
+      if (an === nameKey || an.includes(nameKey) || nameKey.includes(an)) return a.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * SVR «агент» ustuni: rasmiy ajratuvchi — **vergul**; `;` `|` tab/yangi qator noto‘g‘ri bo‘lsa vergulga almashtiriladi, keyin `,` bo‘yicha bo‘linadi.
+ */
+function normalizeSupervisorAgentsCellForCommaSplit(raw: string): string {
+  return raw
+    .replace(/\u00a0/g, " ")
+    .replace(/\uff0c/g, ",")
+    .replace(/[;|]/g, ",")
+    .replace(/\t+/g, ",")
+    .replace(/\r?\n+/g, ",")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s+/g, ",")
+    .replace(/,{2,}/g, ",");
+}
+
+/** Tahlil skriptlari va import bir xil qoidada agent tokenlarini ajratadi. */
+export function splitSupervisorAgentsCell(raw: string): string[] {
+  return normalizeSupervisorAgentsCellForCommaSplit(raw)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function linkSupervisorAgentsForRow(opts: {
+  prisma: PrismaClient;
+  tenantId: number;
+  supervisorUserId: number;
+  agentsCell: string;
+  lookup: TenantAgentLookup;
+  dry: boolean;
+}): Promise<{ applied: number; unmatched: string[]; resolvedCount: number }> {
+  const { prisma, tenantId, supervisorUserId, agentsCell, lookup, dry } = opts;
+  const parts = splitSupervisorAgentsCell(agentsCell);
+  const unmatched: string[] = [];
+  const ids = new Set<number>();
+  for (const p of parts) {
+    const id = resolveAgentIdFromLookup(lookup, p);
+    if (id == null) unmatched.push(p);
+    else ids.add(id);
+  }
+  const idArr = [...ids];
+  if (idArr.length === 0) {
+    return { applied: 0, unmatched, resolvedCount: 0 };
+  }
+  if (dry) {
+    return { applied: 0, unmatched, resolvedCount: idArr.length };
+  }
+  await prisma.user.updateMany({
+    where: { tenant_id: tenantId, id: { in: idArr }, role: "agent" },
+    data: { supervisor_user_id: supervisorUserId }
+  });
+  return { applied: idArr.length, unmatched, resolvedCount: idArr.length };
 }
 
 // ─── public runners ───────────────────────────────────────────────
@@ -624,10 +852,23 @@ export async function runSupervisorsXlsxImport(opts: RunStaffXlsxImportOpts): Pr
     throw new Error("Supervayzerlar Excel: «Ф.И.О» topilmadi.");
   }
 
+  const headerDebug = Object.entries(h)
+    .map(([k, i]) => `${k}→${i}`)
+    .join(", ");
+  console.log(`  Ustun indekslari: ${headerDebug}`);
+
   console.log(
     `\n════════════  QO‘SHIMCHA: supervayzerlar (Excel)  ════════════\n` +
       `Fayl: ${abs}\nList: ${sheetName}\nTenant: ${tenantSlug}\nDRY_RUN=${dry}\n`
   );
+
+  const hasAgentsCol = h.agentsCol !== undefined;
+  if (!hasAgentsCol) {
+    console.warn(
+      "! «Агент» ustuni (vergul bilan bir nechta FIO/kod) topilmadi — SVR qatorlaridagi agentlar bazada bog‘lanmaydi. Sarlavhani tekshiring."
+    );
+  }
+  const agentLookup = await loadTenantAgentLookup(prisma, tenantId);
 
   let created = 0;
   let updated = 0;
@@ -704,6 +945,36 @@ export async function runSupervisorsXlsxImport(opts: RunStaffXlsxImportOpts): Pr
     } else if (res.updated) {
       updated++;
       console.log(`~ yangilandi supervayzer ${login}`);
+    }
+
+    if (hasAgentsCol) {
+      const sup = await prisma.user.findFirst({
+        where: { tenant_id: tenantId, login, role: "supervisor" },
+        select: { id: true }
+      });
+      const agentsCell = cell(row, h.agentsCol);
+      /** DRY: bazada SVR yo‘q bo‘lsa ham agent tokenlarini tekshirish (updateMany chaqirilmaydi). */
+      const canResolveAgents = agentsCell.trim() && (sup != null || dry);
+      if (canResolveAgents) {
+        const link = await linkSupervisorAgentsForRow({
+          prisma,
+          tenantId,
+          supervisorUserId: sup?.id ?? 0,
+          agentsCell,
+          lookup: agentLookup,
+          dry
+        });
+        if (link.unmatched.length > 0) {
+          const prev = link.unmatched.slice(0, 6).join("; ");
+          const more = link.unmatched.length > 6 ? ` … (+${link.unmatched.length - 6})` : "";
+          console.warn(`! ${login}: agent topilmadi: ${prev}${more}`);
+        }
+        if (dry && link.resolvedCount > 0) {
+          console.log(`  [dry] SVR→agent: ${link.resolvedCount} ta mos keldi (bazaga yozilmadi)`);
+        } else if (!dry && link.applied > 0) {
+          console.log(`  ↔ SVR→agent: ${link.applied} ta supervisor_user_id yangilandi`);
+        }
+      }
     }
   }
 

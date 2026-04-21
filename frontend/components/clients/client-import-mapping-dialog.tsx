@@ -10,7 +10,16 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  ClientImportProgress,
+  type ClientImportProgressModel
+} from "@/components/clients/client-import-progress";
 import { CLIENT_IMPORT_MAPPABLE_FIELDS } from "@/lib/client-import-fields";
+import {
+  buildUpdateApplyFieldOptions,
+  CLIENT_IMPORT_DUPLICATE_KEY_OPTIONS,
+  DEFAULT_DUPLICATE_KEY_FIELDS
+} from "@/lib/client-import-masks";
 import {
   mergeAutoClientImportColumns,
   rowToHeaderLabels,
@@ -26,6 +35,10 @@ export type ClientImportMappingPayload = {
   columnMap: Record<string, number>;
   sheetName: string;
   headerRowIndex: number;
+  /** Yangi klient: dublikat qaysi maydonlar bo‘yicha (`client_code`, `city`, …). */
+  duplicateKeyFields?: string[];
+  /** Yangilash: faqat tanlangan maydonlar; berilmasa — barcha xaritalangan ustunlar. */
+  updateApplyFields?: string[];
 };
 
 type Props = {
@@ -35,6 +48,7 @@ type Props = {
   isSubmitting: boolean;
   /** «create» — yangi; «update» — ИД ustuni majburiy */
   importMode?: "create" | "update";
+  progress?: ClientImportProgressModel | null;
   onConfirm: (payload: ClientImportMappingPayload) => void;
 };
 
@@ -45,7 +59,7 @@ function sheetToMatrix(XLSX: XlsxNs, ws: WorkSheet): unknown[][] {
     header: 1,
     defval: null,
     raw: true,
-    blankrows: false
+    blankrows: true
   }) as unknown[][];
 }
 
@@ -55,6 +69,7 @@ export function ClientImportMappingDialog({
   file,
   isSubmitting,
   importMode = "create",
+  progress = null,
   onConfirm
 }: Props) {
   const [parseError, setParseError] = useState<string | null>(null);
@@ -65,6 +80,9 @@ export function ClientImportMappingDialog({
   const [headerRowOneBased, setHeaderRowOneBased] = useState(1);
   const [mappingSelect, setMappingSelect] = useState<Record<string, string>>({});
   const [localErr, setLocalErr] = useState<string | null>(null);
+  const [dupKeySet, setDupKeySet] = useState<Set<string>>(() => new Set(DEFAULT_DUPLICATE_KEY_FIELDS));
+  const [restrictUpdate, setRestrictUpdate] = useState(false);
+  const [updateApplySet, setUpdateApplySet] = useState<Set<string>>(() => new Set());
 
   const resetState = useCallback(() => {
     xlsxModRef.current = null;
@@ -74,6 +92,9 @@ export function ClientImportMappingDialog({
     setHeaderRowOneBased(1);
     setMappingSelect({});
     setLocalErr(null);
+    setDupKeySet(new Set(DEFAULT_DUPLICATE_KEY_FIELDS));
+    setRestrictUpdate(false);
+    setUpdateApplySet(new Set(buildUpdateApplyFieldOptions().map((o) => o.key)));
   }, []);
 
   useEffect(() => {
@@ -179,14 +200,24 @@ export function ClientImportMappingDialog({
         setLocalErr('Укажите столбец «ИД» (внутренний id клиента в системе) — обязательно для обновления.');
         return;
       }
+      if (restrictUpdate && updateApplySet.size === 0) {
+        setLocalErr("Отметьте хотя бы одно поле для обновления или снимите «Только выбранные поля».");
+        return;
+      }
     } else if (merged.name === undefined) {
       setLocalErr("Укажите столбец «Наименование» — обязательно для новых клиентов.");
+      return;
+    } else if (dupKeySet.size === 0) {
+      setLocalErr("Выберите хотя бы один критерий дубликата (код, город, телефон…).");
       return;
     }
     onConfirm({
       columnMap: merged,
       sheetName,
-      headerRowIndex: headerRowIdx
+      headerRowIndex: headerRowIdx,
+      duplicateKeyFields: importMode === "create" ? Array.from(dupKeySet) : undefined,
+      updateApplyFields:
+        importMode === "update" && restrictUpdate ? Array.from(updateApplySet) : undefined
     });
   };
 
@@ -208,8 +239,8 @@ export function ClientImportMappingDialog({
                 <span className="break-all">
                   Файл: <strong>{file.name}</strong>
                   {importMode === "update"
-                    ? " — строки с «ИД» из системы; пустые ячейки не перезаписывают поля. Столбцы «Агент N» подхватываются автоматически по заголовку."
-                    : " — для каждого поля системы выберите столбец. «Агент 1…10» можно не мапить вручную."}
+                    ? " — строки с «ИД» из системы; пустые ячейки не перезаписывают поля. Столбцы «Агент N / Агент N день / Экспедитор N» подхватываются автоматически только если найдены в шапке."
+                    : " — для каждого поля системы выберите столбец. «Агент 1…10 / день / Экспедитор» можно не мапить вручную: если таких столбцов нет, они будут пропущены."}
                 </span>
               ) : (
                 "Файл не выбран."
@@ -219,13 +250,95 @@ export function ClientImportMappingDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="mb-4">
+            <ClientImportProgress progress={progress} />
+          </div>
           {parseError ? (
             <p className="text-sm text-destructive">{parseError}</p>
           ) : !workbook ? (
             <p className="text-muted-foreground text-sm">Чтение файла…</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-end gap-3">
+              ) : (
+                <div className="space-y-4">
+                  {importMode === "create" ? (
+                    <div className="bg-muted/40 space-y-2 rounded-md border border-border/80 p-3">
+                      <p className="text-sm font-medium">Дубликаты: по каким полям не создавать повтор</p>
+                      <p className="text-muted-foreground text-xs">
+                        По умолчанию — код и город (разные города = разные записи). Телефон / ИНН / ПИНФЛ
+                        отключены, пока не отметите.
+                      </p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        {CLIENT_IMPORT_DUPLICATE_KEY_OPTIONS.map(({ key, label }) => (
+                          <label key={key} className="flex cursor-pointer items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              className="border-input h-4 w-4 rounded"
+                              checked={dupKeySet.has(key)}
+                              disabled={isSubmitting}
+                              onChange={(e) => {
+                                setDupKeySet((prev) => {
+                                  const n = new Set(prev);
+                                  if (e.target.checked) n.add(key);
+                                  else n.delete(key);
+                                  return n;
+                                });
+                              }}
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-muted/40 space-y-2 rounded-md border border-border/80 p-3">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                        <input
+                          type="checkbox"
+                          className="border-input h-4 w-4 rounded"
+                          checked={restrictUpdate}
+                          disabled={isSubmitting}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setRestrictUpdate(on);
+                            if (on && updateApplySet.size === 0) {
+                              setUpdateApplySet(new Set(buildUpdateApplyFieldOptions().map((o) => o.key)));
+                            }
+                          }}
+                        />
+                        Обновлять только выбранные поля (иначе — все сопоставленные столбцы)
+                      </label>
+                      {restrictUpdate ? (
+                        <>
+                          <p className="text-muted-foreground text-xs">
+                            Снимите галочки с агента / дней / экспедитора, если не нужно менять их из файла.
+                          </p>
+                          <div className="max-h-48 overflow-y-auto rounded border border-border/60 bg-background/50 p-2">
+                            <div className="grid gap-1 sm:grid-cols-2">
+                              {buildUpdateApplyFieldOptions().map(({ key, label }) => (
+                                <label key={key} className="flex cursor-pointer items-center gap-2 text-xs">
+                                  <input
+                                    type="checkbox"
+                                    className="border-input h-3.5 w-3.5 shrink-0 rounded"
+                                    checked={updateApplySet.has(key)}
+                                    disabled={isSubmitting}
+                                    onChange={(e) => {
+                                      setUpdateApplySet((prev) => {
+                                        const n = new Set(prev);
+                                        if (e.target.checked) n.add(key);
+                                        else n.delete(key);
+                                        return n;
+                                      });
+                                    }}
+                                  />
+                                  <span className="min-w-0">{label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[10rem] flex-1 space-y-1.5">
                   <Label htmlFor="import-sheet">Лист</Label>
                   <select

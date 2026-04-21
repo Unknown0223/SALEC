@@ -4,6 +4,7 @@ import { prisma } from "../../config/database";
 import { invalidateStock } from "../../lib/redis-cache";
 import { appendClientAuditLog } from "../clients/clients.service";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
+import { assertReturnProductsInterchangeableStrict } from "../products/product-catalog.service";
 
 export type SalesReturnListRow = {
   id: number;
@@ -23,11 +24,20 @@ export type SalesReturnListRow = {
 
 export async function listSalesReturns(
   tenantId: number,
-  q: { page: number; limit: number; warehouse_id?: number; client_id?: number }
+  q: {
+    page: number;
+    limit: number;
+    warehouse_id?: number;
+    client_id?: number;
+    warehouse_ids?: number[];
+    client_ids?: number[];
+  }
 ): Promise<{ data: SalesReturnListRow[]; total: number; page: number; limit: number }> {
   const where: Prisma.SalesReturnWhereInput = { tenant_id: tenantId, status: "posted" };
   if (q.warehouse_id != null && q.warehouse_id > 0) where.warehouse_id = q.warehouse_id;
   if (q.client_id != null && q.client_id > 0) where.client_id = q.client_id;
+  if (q.warehouse_ids != null && q.warehouse_ids.length > 0) where.warehouse_id = { in: q.warehouse_ids };
+  if (q.client_ids != null && q.client_ids.length > 0) where.client_id = { in: q.client_ids };
 
   const [total, rows] = await Promise.all([
     prisma.salesReturn.count({ where }),
@@ -97,6 +107,7 @@ export type CreateSalesReturnInput = {
   warehouse_id: number;
   client_id?: number | null;
   order_id?: number | null;
+  price_type?: string | null;
   refund_amount?: number | null;
   note?: string | null;
   refusal_reason_ref?: string | null;
@@ -138,6 +149,9 @@ export async function createSalesReturn(
     where: { tenant_id: tenantId, id: { in: productIds }, is_active: true }
   });
   if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
+
+  const returnPriceType = (input.price_type ?? "").trim() || "retail";
+  await assertReturnProductsInterchangeableStrict(tenantId, productIds, returnPriceType);
 
   const refund =
     input.refund_amount != null && Number.isFinite(input.refund_amount) && input.refund_amount > 0

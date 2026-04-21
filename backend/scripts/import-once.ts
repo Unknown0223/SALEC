@@ -4,25 +4,30 @@
  * Nima qiladi:
  *   [1/4]…[4/4] — zona/viloyat, savdo kanali, yo‘nalish, ombor, tenant.settings
  *   (ixtiyoriy) Xodimlar CSV
- *   (ixtiyoriy) Supervayzerlar Excel «Супервайзеры» (agentlardan oldin)
- *   (ixtiyoriy) Faol agentlar Excel «Активные агенты»
+ *   (ixtiyoriy) Faol agentlar Excel «Активные агенты» (birinchida — SVR bog‘lanishi uchun)
  *   (ixtiyoriy) Faol eksportlar Excel «Активные экспедиторы»
+ *   (ixtiyoriy) Supervayzerlar Excel «Супервайзеры» — «агент» ustunida agentlar **vergul** bilan; `;` `|` yangi qator avtomatik vergulga almashtiriladi
  *   (ixtiyoriy) Mahsulotlar JSON
  *   (ixtiyoriy) «Продукты» Excel — PRODUCTS_XLSX_PATH yoki Downloads / scripts/data
  *   (ixtiyoriy) «Прайст лист» Excel — narxlarni SKU bo‘yicha yozadi (PRICE_LIST_XLSX_PATH yoki Downloads)
  *   (ixtiyoriy) demo_* foydalanuvchilar parolini bir xil qilish
  *
- * Ishlatish (loyiha ildizidan):
+ * Ishlatish — **papka: `backend`** (loyiha ildizidan emas):
+ *   cd backend
  *   $env:IMPORT_TENANT_SLUG='test1'   (panel «SAVDO PANEL …» dagi slug bilan bir xil bo‘lsin!)
+ *
+ * Staff Excel (boshqa kompyuterda ham): fayllarni repoga `backend/scripts/data/` ga qo‘ying — birinchi navbatda
+ * quyidagi nomlar qidiriladi (ketma-ket, birinchisi topilsa ishlatiladi):
+ *   • agentlar:     staff-agents.xlsx  →  active-agents.xlsx  →  Активные агенты*.xlsx
+ *   • eksportlar:   staff-expeditors.xlsx  →  active-expeditors.xlsx  →  Активные*экспедиторы*.xlsx
+ *   • supervayzer:  staff-supervisors.xlsx  →  active-supervisors.xlsx  →  Супервайзеры*.xlsx
+ * (xuddi shu nomlar Downloads da ham qidiriladi.) Batafsil: scripts/data/README-STAFF-XLSX.md
+ *
  *   $env:IMPORT_STAFF_CSV='scripts/mening-xodimlarim.csv'  # ixtiyoriy
  *   (CSV bermasangiz, `scripts/sample-staff.csv` bor bo‘lsa, avtomatik olinadi)
  *   Xodimlarni umuman o‘tkazmaslik: IMPORT_ONCE_NO_STAFF=1
- *   Supervayzerlar: SUPERVISORS_XLSX_PATH yoki scripts/data/Супервайзеры (1).xlsx | …
- *   O‘tkazmaslik: IMPORT_ONCE_NO_SUPERVISORS_XLSX=1
- *   Agentlar: AGENTS_XLSX_PATH yoki scripts/data/Активные агенты*.xlsx
- *   O‘tkazmaslik: IMPORT_ONCE_NO_AGENTS_XLSX=1
- *   Eksportlar: EXPEDITORS_XLSX_PATH yoki scripts/data/Активные Активные экспедиторы (2).xlsx | …
- *   O‘tkazmaslik: IMPORT_ONCE_NO_EXPEDITORS_XLSX=1
+ *   Yoki aniq yo‘l: AGENTS_XLSX_PATH, EXPEDITORS_XLSX_PATH, SUPERVISORS_XLSX_PATH
+ *   O‘tkazmaslik: IMPORT_ONCE_NO_SUPERVISORS_XLSX=1 | IMPORT_ONCE_NO_AGENTS_XLSX=1 | IMPORT_ONCE_NO_EXPEDITORS_XLSX=1
  *   Yangi foydalanuvchi paroli: IMPORT_DEFAULT_PASSWORD yoki AGENTS_IMPORT_PASSWORD / …
  *   $env:IMPORT_PRODUCTS_JSON='scripts/data/mahsulotlar.json'  # ixtiyoriy (bo‘sh bo‘lmasa, avtomatik ham olinadi)
  *   npm run import:once
@@ -152,30 +157,7 @@ async function main() {
   ).trim();
   const staffXlsxReset = truthy(process.env.AGENTS_RESET_PASSWORD);
 
-  if (!truthy(process.env.IMPORT_ONCE_NO_SUPERVISORS_XLSX)) {
-    const supResolved = resolveSupervisorsXlsxPath(cwdBackend, process.env.SUPERVISORS_XLSX_PATH);
-    if (supResolved.ok) {
-      const pw = (process.env.SUPERVISORS_IMPORT_PASSWORD || staffXlsxPass).trim();
-      await runSupervisorsXlsxImport({
-        prisma,
-        tenantId: tenant.id,
-        tenantSlug: slug,
-        xlsxPath: supResolved.path,
-        dry,
-        defaultPassword: pw,
-        resetPassword: staffXlsxReset
-      });
-    } else if (supResolved.reason === "missing_env_file") {
-      throw new Error(`SUPERVISORS_XLSX_PATH berildi, fayl yo‘q: ${supResolved.detail}`);
-    } else {
-      console.log(
-        "\n(o‘tkazib yuborildi) Supervayzerlar Excel — topilmadi. SUPERVISORS_XLSX_PATH yoki scripts/data/Супервайзеры*.xlsx."
-      );
-    }
-  } else {
-    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_SUPERVISORS_XLSX=1.");
-  }
-
+  /** Avval agentlar, keyin eksportlar, oxirida SVR — SVR qatoridagi «агент» ustuni bazadagi agentlarga bog‘lanadi. */
   if (!truthy(process.env.IMPORT_ONCE_NO_AGENTS_XLSX)) {
     const agentsResolved = resolveAgentsXlsxPath(cwdBackend, process.env.AGENTS_XLSX_PATH);
     if (agentsResolved.ok) {
@@ -222,6 +204,30 @@ async function main() {
     }
   } else {
     console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_EXPEDITORS_XLSX=1.");
+  }
+
+  if (!truthy(process.env.IMPORT_ONCE_NO_SUPERVISORS_XLSX)) {
+    const supResolved = resolveSupervisorsXlsxPath(cwdBackend, process.env.SUPERVISORS_XLSX_PATH);
+    if (supResolved.ok) {
+      const pw = (process.env.SUPERVISORS_IMPORT_PASSWORD || staffXlsxPass).trim();
+      await runSupervisorsXlsxImport({
+        prisma,
+        tenantId: tenant.id,
+        tenantSlug: slug,
+        xlsxPath: supResolved.path,
+        dry,
+        defaultPassword: pw,
+        resetPassword: staffXlsxReset
+      });
+    } else if (supResolved.reason === "missing_env_file") {
+      throw new Error(`SUPERVISORS_XLSX_PATH berildi, fayl yo‘q: ${supResolved.detail}`);
+    } else {
+      console.log(
+        "\n(o‘tkazib yuborildi) Supervayzerlar Excel — topilmadi. SUPERVISORS_XLSX_PATH yoki scripts/data/Супервайзеры*.xlsx."
+      );
+    }
+  } else {
+    console.log("\n(o‘tkazib yuborildi) IMPORT_ONCE_NO_SUPERVISORS_XLSX=1.");
   }
 
   let productsJson = (process.env.IMPORT_PRODUCTS_JSON || "").trim();

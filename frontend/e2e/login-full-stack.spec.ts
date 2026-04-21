@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * To‘liq login faqat backend (`4000`) va `next dev` (rewrite) bilan ishlaydi.
+ * To‘liq login faqat backend (`18080` standart dev, yoki sizning PORT) va `next dev` (rewrite) bilan ishlaydi.
  * CI dagi `next start` da `/auth` proxy yo‘q — shuning uchun bu test sukutda o‘tkaziladi.
  */
 test.describe("Login full stack (ixtiyoriy)", () => {

@@ -19,6 +19,9 @@ export type ImportClientsXlsxJobData = {
   sheetName?: string;
   headerRowIndex?: number;
   columnMap?: Record<string, number>;
+  importMode?: "create" | "update";
+  duplicateKeyFields?: string[];
+  updateApplyFields?: string[];
 };
 
 export type ImportStockXlsxJobData = {
@@ -58,7 +61,13 @@ export async function processBackgroundJob(job: Job): Promise<unknown> {
       return await importClientsFromXlsx(d.tenant_id, buf, {
         sheetName: d.sheetName,
         headerRowIndex: d.headerRowIndex,
-        columnMap: d.columnMap
+        columnMap: d.columnMap,
+        importMode: d.importMode,
+        duplicateKeyFields: d.duplicateKeyFields,
+        updateApplyFields: d.updateApplyFields,
+        onProgress: async (progress) => {
+          await job.updateProgress(progress);
+        }
       });
     } finally {
       await unlink(fp).catch(() => {});

@@ -12,6 +12,7 @@ import {
   parseIsoDateEndUtc,
   paymentAmountsNetMinusUnpaid,
   processUnpaidPayRefRows,
+  sqlIntIdToNumber,
   type ClientBalanceListQuery,
   type ClientBalancePaymentTypeSummary
 } from "./client-balances.service";
@@ -53,6 +54,7 @@ export type ConsignmentBalanceRow = {
   client_id: number;
   client_code: string | null;
   client_name: string;
+  is_active: boolean;
   agent_name: string | null;
   agent_code: string | null;
   supervisor_name: string | null;
@@ -167,7 +169,9 @@ async function loadConsignmentDebtByClient(
       WHERE unpaid > 0
     `;
     for (const r of rows) {
-      map.set(r.client_id, {
+      const cid = sqlIntIdToNumber(r.client_id);
+      if (!Number.isFinite(cid)) continue;
+      map.set(cid, {
         gross: r.gross_sum,
         allocated: r.allocated_sum,
         unpaid: r.unpaid,
@@ -235,15 +239,14 @@ export async function listConsignmentBalancesReport(
   const asOfRaw = q.balance_as_of?.trim();
   const asOfEnd = asOfRaw ? parseIsoDateEndUtc(asOfRaw) : null;
 
-  const [{ labels: sprLabels, entries: pmEntries }, rawUnpaid, netGlobal, pagePayNorm] =
-    await Promise.all([
-      loadTenantPaymentRefs(tenantId),
-      loadUnpaidOrderBalanceRawByPaymentRef(tenantId, eligible, odFrom, odTo, {
-        consignmentOnly: true
-      }),
-      loadPaymentNetTotalsByTypeGlobally(tenantId, eligible, asOfEnd),
-      loadPaymentNetNormByClient(tenantId, sliceIds, asOfEnd)
-    ]);
+  const { labels: sprLabels, entries: pmEntries } = await loadTenantPaymentRefs(tenantId);
+  const [rawUnpaid, netGlobal, pagePayNorm] = await Promise.all([
+    loadUnpaidOrderBalanceRawByPaymentRef(tenantId, eligible, odFrom, odTo, {
+      consignmentOnly: true
+    }),
+    loadPaymentNetTotalsByTypeGlobally(tenantId, eligible, asOfEnd, pmEntries),
+    loadPaymentNetNormByClient(tenantId, sliceIds, asOfEnd, pmEntries)
+  ]);
   perf("payment-sources-loaded", {
     eligible: eligible.length,
     sliceIds: sliceIds.length,
@@ -259,6 +262,7 @@ export async function listConsignmentBalancesReport(
           select: {
             id: true,
             name: true,
+            is_active: true,
             legal_name: true,
             client_code: true,
             inn: true,
@@ -304,6 +308,7 @@ export async function listConsignmentBalancesReport(
       client_id: c.id,
       client_code: c.client_code,
       client_name: c.name,
+      is_active: c.is_active,
       agent_name: ag?.name ?? null,
       agent_code: ag?.code ?? null,
       supervisor_name: ag?.supervisor?.name ?? null,

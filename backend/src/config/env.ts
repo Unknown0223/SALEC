@@ -8,7 +8,11 @@ config({ path: resolve(__dirname, "../../../.env") });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  PORT: z.coerce.number().int().positive().default(4000),
+  /**
+   * Lokal dev: past portlar (4000–4050 atrofi) Windows’da Hyper-V excluded range ichida
+   * `listen EACCES` berishi mumkin — yuqori port + `127.0.0.1` (index.ts) xavfsizroq.
+   */
+  PORT: z.coerce.number().int().positive().default(18080),
   DATABASE_URL: z
     .string()
     .min(1)

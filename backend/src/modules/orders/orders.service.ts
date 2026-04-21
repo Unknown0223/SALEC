@@ -43,6 +43,7 @@ import {
 } from "../client-balances/client-balances.service";
 import { resolvePaymentMethodRefToLabel } from "../tenant-settings/finance-refs";
 import { loadPaymentMethodEntriesForResolve } from "../tenant-settings/tenant-settings.service";
+import { prepareExchangeOrderLines } from "./exchange-order-create";
 
 export type OrderLineInput = { product_id: number; qty: number };
 
@@ -75,6 +76,11 @@ export type CreateOrderInput = {
   /** ISO sana (ixtiyoriy) */
   consignment_due_date?: string | null;
   items: OrderLineInput[];
+  /** `order_type=exchange` uchun majburiy (minus/plus alohida) */
+  source_order_ids?: number[];
+  minus_lines?: Array<{ order_id: number; product_id: number; qty: number }>;
+  plus_lines?: Array<{ product_id: number; qty: number }>;
+  reason_ref?: string | null;
 };
 
 export type UpdateOrderLinesInput = {
@@ -96,6 +102,8 @@ export type OrderItemRow = {
   price: string;
   total: string;
   is_bonus: boolean;
+  /** `exchange` zakazlarida */
+  exchange_line_kind?: string | null;
 };
 
 export type OrderListRow = {
@@ -259,6 +267,7 @@ export type OrderDetailLoaded = {
     price: Prisma.Decimal;
     total: Prisma.Decimal;
     is_bonus: boolean;
+    exchange_line_kind: string | null;
     product: { sku: string; name: string };
   }>;
   status_logs: Array<{
@@ -414,8 +423,10 @@ function toDetailRow(o: OrderDetailLoaded, viewerRole?: string): OrderDetailRow 
     expected_ship_date: null,
     shipped_at: null,
     delivered_at: null,
-    qty: o.items
-      .filter((i) => !i.is_bonus)
+    qty: (o.order_type === "exchange"
+      ? o.items.filter((i) => !i.is_bonus && i.exchange_line_kind === "plus")
+      : o.items.filter((i) => !i.is_bonus)
+    )
       .reduce((acc, i) => acc.add(i.qty), new Prisma.Decimal(0))
       .toString(),
     agent_id: o.agent_id,
@@ -463,6 +474,7 @@ function mapItems(
     price: Prisma.Decimal;
     total: Prisma.Decimal;
     is_bonus: boolean;
+    exchange_line_kind?: string | null;
     product: { sku: string; name: string };
   }>
 ): OrderItemRow[] {
@@ -474,7 +486,8 @@ function mapItems(
     qty: i.qty.toString(),
     price: i.price.toString(),
     total: i.total.toString(),
-    is_bonus: i.is_bonus
+    is_bonus: i.is_bonus,
+    exchange_line_kind: i.exchange_line_kind ?? null
   }));
 }
 
@@ -517,8 +530,18 @@ export async function createOrder(
   input: CreateOrderInput,
   viewerRole?: string
 ): Promise<OrderDetailRow> {
-  if (!input.items.length) {
+  const orderTypeEarly = normalizeOrderType(input.order_type);
+  if (orderTypeEarly !== "exchange" && !input.items.length) {
     throw new Error("EMPTY_ITEMS");
+  }
+  if (orderTypeEarly === "exchange") {
+    if (
+      !input.source_order_ids?.length ||
+      !input.minus_lines?.length ||
+      !input.plus_lines?.length
+    ) {
+      throw new Error("EXCHANGE_PAYLOAD_REQUIRED");
+    }
   }
 
   const client = await prisma.client.findFirst({
@@ -571,58 +594,108 @@ export async function createOrder(
 
   const priceType = (input.price_type ?? "").trim() || "retail";
 
-  const lineData: Array<{
+  type LineDraft = {
     product_id: number;
     qty: Prisma.Decimal;
     price: Prisma.Decimal;
     total: Prisma.Decimal;
-  }> = [];
+    exchange_line_kind?: "minus" | "plus";
+  };
+
+  const lineData: LineDraft[] = [];
   let totalSum = new Prisma.Decimal(0);
   const qtyByProduct = new Map<number, number>();
   const productById = new Map<number, { id: number; category_id: number | null }>();
   const orderedProductIds = new Set<number>();
 
-  // ✅ BATCH validation — dublikat mahsulotlar tekshirish
-  const orderProductIds = new Set(input.items.map(i => i.product_id));
-  if (orderProductIds.size !== input.items.length) {
-    throw new Error("DUPLICATE_PRODUCT");
-  }
-  for (const it of input.items) {
-    if (!Number.isFinite(it.qty) || it.qty <= 0) {
-      throw new Error("BAD_QTY");
-    }
-  }
-  const productIds = [...orderProductIds];
-  const products = await prisma.product.findMany({
-    where: { id: { in: productIds }, tenant_id: tenantId, is_active: true }
-  });
-  const productMap = new Map(products.map(p => [p.id, p]));
-  for (const it of input.items) {
-    const product = productMap.get(it.product_id);
-    if (!product) {
+  let exchangeMetaJson: Prisma.InputJsonValue | undefined;
+
+  if (orderTypeEarly === "exchange") {
+    const ex = await prepareExchangeOrderLines(
+      tenantId,
+      input.client_id,
+      input.warehouse_id,
+      input.agent_id ?? null,
+      priceType,
+      {
+        source_order_ids: input.source_order_ids!,
+        minus_lines: input.minus_lines!,
+        plus_lines: input.plus_lines!,
+        reason_ref: input.reason_ref
+      }
+    );
+    const plusRows = await prisma.product.findMany({
+      where: { id: { in: ex.plusProductIds }, tenant_id: tenantId, is_active: true }
+    });
+    const minusRows = await prisma.product.findMany({
+      where: { id: { in: ex.minusProductIds }, tenant_id: tenantId }
+    });
+    if (plusRows.length !== ex.plusProductIds.length || minusRows.length !== ex.minusProductIds.length) {
       throw new Error("BAD_PRODUCT");
     }
-    const priceStr = await getProductPrice(tenantId, it.product_id, priceType);
-    if (priceStr == null) {
-      const e = new Error("NO_PRICE") as Error & { product_id: number; price_type: string };
-      e.product_id = it.product_id;
-      e.price_type = priceType;
-      throw e;
+    const pmap = new Map<number, (typeof plusRows)[number]>();
+    for (const p of [...plusRows, ...minusRows]) pmap.set(p.id, p);
+    for (const l of ex.lines) {
+      const row = pmap.get(l.product_id);
+      if (!row) throw new Error("BAD_PRODUCT");
+      lineData.push({
+        product_id: l.product_id,
+        qty: l.qty,
+        price: l.price,
+        total: l.total,
+        exchange_line_kind: l.exchange_line_kind
+      });
+      productById.set(row.id, { id: row.id, category_id: row.category_id });
+      if (l.exchange_line_kind === "plus") {
+        qtyByProduct.set(l.product_id, (qtyByProduct.get(l.product_id) ?? 0) + Number(l.qty));
+        orderedProductIds.add(l.product_id);
+      }
     }
-    const price = new Prisma.Decimal(priceStr);
-    const qty = new Prisma.Decimal(it.qty);
-    const lineTotal = qty.mul(price);
-    totalSum = totalSum.add(lineTotal);
-    lineData.push({ product_id: it.product_id, qty, price, total: lineTotal });
-    productById.set(product.id, { id: product.id, category_id: product.category_id });
-    qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) ?? 0) + it.qty);
-    orderedProductIds.add(it.product_id);
+    totalSum = ex.paidTotal;
+    exchangeMetaJson = ex.exchangeMeta as unknown as Prisma.InputJsonValue;
+  } else {
+    // ✅ BATCH validation — dublikat mahsulotlar tekshirish
+    const orderProductIds = new Set(input.items.map((i) => i.product_id));
+    if (orderProductIds.size !== input.items.length) {
+      throw new Error("DUPLICATE_PRODUCT");
+    }
+    for (const it of input.items) {
+      if (!Number.isFinite(it.qty) || it.qty <= 0) {
+        throw new Error("BAD_QTY");
+      }
+    }
+    const productIds = [...orderProductIds];
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, tenant_id: tenantId, is_active: true }
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+    for (const it of input.items) {
+      const product = productMap.get(it.product_id);
+      if (!product) {
+        throw new Error("BAD_PRODUCT");
+      }
+      const priceStr = await getProductPrice(tenantId, it.product_id, priceType);
+      if (priceStr == null) {
+        const e = new Error("NO_PRICE") as Error & { product_id: number; price_type: string };
+        e.product_id = it.product_id;
+        e.price_type = priceType;
+        throw e;
+      }
+      const price = new Prisma.Decimal(priceStr);
+      const qty = new Prisma.Decimal(it.qty);
+      const lineTotal = qty.mul(price);
+      totalSum = totalSum.add(lineTotal);
+      lineData.push({ product_id: it.product_id, qty, price, total: lineTotal });
+      productById.set(product.id, { id: product.id, category_id: product.category_id });
+      qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) ?? 0) + it.qty);
+      orderedProductIds.add(it.product_id);
+    }
   }
 
   /** Vaqtincha noyob raqam; tranzaksiya ichida `String(id)` ga almashtiriladi (qisqa, № bilan mos). */
   const tempOrderNumber = `__${tenantId}_${Date.now()}_${randomBytes(5).toString("hex")}`;
 
-  const orderType = normalizeOrderType(input.order_type);
+  const orderType = orderTypeEarly;
   /** Vozvrat s polki (yoki qo‘lda «возврат») — sotuv emas: klientdan omborga, logistika zanjiri «new…delivered» shart emas. */
   const isInboundShelfReturn = orderType === "return" || orderType === "return_by_order";
 
@@ -633,6 +706,11 @@ export async function createOrder(
     const pm = (input.payment_method_ref ?? "").trim();
     if (!pm) {
       throw new Error("ORDER_REQUIRES_PAYMENT_METHOD");
+    }
+  }
+  if (orderType === "exchange") {
+    if (input.agent_id == null || !Number.isFinite(input.agent_id) || input.agent_id < 1) {
+      throw new Error("EXCHANGE_REQUIRES_AGENT");
     }
   }
 
@@ -648,7 +726,8 @@ export async function createOrder(
     : new Map<number, number>();
 
   const order = await prisma.$transaction(async (tx) => {
-    const applyBonus = isInboundShelfReturn ? false : (input.apply_bonus ?? true);
+    const applyBonus =
+      isInboundShelfReturn || orderType === "exchange" ? false : (input.apply_bonus ?? true);
     let paidAfterDisc = lineData;
     let paidTotal = totalSum;
     let bonusDrafts: Array<{
@@ -700,7 +779,7 @@ export async function createOrder(
       applyBonus && rawDisc.gt(0) ? roundOrderMoney(rawDisc) : new Prisma.Decimal(0);
 
     const creditLimit = client.credit_limit;
-    if (!isInboundShelfReturn && creditLimit.gt(0)) {
+    if (!isInboundShelfReturn && orderType !== "exchange" && creditLimit.gt(0)) {
       const balRow = await tx.clientBalance.findUnique({
         where: { tenant_id_client_id: { tenant_id: tenantId, client_id: client.id } },
         select: { balance: true }
@@ -730,7 +809,8 @@ export async function createOrder(
       }
     }
 
-    const isConsignmentOrder = !isInboundShelfReturn && (input.is_consignment ?? false);
+    const isConsignmentOrder =
+      !isInboundShelfReturn && orderType !== "exchange" && (input.is_consignment ?? false);
     let consignmentDueDate: Date | null = null;
     if (isConsignmentOrder && input.consignment_due_date?.trim()) {
       const d = new Date(input.consignment_due_date.trim());
@@ -796,6 +876,7 @@ export async function createOrder(
     };
     if (!isInboundShelfReturn) {
       for (const l of paidAfterDisc) {
+        if (l.exchange_line_kind === "minus") continue;
         addNeed(l.product_id, l.qty);
       }
       for (const b of bonusCreates) {
@@ -927,6 +1008,9 @@ export async function createOrder(
           orderType === "order"
             ? (input.payment_method_ref ?? "").trim().slice(0, 64) || null
             : null,
+        ...(orderType === "exchange" && exchangeMetaJson != null
+          ? { exchange_meta: exchangeMetaJson }
+          : {}),
         items: {
           create: [
             ...paidAfterDisc.map((l) => ({
@@ -934,7 +1018,8 @@ export async function createOrder(
               qty: l.qty,
               price: l.price,
               total: l.total,
-              is_bonus: false
+              is_bonus: false,
+              exchange_line_kind: l.exchange_line_kind ?? null
             })),
             ...bonusCreates
           ]
@@ -954,6 +1039,34 @@ export async function createOrder(
       }
       for (const b of bonusCreates) {
         addIn(b.product_id, b.qty);
+      }
+      for (const [productId, dq] of inboundByProduct) {
+        if (!dq.gt(0)) continue;
+        await tx.stock.upsert({
+          where: {
+            tenant_id_warehouse_id_product_id: {
+              tenant_id: tenantId,
+              warehouse_id: whId,
+              product_id: productId
+            }
+          },
+          create: {
+            tenant_id: tenantId,
+            warehouse_id: whId,
+            product_id: productId,
+            qty: dq
+          },
+          update: { qty: { increment: dq } }
+        });
+      }
+    } else if (orderType === "exchange") {
+      const inboundByProduct = new Map<number, Prisma.Decimal>();
+      const addInEx = (productId: number, q: Prisma.Decimal) => {
+        const cur = inboundByProduct.get(productId) ?? new Prisma.Decimal(0);
+        inboundByProduct.set(productId, cur.add(q));
+      };
+      for (const l of paidAfterDisc) {
+        if (l.exchange_line_kind === "minus") addInEx(l.product_id, l.qty);
       }
       for (const [productId, dq] of inboundByProduct) {
         if (!dq.gt(0)) continue;
@@ -1692,9 +1805,13 @@ export async function updateOrderStatus(
     if (whId != null) {
       const items = await tx.orderItem.findMany({
         where: { order_id: o.id },
-        select: { product_id: true, qty: true, is_bonus: true }
+        select: { product_id: true, qty: true, is_bonus: true, exchange_line_kind: true }
       });
-      const nonBonusItems = items.filter(i => !i.is_bonus);
+      const nonBonusItems = items.filter((i) => {
+        if (i.is_bonus) return false;
+        if (i.exchange_line_kind === "minus") return false;
+        return true;
+      });
 
       if (trimmed === "confirmed" && fromStatus === "new") {
         // Rezlarga chiqarish + haqiqiy qoldiqdan ayirish
@@ -1721,7 +1838,7 @@ export async function updateOrderStatus(
           });
         }
       } else if (trimmed === "cancelled") {
-        // Rezervni bekor qilish
+        // Rezervni bekor qilish (faqat plus); minus uchun inbound qaytarish
         for (const item of nonBonusItems) {
           await tx.stock.upsert({
             where: {
@@ -1740,6 +1857,28 @@ export async function updateOrderStatus(
             },
             update: {
               reserved_qty: { decrement: item.qty }
+            }
+          });
+        }
+        const minusItems = items.filter((i) => !i.is_bonus && i.exchange_line_kind === "minus");
+        for (const item of minusItems) {
+          await tx.stock.upsert({
+            where: {
+              tenant_id_warehouse_id_product_id: {
+                tenant_id: tenantId,
+                warehouse_id: whId,
+                product_id: item.product_id
+              }
+            },
+            create: {
+              tenant_id: tenantId,
+              warehouse_id: whId,
+              product_id: item.product_id,
+              qty: new Prisma.Decimal(0),
+              reserved_qty: new Prisma.Decimal(0)
+            },
+            update: {
+              qty: { decrement: item.qty }
             }
           });
         }
@@ -1763,6 +1902,28 @@ export async function updateOrderStatus(
             },
             update: {
               reserved_qty: { increment: item.qty }
+            }
+          });
+        }
+        const minusItemsReopen = items.filter((i) => !i.is_bonus && i.exchange_line_kind === "minus");
+        for (const item of minusItemsReopen) {
+          await tx.stock.upsert({
+            where: {
+              tenant_id_warehouse_id_product_id: {
+                tenant_id: tenantId,
+                warehouse_id: whId,
+                product_id: item.product_id
+              }
+            },
+            create: {
+              tenant_id: tenantId,
+              warehouse_id: whId,
+              product_id: item.product_id,
+              qty: item.qty,
+              reserved_qty: new Prisma.Decimal(0)
+            },
+            update: {
+              qty: { increment: item.qty }
             }
           });
         }

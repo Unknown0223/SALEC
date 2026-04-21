@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { DIRECTORY_READ_ROLES, getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { parseSelectedMastersFromQuery, resolveConstraintScope } from "../linkage/linkage.service";
 import { createCashDesk, getCashDesk, listCashDesks, listCashDeskPickers, patchCashDesk } from "./cash-desks.service";
 import {
   closeShift,
@@ -59,14 +60,23 @@ export async function registerCashDeskRoutes(app: FastifyInstance) {
       .object({
         is_active: z.enum(["true", "false"]).optional(),
         q: z.string().optional(),
+        selected_agent_id: z.coerce.number().int().positive().optional(),
+        selected_warehouse_id: z.coerce.number().int().positive().optional(),
+        selected_cash_desk_id: z.coerce.number().int().positive().optional(),
+        selected_expeditor_user_id: z.coerce.number().int().positive().optional(),
         page: z.coerce.number().int().min(1).optional(),
         limit: z.coerce.number().int().min(1).max(200).optional()
       })
       .parse(request.query);
     const is_active = q.is_active === undefined ? undefined : q.is_active === "true";
+    const selected = parseSelectedMastersFromQuery(
+      request.query as Record<string, string | undefined>
+    );
+    const scope = await resolveConstraintScope(tenantId, selected);
     const result = await listCashDesks(tenantId, {
       is_active,
       q: q.q,
+      allowed_ids: scope.constrained ? scope.cash_desk_ids : undefined,
       page: q.page ?? 1,
       limit: q.limit ?? 10
     });

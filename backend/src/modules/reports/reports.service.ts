@@ -291,6 +291,9 @@ export async function getAgentKpi(
     total_orders: string;
     avg_order_sum: string;
     returns_count: number;
+    exchange_minus_qty: string;
+    exchange_plus_qty: string;
+    net_exchange_qty: string;
   }>;
 }> {
   const range = parseDateRange(from, to);
@@ -351,6 +354,24 @@ export async function getAgentKpi(
     GROUP BY o.agent_id
   `;
 
+  const exchangeStats = await prisma.$queryRaw<
+    Array<{ agent_id: number; minus_qty: Prisma.Decimal; plus_qty: Prisma.Decimal }>
+  >`
+    SELECT o.agent_id,
+      COALESCE(SUM(CASE WHEN oi.exchange_line_kind = 'minus' THEN oi.qty ELSE 0 END), 0)::numeric(15,3) AS minus_qty,
+      COALESCE(SUM(CASE WHEN oi.exchange_line_kind = 'plus' THEN oi.qty ELSE 0 END), 0)::numeric(15,3) AS plus_qty
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.id
+    WHERE o.tenant_id = ${tenantId}
+      AND o.order_type = 'exchange'
+      AND o.created_at >= ${start}
+      AND o.created_at <= ${end}
+      AND o.agent_id IS NOT NULL
+      AND o.agent_id IN (${Prisma.join(agentIds)})
+      AND oi.is_bonus = false
+    GROUP BY o.agent_id
+  `;
+
   const oMap = new Map<number, { cnt: bigint; sum: Prisma.Decimal }>(
     orderStats.map((o) => [o.agent_id, { cnt: o.order_count, sum: o.total_sum }])
   );
@@ -360,6 +381,12 @@ export async function getAgentKpi(
   const rMap = new Map<number, bigint>(
     returnStats.map((r) => [r.agent_id, r.returns_count])
   );
+  const exMap = new Map<number, { minus: Prisma.Decimal; plus: Prisma.Decimal }>(
+    exchangeStats.map((r) => [
+      r.agent_id,
+      { minus: r.minus_qty ?? new Prisma.Decimal(0), plus: r.plus_qty ?? new Prisma.Decimal(0) }
+    ])
+  );
 
   return {
     data: agents.map((agent) => {
@@ -368,6 +395,10 @@ export async function getAgentKpi(
       const avg = cnt > 0
         ? new Prisma.Decimal(o.sum).div(cnt).toFixed(2)
         : "0";
+      const ex = exMap.get(agent.id);
+      const minusEx = ex?.minus ?? new Prisma.Decimal(0);
+      const plusEx = ex?.plus ?? new Prisma.Decimal(0);
+      const netEx = plusEx.sub(minusEx);
 
       return {
         user_id: agent.id,
@@ -377,7 +408,10 @@ export async function getAgentKpi(
         order_count: cnt,
         total_orders: o.sum.toString(),
         avg_order_sum: avg,
-        returns_count: Number(rMap.get(agent.id) ?? 0n)
+        returns_count: Number(rMap.get(agent.id) ?? 0n),
+        exchange_minus_qty: minusEx.toString(),
+        exchange_plus_qty: plusEx.toString(),
+        net_exchange_qty: netEx.toString()
       };
     })
   };

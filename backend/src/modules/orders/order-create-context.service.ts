@@ -8,6 +8,7 @@ import {
 } from "../reference/reference.service";
 import { listStaff, type StaffRow } from "../staff/staff.service";
 import { getTenantProfile, type TenantProfileDto } from "../tenant-settings/tenant-settings.service";
+import { resolveConstraintScope, type LinkageSelectedMasters } from "../linkage/linkage.service";
 
 export type OrderCreateContextBundle = {
   clients: Awaited<ReturnType<typeof listClientsForTenantPaged>>["data"];
@@ -23,7 +24,10 @@ export type OrderCreateContextBundle = {
 /**
  * Yangi zakaz formasi uchun bitta javob: oldin 8 ta alohida HTTP o‘rniga serverda parallel DB.
  */
-export async function getOrderCreateContextBundle(tenantId: number): Promise<OrderCreateContextBundle> {
+export async function getOrderCreateContextBundle(
+  tenantId: number,
+  selected: LinkageSelectedMasters = {}
+): Promise<OrderCreateContextBundle> {
   const [
     clientsPaged,
     products,
@@ -45,14 +49,35 @@ export async function getOrderCreateContextBundle(tenantId: number): Promise<Ord
   ]);
 
   const price_types = priceTypesRaw.length ? priceTypesRaw : ["retail"];
+  const scope = await resolveConstraintScope(tenantId, selected);
+
+  const constrainedClients = scope.constrained
+    ? clientsPaged.data.filter((c) => scope.client_ids.includes(c.id))
+    : clientsPaged.data;
+  const constrainedWarehouses = scope.constrained
+    ? warehouses.filter((w) => scope.warehouse_ids.includes(w.id))
+    : warehouses;
+  const constrainedUsers = scope.constrained
+    ? users.filter((u) => u.id === scope.selected_agent_id)
+    : users;
+  const constrainedExpeditors = scope.constrained
+    ? expeditors.filter((r) => r.is_active && scope.expeditor_ids.includes(r.id))
+    : expeditors.filter((r) => r.is_active);
+  const constrainedProducts = scope.constrained
+    ? scope.product_ids.length > 0
+      ? products.filter((p) => scope.product_ids.includes(p.id))
+      : scope.product_restricted
+        ? []
+        : products
+    : products;
 
   return {
-    clients: clientsPaged.data,
-    products,
-    warehouses,
-    users,
+    clients: constrainedClients,
+    products: constrainedProducts,
+    warehouses: constrainedWarehouses,
+    users: constrainedUsers,
     price_types,
-    expeditors: expeditors.filter((r) => r.is_active),
+    expeditors: constrainedExpeditors,
     settings_profile: profile,
     product_categories: categories
   };

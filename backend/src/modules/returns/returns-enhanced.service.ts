@@ -4,8 +4,12 @@ import { prisma } from "../../config/database";
 import { emitOrderUpdated } from "../../lib/order-event-bus";
 import { invalidateDashboard, invalidateStock } from "../../lib/redis-cache";
 import { appendTenantAuditEvent, AuditEntityType } from "../../lib/tenant-audit";
-import { getProductPrice } from "../products/product-prices.service";
+import { assertReturnProductsInterchangeableStrict } from "../products/product-catalog.service";
 import { canTransitionOrderStatus, normalizeOrderType } from "../orders/order-status";
+
+function effectiveReturnPriceType(raw: string | null | undefined): string {
+  return (raw ?? "").trim() || "retail";
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +68,8 @@ export type CreatePeriodReturnInput = {
   order_id?: number;
   date_from?: string;
   date_to?: string;
+  /** Zakaz yaratishdagi narx turi; bo‘lmasa `retail` (interchangeable tekshiruvi). */
+  price_type?: string | null;
   lines: CreatePeriodReturnLine[];
   note?: string | null;
   refusal_reason_ref?: string | null;
@@ -82,6 +88,7 @@ export type CreatePeriodReturnBatchLine = {
 export type CreatePeriodReturnBatchInput = {
   warehouse_id?: number;
   client_id: number;
+  price_type?: string | null;
   lines: CreatePeriodReturnBatchLine[];
   note?: string | null;
   refusal_reason_ref?: string | null;
@@ -994,6 +1001,12 @@ export async function createPeriodReturn(
   if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
   const pMap = new Map(products.map(p => [p.id, p]));
 
+  await assertReturnProductsInterchangeableStrict(
+    tenantId,
+    productIds,
+    effectiveReturnPriceType(input.price_type)
+  );
+
   const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
 
   const orderScoped = input.order_id != null && input.order_id > 0;
@@ -1319,6 +1332,12 @@ export async function createPeriodReturnBatch(
   });
   if (products.length !== productIds.length) throw new Error("BAD_PRODUCT");
   const pMap = new Map(products.map((p) => [p.id, p]));
+
+  await assertReturnProductsInterchangeableStrict(
+    tenantId,
+    productIds,
+    effectiveReturnPriceType(input.price_type)
+  );
 
   const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
 
@@ -1808,6 +1827,7 @@ async function autoMarkReturnedOrders(
 export type FullReturnInput = {
   order_id: number;
   warehouse_id?: number;
+  price_type?: string | null;
   note?: string | null;
   refund_amount?: number;
   refusal_reason_ref?: string | null;
@@ -1866,6 +1886,13 @@ export async function createFullReturnFromOrder(
     return have >= need;
   });
   if (alreadyFullyReturned) throw new Error("ORDER_ALREADY_FULLY_RETURNED");
+
+  const fullReturnProductIds = [...new Set(order.items.map((it) => it.product_id))];
+  await assertReturnProductsInterchangeableStrict(
+    tenantId,
+    fullReturnProductIds,
+    effectiveReturnPriceType(input.price_type)
+  );
 
   const warehouseId = input.warehouse_id ?? await findReturnWarehouse(tenantId);
   const number = `VR-${tenantId}-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;

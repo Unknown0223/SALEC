@@ -25,9 +25,16 @@ function settingsRefRecord(tenantId: number): Promise<Record<string, unknown>> {
     });
 }
 
-export async function listWarehousesForTenant(tenantId: number) {
+export async function listWarehousesForTenant(
+  tenantId: number,
+  opts?: { allowed_ids?: number[] }
+) {
+  const where: Prisma.WarehouseWhereInput = { tenant_id: tenantId };
+  if (opts?.allowed_ids !== undefined) {
+    where.id = { in: opts.allowed_ids };
+  }
   return prisma.warehouse.findMany({
-    where: { tenant_id: tenantId },
+    where,
     orderBy: { name: "asc" },
     select: {
       id: true,

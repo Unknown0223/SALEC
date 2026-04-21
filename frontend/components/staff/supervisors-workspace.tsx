@@ -743,6 +743,14 @@ function SupervisorEditDialog({
     setAgSel(new Set(r.supervisees.map((s) => s.id)));
   }, [r]);
 
+  const filteredAgents = useMemo(() => {
+    const q = agSearch.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter((a) =>
+      `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(q)
+    );
+  }, [agents, agSearch]);
+
   if (!row || !r) return null;
 
   const save = async () => {
@@ -768,14 +776,6 @@ function SupervisorEditDialog({
       setSaving(false);
     }
   };
-
-  const filteredAgents = useMemo(() => {
-    const q = agSearch.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter((a) =>
-      `${a.fio} ${a.code ?? ""} ${a.id}`.toLowerCase().includes(q)
-    );
-  }, [agents, agSearch]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>

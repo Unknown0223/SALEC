@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { DIRECTORY_READ_ROLES, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { parseSelectedMastersFromQuery, resolveConstraintScope } from "../linkage/linkage.service";
 import {
   createProductCategoryRow,
   createWarehouseRow,
@@ -92,7 +93,13 @@ export async function registerReferenceRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const data = await listWarehousesForTenant(request.tenant!.id);
+      const q = request.query as Record<string, string | undefined>;
+      const selected = parseSelectedMastersFromQuery(q);
+      const scope = await resolveConstraintScope(request.tenant!.id, selected);
+      const data = await listWarehousesForTenant(
+        request.tenant!.id,
+        scope.constrained ? { allowed_ids: scope.warehouse_ids } : undefined
+      );
       return reply.send({ data });
     }
   );

@@ -2,6 +2,7 @@
 
 import { OrderSseListener } from "@/components/dashboard/order-sse-listener";
 import {
+  dashboardHomeNav,
   dashboardKassaNav,
   dashboardOrdersNav,
   dashboardSidebarLayout,
@@ -94,6 +95,10 @@ function usersNavChildActive(pathname: string): boolean {
   return dashboardUsersNav.items.some((item) => isNavActive(pathname, item.href));
 }
 
+function dashboardNavChildActive(pathname: string): boolean {
+  return dashboardHomeNav.items.some((item) => !item.disabled && item.href !== "#" && isNavActive(pathname, item.href));
+}
+
 function ordersNavModuleOpen(pathname: string): boolean {
   return pathname.startsWith("/orders") || pathname.startsWith("/returns");
 }
@@ -134,13 +139,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { tenantSlug, clearSession } = useAuthStore();
   const effectiveRole = useEffectiveRole();
-  const [openSection, setOpenSection] = useState<"orders" | "stock" | "kassa" | "users" | null>(null);
+  const [openSection, setOpenSection] = useState<"dashboard" | "orders" | "stock" | "kassa" | "users" | null>(
+    null
+  );
+  const dashboardOpen = openSection === "dashboard";
   const usersOpen = openSection === "users";
   const stockOpen = openSection === "stock";
   const kassaOpen = openSection === "kassa";
   const ordersOpen = openSection === "orders";
 
   useEffect(() => {
+    if (dashboardNavChildActive(pathname)) {
+      setOpenSection("dashboard");
+      return;
+    }
     if (ordersNavModuleOpen(pathname)) {
       setOpenSection("orders");
       return;
@@ -160,7 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setOpenSection(null);
   }, [pathname]);
 
-  function toggleSection(section: "orders" | "stock" | "kassa" | "users") {
+  function toggleSection(section: "dashboard" | "orders" | "stock" | "kassa" | "users") {
     setOpenSection((prev) => (prev === section ? null : section));
   }
 
@@ -192,20 +204,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="scrollbar-none flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden p-2 overscroll-contain">
           {dashboardSidebarLayout.map((entry, idx) => {
             if (entry.kind === "link") {
-              const { href, label } = entry.item;
-              const active = isNavActive(pathname, href);
+              const { href, label, disabled } = entry.item;
+              const active = !disabled && href !== "#" && isNavActive(pathname, href);
               const Icon = linkIcon(href);
+              const className = cn(
+                "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                disabled || href === "#"
+                  ? "cursor-not-allowed text-sidebar-foreground/45"
+                  : active
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                    : "text-sidebar-foreground/90 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
+              );
+              if (disabled || href === "#") {
+                return (
+                  <span key={`${href}-${label}-${idx}`} className={className} aria-disabled>
+                    <ClientLucideIcon icon={Icon} className="size-[18px] shrink-0 opacity-90" />
+                    {label}
+                  </span>
+                );
+              }
               return (
-                <Link
-                  key={`${href}-${idx}`}
-                  href={href}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                      : "text-sidebar-foreground/90 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground"
-                  )}
-                >
+                <Link key={`${href}-${idx}`} href={href} className={className}>
                   <ClientLucideIcon icon={Icon} className="size-[18px] shrink-0 opacity-90" />
                   {label}
                 </Link>
@@ -266,6 +285,61 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+              );
+            }
+
+            if (entry.kind === "dashboard") {
+              return (
+                <div key="dashboard" className="flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection("dashboard")}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                      dashboardNavChildActive(pathname)
+                        ? "bg-sidebar-accent/90 text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/90 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                    )}
+                    aria-expanded={dashboardOpen}
+                  >
+                    {dashboardOpen ? (
+                      <ClientLucideIcon icon={ChevronDown} className="size-4 shrink-0 opacity-80" />
+                    ) : (
+                      <ClientLucideIcon icon={ChevronRight} className="size-4 shrink-0 opacity-80" />
+                    )}
+                    <ClientLucideIcon icon={LayoutDashboard} className="size-[18px] shrink-0 opacity-90" />
+                    <span>{dashboardHomeNav.sectionTitle}</span>
+                  </button>
+                  {dashboardOpen && (
+                    <ul className="ml-1 flex flex-col gap-0.5 border-l border-sidebar-border/60 py-0.5 pl-2">
+                      {dashboardHomeNav.items.map((item) => {
+                        const muted = Boolean(item.disabled || item.href === "#");
+                        const active = !muted && isNavActive(pathname, item.href);
+                        return (
+                          <li key={`${item.label}-${item.href}`}>
+                            {muted ? (
+                              <span className="block cursor-not-allowed rounded-lg px-3 py-2 text-[13px] font-medium text-sidebar-foreground/40">
+                                {item.label}
+                              </span>
+                            ) : (
+                              <Link
+                                href={item.href}
+                                className={cn(
+                                  "block rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
+                                  active
+                                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                                )}
+                              >
+                                {item.label}
+                              </Link>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
                 </div>
               );

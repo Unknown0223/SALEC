@@ -6,7 +6,7 @@ const { execSync, spawnSync } = require("child_process");
 const path = require("path");
 
 const argv = process.argv.slice(2).map((s) => Number.parseInt(s, 10));
-const PORTS = argv.filter((n) => n > 0).length ? argv.filter((n) => n > 0) : [4000, 3000];
+const PORTS = argv.filter((n) => n > 0).length ? argv.filter((n) => n > 0) : [18080, 3000];
 
 function pidsListeningOnPortWindows(port) {
   const out = execSync("netstat -ano", { encoding: "utf8" });

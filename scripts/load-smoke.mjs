@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Oddiy HTTP yuk sinovi (tashqi dependency yo‘q).
- * Misol: node scripts/load-smoke.mjs --base http://127.0.0.1:4000 --path /health --n 500 --c 25
+ * Misol: node scripts/load-smoke.mjs --base http://127.0.0.1:18080 --path /health --n 500 --c 25
  */
 import http from "node:http";
 import https from "node:https";
@@ -14,7 +14,7 @@ function parseArgs() {
     return i >= 0 && a[i + 1] ? a[i + 1] : d;
   };
   return {
-    base: get("--base", "http://127.0.0.1:4000"),
+    base: get("--base", "http://127.0.0.1:18080"),
     path: get("--path", "/health"),
     n: Number(get("--n", "200")),
     c: Number(get("--c", "10"))

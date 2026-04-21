@@ -16,7 +16,7 @@ const nextConfig = {
     /** To‘g‘ridan-to‘g‘ri backend URL — proxy kerak emas (CORS backendda ochiq bo‘lishi kerak). */
     if (process.env.NEXT_PUBLIC_API_URL?.trim()) return [];
 
-    const devTarget = process.env.API_INTERNAL_ORIGIN?.trim() || "http://127.0.0.1:4000";
+    const devTarget = process.env.API_INTERNAL_ORIGIN?.trim() || "http://127.0.0.1:18080";
     if (process.env.NODE_ENV === "development") {
       return [
         { source: "/api/:path*", destination: `${devTarget}/api/:path*` },

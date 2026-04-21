@@ -15,6 +15,7 @@ import {
   getClientReceivables,
   exportClientReceivablesXlsx
 } from "./reports.service";
+import { exportOrderDebtsXlsx, listOrderDebtsReport } from "./order-debts-report.service";
 
 export async function registerReportRoutes(app: FastifyInstance) {
   const preHandler = [jwtAccessVerify];
@@ -147,4 +148,23 @@ export async function registerReportRoutes(app: FastifyInstance) {
   app.get("/api/:slug/reports/receivables", { preHandler }, receivablesListHandler);
   app.get("/api/:slug/reports/client-receivables/export", { preHandler }, receivablesExportHandler);
   app.get("/api/:slug/reports/client-receivables", { preHandler }, receivablesListHandler);
+
+  app.get("/api/:slug/reports/order-debts/export", { preHandler }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const q = request.query as Record<string, string | undefined>;
+    const { buffer, truncated, total } = await exportOrderDebtsXlsx(request.tenant!.id, q);
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", 'attachment; filename="dolgi-po-zakazam.xlsx"')
+      .header("X-Export-Truncated", truncated ? "1" : "0")
+      .header("X-Export-Total", String(total))
+      .send(buffer);
+  });
+
+  app.get("/api/:slug/reports/order-debts", { preHandler }, async (request, reply) => {
+    if (!ensureTenantContext(request, reply)) return;
+    const q = request.query as Record<string, string | undefined>;
+    const data = await listOrderDebtsReport(request.tenant!.id, q);
+    return reply.send(data);
+  });
 }

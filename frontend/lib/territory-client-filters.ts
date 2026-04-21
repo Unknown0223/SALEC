@@ -143,3 +143,99 @@ export function buildPaymentTerritorySelectOptions(
       return [];
   }
 }
+
+function trimText(v: string | null | undefined): string {
+  return String(v ?? "").trim();
+}
+
+function uniqSorted(values: string[]): string[] {
+  const s = new Set<string>();
+  for (const v of values) {
+    const t = trimText(v);
+    if (t) s.add(t);
+  }
+  return Array.from(s).sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+function collectTreeZoneRegionCity(
+  nodes: TerritoryNode[] | undefined,
+  selectedZone: string,
+  selectedRegion: string
+): { zones: string[]; regions: string[]; cities: string[] } {
+  const zones = new Set<string>();
+  const regions = new Set<string>();
+  const cities = new Set<string>();
+
+  const wantZone = trimText(selectedZone);
+  const wantRegion = trimText(selectedRegion);
+
+  const walk = (list: TerritoryNode[], depth: number, path: string[]) => {
+    for (const n of list) {
+      if (n.active === false) continue;
+      const name = trimText(n.name);
+      if (!name) continue;
+      const nextPath = [...path, name];
+      if (depth === 0) {
+        zones.add(name);
+      }
+      if (depth === 1) {
+        const zoneName = nextPath[0] ?? "";
+        if (!wantZone || zoneName === wantZone) regions.add(name);
+      }
+      if (depth === 2) {
+        const zoneName = nextPath[0] ?? "";
+        const regionName = nextPath[1] ?? "";
+        const zoneOk = !wantZone || zoneName === wantZone;
+        const regionOk = !wantRegion || regionName === wantRegion;
+        if (zoneOk && regionOk) cities.add(name);
+      }
+      if (n.children?.length) walk(n.children, depth + 1, nextPath);
+    }
+  };
+
+  walk(nodes ?? [], 0, []);
+  return {
+    zones: Array.from(zones).sort((a, b) => a.localeCompare(b, "ru")),
+    regions: Array.from(regions).sort((a, b) => a.localeCompare(b, "ru")),
+    cities: Array.from(cities).sort((a, b) => a.localeCompare(b, "ru"))
+  };
+}
+
+function toSelectOptions(values: string[], currentValue: string): RefSelectOption[] {
+  const merged = uniqSorted([currentValue, ...values]);
+  return merged.map((v) => ({ value: v, label: v }));
+}
+
+/**
+ * Kaskad tanlash: Зона -> Область -> Город.
+ * Hammasi nom bo‘yicha (kod emas).
+ */
+export function buildZoneRegionCityCascadeOptions(
+  refs: ClientRefsTerritoryBundle | undefined,
+  live: ClientBalanceTerritoryOptions | undefined,
+  territoryNodes: TerritoryNode[] | undefined,
+  current: { zone: string; region: string; city: string }
+): { zones: RefSelectOption[]; regions: RefSelectOption[]; cities: RefSelectOption[] } {
+  const tree = collectTreeZoneRegionCity(territoryNodes, current.zone, current.region);
+
+  const zones = toSelectOptions(
+    uniqSorted([...(refs?.zones ?? []), ...(live?.zones ?? []), ...tree.zones]),
+    current.zone
+  );
+
+  const regionFallback = uniqSorted([
+    ...(refs?.regions ?? []),
+    ...(live?.regions ?? []),
+    ...tree.regions
+  ]);
+  const regions = dedupeRefSelectOptionsByTerritoryDisplayName(
+    mergeRefSelectOptions(current.region, refs?.region_options as RefSelectOption[] | undefined, regionFallback)
+  );
+
+  const cityFallback = uniqSorted([...(refs?.cities ?? []), ...(live?.cities ?? []), ...tree.cities]);
+  const cities = dedupeRefSelectOptionsByTerritoryDisplayName(
+    mergeRefSelectOptions(current.city, refs?.city_options as RefSelectOption[] | undefined, cityFallback)
+  );
+
+  return { zones, regions, cities };
+}

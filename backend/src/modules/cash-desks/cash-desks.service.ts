@@ -64,10 +64,13 @@ function mapLinkRoleCounts(links: { link_role: string }[]) {
 
 export async function listCashDesks(
   tenantId: number,
-  opts: { is_active?: boolean; q?: string; page: number; limit: number }
+  opts: { is_active?: boolean; q?: string; page: number; limit: number; allowed_ids?: number[] }
 ) {
   const where: Prisma.CashDeskWhereInput = { tenant_id: tenantId };
   if (opts.is_active !== undefined) where.is_active = opts.is_active;
+  if (opts.allowed_ids !== undefined) {
+    where.id = { in: opts.allowed_ids };
+  }
   const q = (opts.q ?? "").trim();
   if (q) {
     where.OR = [

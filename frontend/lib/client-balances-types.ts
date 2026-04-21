@@ -9,6 +9,7 @@ export type ClientBalanceRow = {
   client_id: number;
   client_code: string | null;
   name: string;
+  is_active: boolean;
   legal_name: string | null;
   agent_id: number | null;
   agent_name: string | null;

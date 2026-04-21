@@ -1,8 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { parseSelectedMastersFromQuery, resolveConstraintScope } from "../linkage/linkage.service";
 import {
   createSalesReturn,
   listSalesReturns,
@@ -18,10 +19,13 @@ import {
 
 const catalogRoles = ["admin", "operator"] as const;
 
+const priceTypeOptional = z.string().trim().min(1).max(128).optional().nullable();
+
 const createBody = z.object({
   warehouse_id: z.number().int().positive(),
   client_id: z.number().int().positive().nullable().optional(),
   order_id: z.number().int().positive().nullable().optional(),
+  price_type: priceTypeOptional,
   refund_amount: z.number().positive().nullable().optional(),
   note: z.string().max(2000).optional().nullable(),
   refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
@@ -47,6 +51,7 @@ const periodReturnBody = z.object({
   client_id: z.number().int().positive(),
   order_id: z.number().int().positive().optional(),
   warehouse_id: z.number().int().positive().optional(),
+  price_type: priceTypeOptional,
   date_from: z.string().optional(),
   date_to: z.string().optional(),
   note: z.string().max(2000).optional().nullable(),
@@ -77,6 +82,7 @@ const periodReturnBatchLine = z.object({
 const periodReturnBatchBody = z.object({
   client_id: z.number().int().positive(),
   warehouse_id: z.number().int().positive().optional(),
+  price_type: priceTypeOptional,
   note: z.string().max(2000).optional().nullable(),
   refusal_reason_ref: z.string().trim().max(128).optional().nullable(),
   lines: z
@@ -96,10 +102,21 @@ const periodReturnBatchBody = z.object({
 const fullReturnBody = z.object({
   order_id: z.number().int().positive(),
   warehouse_id: z.number().int().positive().optional(),
+  price_type: priceTypeOptional,
   refund_amount: z.number().positive().optional(),
   note: z.string().max(2000).optional().nullable(),
   refusal_reason_ref: z.string().trim().max(128).optional().nullable()
 });
+
+function sendReturnNotInterchangeable(reply: FastifyReply, e: unknown) {
+  const pid = (e as Error & { product_id?: number }).product_id;
+  return reply.status(400).send({
+    error: "ReturnNotInterchangeable",
+    ...(pid != null ? { product_id: pid } : {}),
+    message:
+      "Mahsulot faol interchangeable guruhda emas yoki tanlangan narx turi guruh bilan mos emas. Katalogda guruhni tekshiring."
+  });
+}
 
 export async function registerSalesReturnRoutes(app: FastifyInstance) {
   // ─── List returns ──────────────────────────────────────────────────────
@@ -113,10 +130,14 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
       const limit = Math.min(100, Math.max(1, Number.parseInt(q.limit ?? "30", 10) || 30));
       const warehouse_id = q.warehouse_id ? Number.parseInt(q.warehouse_id, 10) : undefined;
       const client_id = q.client_id ? Number.parseInt(q.client_id, 10) : undefined;
+      const selected = parseSelectedMastersFromQuery(q);
+      const scope = await resolveConstraintScope(request.tenant!.id, selected);
       const result = await listSalesReturns(request.tenant!.id, {
         page, limit,
         warehouse_id: warehouse_id != null && warehouse_id > 0 ? warehouse_id : undefined,
-        client_id: client_id != null && client_id > 0 ? client_id : undefined
+        client_id: client_id != null && client_id > 0 ? client_id : undefined,
+        warehouse_ids: scope.constrained ? scope.warehouse_ids : undefined,
+        client_ids: scope.constrained ? scope.client_ids : undefined
       });
       return reply.send(result);
     }
@@ -145,6 +166,11 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
       const clientId = Number.parseInt(q.client_id ?? "0", 10);
       if (!Number.isFinite(clientId) || clientId < 1) {
         return reply.status(400).send({ error: "ClientIdRequired" });
+      }
+      const selected = parseSelectedMastersFromQuery(q);
+      const scope = await resolveConstraintScope(request.tenant!.id, selected);
+      if (scope.constrained && !scope.client_ids.includes(clientId)) {
+        return reply.status(400).send({ error: "BadClientScope" });
       }
       const orderIdsRaw = q.order_ids?.trim();
       let orderIds: number[] | undefined;
@@ -222,6 +248,7 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
         if (code === "MIXED_LINE_MODES" || code === "MIXED_LINE_FIELDS")
           return reply.status(400).send({ error: "BadLineMode" });
         if (code === "EMPTY_LINE") return reply.status(400).send({ error: "EmptyLine" });
+        if (code === "RETURN_NOT_INTERCHANGEABLE") return sendReturnNotInterchangeable(reply, e);
         throw e;
       }
     }
@@ -267,6 +294,7 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
         if (code === "MIXED_LINE_MODES" || code === "MIXED_LINE_FIELDS")
           return reply.status(400).send({ error: "BadLineMode" });
         if (code === "EMPTY_LINE") return reply.status(400).send({ error: "EmptyLine" });
+        if (code === "RETURN_NOT_INTERCHANGEABLE") return sendReturnNotInterchangeable(reply, e);
         throw e;
       }
     }
@@ -293,6 +321,7 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
         if (code === "ORDER_ALREADY_FULLY_RETURNED")
           return reply.status(409).send({ error: "OrderAlreadyFullyReturned" });
         if (code === "NO_WAREHOUSE") return reply.status(400).send({ error: "NoWarehouse" });
+        if (code === "RETURN_NOT_INTERCHANGEABLE") return sendReturnNotInterchangeable(reply, e);
         throw e;
       }
     }
@@ -321,6 +350,7 @@ export async function registerSalesReturnRoutes(app: FastifyInstance) {
         if (msg === "BAD_QTY") return reply.status(400).send({ error: "BadQty" });
         if (msg === "EMPTY_LINES") return reply.status(400).send({ error: "EmptyLines" });
         if (msg === "REFUND_NEEDS_CLIENT") return reply.status(400).send({ error: "RefundNeedsClient" });
+        if (msg === "RETURN_NOT_INTERCHANGEABLE") return sendReturnNotInterchangeable(reply, e);
         throw e;
       }
     }

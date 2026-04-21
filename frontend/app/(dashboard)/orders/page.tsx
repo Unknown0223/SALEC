@@ -12,7 +12,6 @@ import { PageShell } from "@/components/dashboard/page-shell";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { DateRangePopover, formatDateRangeButton } from "@/components/ui/date-range-popover";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useAuthStoreHydrated, useEffectiveRole } from "@/lib/auth-store";
@@ -65,7 +64,6 @@ import {
   Eye,
   ListOrdered,
   RefreshCw,
-  Search,
   Settings
 } from "lucide-react";
 import Link from "next/link";
@@ -292,8 +290,6 @@ function OrdersPageContent() {
   const effectiveRole = useEffectiveRole();
   const qc = useQueryClient();
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(() => new Set());
   const [bulkTargetStatus, setBulkTargetStatus] = useState("");
   const [bulkFeedback, setBulkFeedback] = useState<string | null>(null);
@@ -366,11 +362,6 @@ function OrdersPageContent() {
     allowedPageSizes: [15, 20, 30, 50, 100]
   });
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchInput.trim().slice(0, 200)), 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
   const replaceOrdersQuery = useCallback(
     (patch: Partial<OrdersUrlFilters>) => {
       const cur = parseOrdersUrl(searchParams);
@@ -419,19 +410,6 @@ function OrdersPageContent() {
     [pathname, router, searchParams]
   );
 
-  const prevDebouncedSearchRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevDebouncedSearchRef.current === null) {
-      prevDebouncedSearchRef.current = debouncedSearch;
-      return;
-    }
-    if (prevDebouncedSearchRef.current === debouncedSearch) return;
-    prevDebouncedSearchRef.current = debouncedSearch;
-    const cur = parseOrdersUrl(searchParams);
-    if (cur.page <= 1) return;
-    replaceOrdersQuery({ page: 1 });
-  }, [debouncedSearch, replaceOrdersQuery, searchParams]);
-
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "orders",
@@ -452,7 +430,6 @@ function OrdersPageContent() {
       filters.payment_method_ref,
       filters.product_id,
       filters.client_category,
-      debouncedSearch,
       tablePrefs.pageSize
     ],
     enabled: Boolean(tenantSlug),
@@ -466,7 +443,6 @@ function OrdersPageContent() {
       if (filters.status.trim()) params.set("status", filters.status.trim());
       if (filters.order_type) params.set("order_type", filters.order_type);
       if (filters.client_id) params.set("client_id", filters.client_id);
-      if (debouncedSearch) params.set("q", debouncedSearch);
       if (filters.warehouse_id) params.set("warehouse_id", filters.warehouse_id);
       if (filters.agent_id) params.set("agent_id", filters.agent_id);
       if (filters.expeditor_id) params.set("expeditor_id", filters.expeditor_id);
@@ -1210,31 +1186,10 @@ function OrdersPageContent() {
                 {filterVisibility.priceType ? <OrdersFilterStubSelect label="Тип цены" /> : null}
                 {filterVisibility.day ? <OrdersFilterStubSelect label="День" /> : null}
                 {filterVisibility.clientCategory ? (
-                <label className="orders-filter-field-label">
-                  Категория клиента
-                  <Input
-                    className="h-9"
-                    placeholder="Напр. VIP"
-                    maxLength={128}
-                    value={filters.client_category}
-                    onChange={(e) => replaceOrdersQuery({ client_category: e.target.value, page: 1 })}
-                  />
-                </label>
+                <OrdersFilterStubSelect label="Категория клиента" />
                 ) : null}
                 {filterVisibility.clientId ? (
-                <label className="orders-filter-field-label">
-                  Клиенты (ID)
-                  <Input
-                    className="h-9 font-mono text-sm"
-                    inputMode="numeric"
-                    placeholder="ID"
-                    value={filters.client_id}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/\D/g, "").slice(0, 12);
-                      replaceOrdersQuery({ client_id: v, page: 1 });
-                    }}
-                  />
-                </label>
+                <OrdersFilterStubSelect label="Клиенты (ID)" />
                 ) : null}
                 {filterVisibility.productCategory ? (
                 <label className="orders-filter-field-label">
@@ -1463,16 +1418,6 @@ function OrdersPageContent() {
                     ))}
                   </select>
                 </label>
-                <div className="relative min-w-[12rem] max-w-md flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Поиск"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    className="h-9 bg-background pl-9 text-foreground"
-                    title="Номер, клиент, комментарий"
-                  />
-                </div>
                 <Button
                   type="button"
                   variant="outline"

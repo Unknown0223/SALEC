@@ -1,11 +1,25 @@
-# Staff import uchun namuna `.xlsx`
+# Staff import — `scripts/data` dagi Excel
 
-Ushbu katalogdagi uchta fayl `npm run import:once` / staff import oqimi bilan ishlatiladi; nomlar `sync-staff-xlsx-from-downloads.cjs` bilan mos keladi:
+`npm run import:once` va `npm run import:staff:triple` **bir xil** import modulidan foydalanadi (`scripts/lib/active-agents-xlsx-import.ts`). Ishga tushirish: **`backend` papkasidan** (`cd backend`), chunki yo‘llar `scripts/data/...` ga nisbatan.
 
-| Fayl | Maqsad |
-|------|--------|
-| `Активные агенты (2).xlsx` | Agentlar |
-| `Активные Активные экспедиторы (2).xlsx` | Ekspeditorlar |
-| `Супервайзеры (1).xlsx` | Supervayzerlar |
+## Boshqa kompyuter / git clone
 
-Downloads dan nusxa: `node backend/scripts/sync-staff-xlsx-from-downloads.cjs` (Windows: `%USERPROFILE%\Downloads` dan `backend/scripts/data` ga).
+1. Uchta faylni shu katalogga qo‘ying (ketma-ketlik: avval agentlar, keyin eksportlar, oxirida supervayzer — SVR «Агент» ustuni agentlarga bog‘lanadi).
+
+2. **Tavsiya etilgan nomlar** (ASCII, har qanday OSda qulay):
+
+| Fayl | Rol |
+|------|-----|
+| `staff-agents.xlsx` | Faol agentlar |
+| `staff-expeditors.xlsx` | Faol eksportlar |
+| `staff-supervisors.xlsx` | Supervayzerlar |
+
+3. Alternativa: ruscha nomlar yoki `active-agents.xlsx` / `active-expeditors.xlsx` / `active-supervisors.xlsx` — to‘liq ro‘yxat `resolveAgentsXlsxPath` / `resolveExpeditorsXlsxPath` / `resolveSupervisorsXlsxPath` funksiyalarida.
+
+4. Downloads dan avtomatik nusxa: `npm run sync:staff-xlsx` (`%USERPROFILE%\Downloads` → `scripts/data`, standart nomlar bilan).
+
+5. Tekshiruv (bazaga yozmaydi): `npm run validate:staff-xlsx` (default: Downloads dagi `(3)`/`(2)` nomlari; argv bilan `scripts/data` ga yo‘l berish mumkin).
+
+## Eski nomlar (hali ham ishlaydi)
+
+Masalan: `Активные агенты (2).xlsx`, `Активные Активные экспедиторы (2).xlsx`, `Супервайзеры (1).xlsx` — agar yuqoridagi `staff-*.xlsx` yo‘q bo‘lsa, navbatdagi nom sinanadi.

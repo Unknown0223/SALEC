@@ -24,6 +24,13 @@ import {
 type StaffPick = { id: number; fio: string; code?: string | null };
 
 type CashDeskRow = { id: number; name: string; is_active: boolean };
+type LinkageScope = {
+  selected_agent_id: number | null;
+  selected_cash_desk_id?: number | null;
+  constrained: boolean;
+  client_ids: number[];
+  cash_desk_ids: number[];
+};
 
 type PaymentBlock = {
   key: string;
@@ -109,6 +116,7 @@ export function AddPaymentForm({
   const [agentFilterId, setAgentFilterId] = useState("");
   const [blocks, setBlocks] = useState<PaymentBlock[]>(() => [newBlock()]);
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
   const clientsQ = useQuery({
     queryKey: ["clients", tenantSlug, "add-payment-form"],
@@ -156,6 +164,48 @@ export function AddPaymentForm({
     }
   });
 
+  const selectedAgentIdNum = agentFilterId.trim() ? Number.parseInt(agentFilterId.trim(), 10) : NaN;
+  const selectedCashDeskIdNum = useMemo(() => {
+    const ids = Array.from(
+      new Set(
+        blocks
+          .map((b) => Number.parseInt(b.cash_desk_id.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n > 0)
+      )
+    );
+    return ids.length === 1 ? ids[0]! : NaN;
+  }, [blocks]);
+  const linkageQ = useQuery({
+    queryKey: [
+      "linkage-options",
+      tenantSlug,
+      "add-payment",
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null,
+      Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0 ? selectedCashDeskIdNum : null
+    ],
+    enabled: Boolean(tenantSlug) && hydrated,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      if (
+        (!Number.isFinite(selectedAgentIdNum) || selectedAgentIdNum < 1) &&
+        (!Number.isFinite(selectedCashDeskIdNum) || selectedCashDeskIdNum < 1)
+      ) {
+        return null;
+      }
+      const params = new URLSearchParams();
+      if (Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0) {
+        params.set("selected_agent_id", String(selectedAgentIdNum));
+      }
+      if (Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0) {
+        params.set("selected_cash_desk_id", String(selectedCashDeskIdNum));
+      }
+      const { data } = await api.get<{ data: LinkageScope }>(
+        `/api/${tenantSlug}/linkage/options?${params.toString()}`
+      );
+      return data.data;
+    }
+  });
+
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "add-payment-refs"],
     enabled: Boolean(tenantSlug) && hydrated,
@@ -173,10 +223,46 @@ export function AddPaymentForm({
 
   const filteredClients = useMemo(() => {
     const all = clientsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (scope?.constrained) {
+      const allowed = new Set(scope.client_ids);
+      return all.filter((c) => allowed.has(c.id));
+    }
     const aid = agentFilterId.trim() ? Number.parseInt(agentFilterId, 10) : NaN;
     if (!Number.isFinite(aid) || aid < 1) return all;
     return all.filter((c) => c.agent_id === aid);
-  }, [clientsQ.data, agentFilterId]);
+  }, [clientsQ.data, linkageQ.data, agentFilterId]);
+  const filteredCashDesks = useMemo(() => {
+    const all = cashDesksQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.cash_desk_ids);
+    return all.filter((d) => allowed.has(d.id));
+  }, [cashDesksQ.data, linkageQ.data]);
+
+  useEffect(() => {
+    if (!clientId.trim()) return;
+    if (!filteredClients.some((c) => String(c.id) === clientId)) {
+      setClientId("");
+      setSelectionNotice("Klient tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [clientId, filteredClients]);
+
+  useEffect(() => {
+    const allowed = new Set(filteredCashDesks.map((d) => String(d.id)));
+    setBlocks((prev) => {
+      let changed = false;
+      const next = prev.map((b) => {
+        if (!b.cash_desk_id.trim() || allowed.has(b.cash_desk_id.trim())) return b;
+        changed = true;
+        return { ...b, cash_desk_id: "" };
+      });
+      if (changed) {
+        setSelectionNotice("Kassa tanlovi yangilandi: mos bo‘lmagan qiymatlar olib tashlandi.");
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredCashDesks]);
 
   const paySelectOpts = useMemo(
     () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
@@ -297,6 +383,11 @@ export function AddPaymentForm({
       {formErr ? (
         <p className="text-sm text-destructive" role="alert">
           {formErr}
+        </p>
+      ) : null}
+      {selectionNotice ? (
+        <p className="text-sm text-amber-700 dark:text-amber-300" role="status">
+          {selectionNotice}
         </p>
       ) : null}
 
@@ -473,7 +564,7 @@ export function AddPaymentForm({
                   onChange={(e) => updateBlock(b.key, { cash_desk_id: e.target.value })}
                   disabled={submitMut.isPending}
                 >
-                  {(cashDesksQ.data ?? []).map((d) => (
+                  {filteredCashDesks.map((d) => (
                     <option key={d.id} value={String(d.id)}>
                       {d.name}
                     </option>

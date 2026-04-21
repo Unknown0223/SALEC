@@ -23,6 +23,13 @@ import {
 } from "../tenant-settings/tenant-settings.service";
 import { salesRefStoredValue } from "../sales-directions/sales-directions.service";
 import { ClientImportRefResolver } from "./client-import-ref-resolve";
+import {
+  buildDuplicateCompositeKey,
+  duplicateKeyFromExistingRow,
+  filterClientUpdateInputByApplyFields,
+  normalizeDuplicateKeyFields,
+  normalizeUpdateApplyFields
+} from "./client-import-masks";
 import { buildClientReconciliationPdf } from "./client-reconciliation-pdf";
 import { normKeyTerritoryMatch } from "../../../shared/territory-lalaku-seed";
 
@@ -128,6 +135,18 @@ export type ListClientsQuery = {
   inn?: string;
   /** Telefon qismiy moslik */
   phone?: string;
+  /** ПИНФЛ / JSHSHIR qismiy moslik */
+  client_pinfl?: string;
+  /** Faol inventar (olib tashlanmagan) qatori bor mijozlar */
+  has_active_equipment?: boolean;
+  /** Faol inventarda `equipment_kind` yoki `inventory_type` dan biriga mos (contains, case-insensitive) */
+  equipment_kind?: string;
+  /** `credit_limit` > 0 */
+  has_credit?: boolean;
+  /** Asosiy yoki slot agenti `User.consignment === true` */
+  agent_consignment?: "yes" | "no";
+  /** Asosiy yoki slot agentida `consignment_limit_amount` berilgan */
+  agent_consignment_limited?: "yes" | "no";
   /** YYYY-MM-DD — `created_at` dan katta yoki teng */
   created_from?: string;
   /** YYYY-MM-DD — `created_at` kichik yoki teng (kun oxirigacha) */
@@ -180,6 +199,8 @@ export type ClientReferences = {
   sales_channels: string[];
   product_category_refs: string[];
   logistics_services: string[];
+  /** Faol inventar bo‘yicha noyob `equipment_kind` / `inventory_type` qiymatlari (filtr select). */
+  equipment_filter_values: string[];
   /** UI: `label` — nom, `value` — DB / filtrda saqlanadigan qiymat (odatda kod). */
   category_options: ClientRefOptionDto[];
   client_type_options: ClientRefOptionDto[];
@@ -373,12 +394,19 @@ export type AgentAssignmentPatch = {
   visit_weekdays?: number[];
 };
 
+type ReplaceClientAgentAssignmentsOptions = {
+  /** Importda IDlar staff lookup bilan allaqachon tekshirilgan bo‘lsa, `user.findFirst` takrorini o‘chirish. */
+  skipStaffDbValidation?: boolean;
+};
+
 async function replaceClientAgentAssignments(
   tx: Prisma.TransactionClient,
   tenantId: number,
   clientId: number,
-  raw: AgentAssignmentPatch[]
+  raw: AgentAssignmentPatch[],
+  options?: ReplaceClientAgentAssignmentsOptions
 ): Promise<void> {
+  const skipStaffDbValidation = options?.skipStaffDbValidation === true;
   const bySlot = new Map<number, AgentAssignmentPatch>();
   for (const s of raw) {
     const slot = Math.floor(Number(s.slot));
@@ -405,13 +433,17 @@ async function replaceClientAgentAssignments(
       if (!Number.isFinite(uid) || uid < 1) {
         throw new Error("VALIDATION");
       }
-      const u = await tx.user.findFirst({
-        where: { id: uid, tenant_id: tenantId, is_active: true }
-      });
-      if (!u) {
-        throw new Error("VALIDATION");
+      if (skipStaffDbValidation) {
+        agent_id = uid;
+      } else {
+        const u = await tx.user.findFirst({
+          where: { id: uid, tenant_id: tenantId, is_active: true }
+        });
+        if (!u) {
+          throw new Error("VALIDATION");
+        }
+        agent_id = uid;
       }
-      agent_id = uid;
     }
 
     let visit_date: Date | null = null;
@@ -431,13 +463,17 @@ async function replaceClientAgentAssignments(
       if (!Number.isFinite(eid) || eid < 1) {
         throw new Error("VALIDATION");
       }
-      const eu = await tx.user.findFirst({
-        where: { id: eid, tenant_id: tenantId, is_active: true }
-      });
-      if (!eu) {
-        throw new Error("VALIDATION");
+      if (skipStaffDbValidation) {
+        expeditor_user_id = eid;
+      } else {
+        const eu = await tx.user.findFirst({
+          where: { id: eid, tenant_id: tenantId, is_active: true }
+        });
+        if (!eu) {
+          throw new Error("VALIDATION");
+        }
+        expeditor_user_id = eid;
       }
-      expeditor_user_id = eid;
     }
 
     const weekdaysJson = visitWeekdaysToPrismaJson(s.visit_weekdays ?? []);
@@ -462,9 +498,9 @@ async function replaceClientAgentAssignments(
   }
 
   await tx.clientAgentAssignment.deleteMany({ where: { client_id: clientId } });
-  for (const r of rows) {
-    await tx.clientAgentAssignment.create({
-      data: {
+  if (rows.length > 0) {
+    await tx.clientAgentAssignment.createMany({
+      data: rows.map((r) => ({
         tenant_id: tenantId,
         client_id: clientId,
         slot: r.slot,
@@ -473,7 +509,7 @@ async function replaceClientAgentAssignments(
         expeditor_phone: r.expeditor_phone,
         expeditor_user_id: r.expeditor_user_id,
         visit_weekdays: r.visit_weekdays
-      }
+      }))
     });
   }
 
@@ -538,7 +574,7 @@ async function syncAssignmentSlotOneWithClientRow(
 }
 
 export async function getClientReferences(tenantId: number): Promise<ClientReferences> {
-  const [clientRows, tenant, salesChannelRows] = await Promise.all([
+  const [clientRows, tenant, salesChannelRows, equipmentRows] = await Promise.all([
     prisma.client.findMany({
       where: { tenant_id: tenantId, merged_into_client_id: null },
       select: {
@@ -562,6 +598,10 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     prisma.salesChannelRef.findMany({
       where: { tenant_id: tenantId, is_active: true },
       select: { code: true, name: true }
+    }),
+    prisma.clientEquipment.findMany({
+      where: { tenant_id: tenantId, removed_at: null },
+      select: { equipment_kind: true, inventory_type: true }
     })
   ]);
 
@@ -597,6 +637,14 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
   const regionPairs = territoryRegionStoredPairs(settingsRef as Record<string, unknown> | undefined);
   const cityTerritoryHints = buildCityTerritoryHints(settingsRef as Record<string, unknown> | undefined);
 
+  const equipVals = new Set<string>();
+  for (const er of equipmentRows) {
+    const k = er.equipment_kind?.trim();
+    if (k) equipVals.add(k);
+    const inv = er.inventory_type?.trim();
+    if (inv) equipVals.add(inv);
+  }
+
   return {
     categories: normalizeDistinct([...setCat, ...clientRows.map((r) => r.category)]),
     client_type_codes: normalizeDistinct([...setTypes, ...clientRows.map((r) => r.client_type_code)]),
@@ -613,6 +661,7 @@ export async function getClientReferences(tenantId: number): Promise<ClientRefer
     ]),
     product_category_refs: normalizeDistinct([...setProdCat, ...clientRows.map((r) => r.product_category_ref)]),
     logistics_services: normalizeDistinct([...setLogistics, ...clientRows.map((r) => r.logistics_service)]),
+    equipment_filter_values: [...equipVals].sort((a, b) => a.localeCompare(b, "ru")),
     category_options: mergeClientRefSelectOpts(
       catParsed,
       strArr("client_categories"),
@@ -799,6 +848,87 @@ export async function buildClientListWhereInput(
     andList.push({ phone: { contains: phoneQ, mode: "insensitive" } });
   }
 
+  const pinflQ = q.client_pinfl?.trim();
+  if (pinflQ) {
+    andList.push({ client_pinfl: { contains: pinflQ, mode: "insensitive" } });
+  }
+
+  if (q.has_active_equipment === true) {
+    andList.push({
+      client_equipment: { some: { removed_at: null } }
+    });
+  } else if (q.has_active_equipment === false) {
+    andList.push({
+      NOT: { client_equipment: { some: { removed_at: null } } }
+    });
+  }
+
+  const equipQ = q.equipment_kind?.trim();
+  if (equipQ) {
+    andList.push({
+      client_equipment: {
+        some: {
+          removed_at: null,
+          OR: [
+            { equipment_kind: { contains: equipQ, mode: "insensitive" } },
+            { inventory_type: { contains: equipQ, mode: "insensitive" } }
+          ]
+        }
+      }
+    });
+  }
+
+  const zeroCredit = new Prisma.Decimal(0);
+  if (q.has_credit === true) {
+    andList.push({ credit_limit: { gt: zeroCredit } });
+  } else if (q.has_credit === false) {
+    andList.push({ credit_limit: { lte: zeroCredit } });
+  }
+
+  if (q.agent_consignment === "yes") {
+    andList.push({
+      OR: [
+        { agent: { consignment: true } },
+        { agent_assignments: { some: { agent: { consignment: true } } } }
+      ]
+    });
+  } else if (q.agent_consignment === "no") {
+    andList.push({
+      NOT: {
+        OR: [
+          { agent: { consignment: true } },
+          { agent_assignments: { some: { agent: { consignment: true } } } }
+        ]
+      }
+    });
+  }
+
+  if (q.agent_consignment_limited === "yes") {
+    andList.push({
+      OR: [
+        { agent: { consignment_limit_amount: { not: null } } },
+        {
+          agent_assignments: {
+            some: { agent: { consignment_limit_amount: { not: null } } }
+          }
+        }
+      ]
+    });
+  } else if (q.agent_consignment_limited === "no") {
+    andList.push({
+      NOT: {
+        OR: [
+          { agent: { consignment_limit_amount: { not: null } } },
+          {
+            agent_assignments: {
+              some: { agent: { consignment_limit_amount: { not: null } } }
+            }
+          }
+        ]
+      }
+    });
+  }
+
   const createdAtFilter: Prisma.DateTimeFilter = {};
   const crFrom = q.created_from?.trim();
   const crTo = q.created_to?.trim();
@@ -831,6 +961,7 @@ export async function buildClientListWhereInput(
         { name: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
         { inn: { contains: search, mode: "insensitive" } },
+        { client_pinfl: { contains: search, mode: "insensitive" } },
         { region: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
         { district: { contains: search, mode: "insensitive" } },
@@ -2303,7 +2434,49 @@ function normalizeHeaderLabel(h: string): string {
     .replace(/[()]/g, "")
     .replace(/\s*[/\\]+\s*/g, "_")
     .replace(/\s+/g, "_")
+    .replace(/[_-]{2,}/g, "_")
+    .replace(/^_+|_+$/g, "")
     .replace(/[''`«»]/g, "");
+}
+
+function parseImportSlotFromHeader(n: string, stem: "агент" | "экспедитор"): number | null {
+  const m = new RegExp(`^${stem}_?(\\d+)$`).exec(n);
+  if (m) {
+    const slot = Number.parseInt(m[1], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= CONTACT_SLOTS) return slot;
+  }
+  /** «Эксп. 2» → `эксп._2`, «Эксп_2» → `эксп_2`, «Эксп2» → `эксп2` */
+  if (stem === "экспедитор") {
+    const mShort =
+      /^эксп(?:[._]+|\s*)(\d+)$/.exec(n) ||
+      /^эксп(\d+)$/.exec(n);
+    if (mShort) {
+      const slot = Number.parseInt(mShort[1], 10);
+      if (Number.isFinite(slot) && slot >= 1 && slot <= CONTACT_SLOTS) return slot;
+    }
+  }
+  return null;
+}
+
+function parseImportAgentDaysSlotFromHeader(n: string): number | null {
+  const m1 = /^агент_?(\d+)_?(день|дни|день_посещения|дни_посещения)$/.exec(n);
+  if (m1) {
+    const slot = Number.parseInt(m1[1], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= CONTACT_SLOTS) return slot;
+  }
+  /** «День 2», «День2», «Дни 3» — «Агент N день» prefiksisiz eksportlar. */
+  const mDay = /^(день|дни)_?(\d+)$/.exec(n);
+  if (mDay) {
+    const slot = Number.parseInt(mDay[2], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= CONTACT_SLOTS) return slot;
+  }
+  const mVisit = /^(день|дни)_посещения_?(\d+)$/.exec(n);
+  if (mVisit) {
+    const slot = Number.parseInt(mVisit[2], 10);
+    if (Number.isFinite(slot) && slot >= 1 && slot <= CONTACT_SLOTS) return slot;
+  }
+  if (n === "день" || n === "дни" || n === "день_посещения" || n === "дни_посещения") return 1;
+  return null;
 }
 
 function headerToClientImportKey(h: string): string | null {
@@ -2321,21 +2494,12 @@ function excelHeaderToImportKey(label: string): string | null {
   const direct = headerToClientImportKey(label);
   if (direct) return direct;
   const n = normalizeHeaderLabel(label);
-  const m1 = /^агент_(\d+)$/.exec(n);
-  if (m1) {
-    const slot = Number.parseInt(m1[1], 10);
-    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_agent_${slot}`;
-  }
-  const m2 = /^агент_(\d+)_день$/.exec(n);
-  if (m2) {
-    const slot = Number.parseInt(m2[1], 10);
-    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_agent_${slot}_days`;
-  }
-  const m3 = /^экспедитор_(\d+)$/.exec(n);
-  if (m3) {
-    const slot = Number.parseInt(m3[1], 10);
-    if (slot >= 1 && slot <= CONTACT_SLOTS) return `import_expeditor_${slot}`;
-  }
+  const agentSlot = parseImportSlotFromHeader(n, "агент");
+  if (agentSlot != null) return `import_agent_${agentSlot}`;
+  const daySlot = parseImportAgentDaysSlotFromHeader(n);
+  if (daySlot != null) return `import_agent_${daySlot}_days`;
+  const expeditorSlot = parseImportSlotFromHeader(n, "экспедитор");
+  if (expeditorSlot != null) return `import_expeditor_${expeditorSlot}`;
   return null;
 }
 
@@ -2657,10 +2821,33 @@ export async function buildClientUpdateImportTemplateBuffer(
 }
 
 const IMPORT_MAX_ERRORS_RETURNED = 100;
+const IMPORT_MAX_WARNINGS_RETURNED = 120;
+const IMPORT_PROGRESS_STEP_ROWS = 75;
+/** Progress matnida «пачка k / K» uchun (navbatma-navbat qatorlar guruhi). */
+const IMPORT_PROGRESS_CHUNK_ROWS = 1000;
 /** Birinchi qatorlardan qaysi birida sarlavha ekanini qidiramiz (sarlavha 3–10-qatorda bo‘lishi mumkin). */
 const IMPORT_HEADER_SCAN_ROWS = 50;
 /** Bitta varaqdan yuklab olinadigan maksimal qator (xotira / vaqt). */
 const IMPORT_MAX_DATA_ROWS = 200_000;
+
+export type ClientImportProgressStage =
+  | "queued"
+  | "parsing"
+  | "resolving"
+  | "writing"
+  | "finalizing"
+  | "done"
+  | "failed";
+
+export type ClientImportProgress = {
+  stage: ClientImportProgressStage;
+  percent: number;
+  processedRows: number;
+  totalRows: number;
+  message?: string;
+};
+
+type ClientImportProgressSink = (progress: ClientImportProgress) => void | Promise<void>;
 
 function buildColIndexFromHeaderRow(headerCells: unknown): Record<string, number> | null {
   if (!Array.isArray(headerCells)) return null;
@@ -2674,6 +2861,63 @@ function buildColIndexFromHeaderRow(headerCells: unknown): Record<string, number
   const hasName = Object.prototype.hasOwnProperty.call(colIndexByKey, "name");
   const hasDbId = Object.prototype.hasOwnProperty.call(colIndexByKey, "client_db_id");
   return hasName || hasDbId ? colIndexByKey : null;
+}
+
+function isPotentialAssignmentHeaderLabel(label: string): boolean {
+  const n = normalizeHeaderLabel(label);
+  if (!n) return false;
+  if (!/\d/.test(n)) return false;
+  return n.includes("агент") || n.includes("экспедитор");
+}
+
+function collectUnknownAssignmentHeaders(headerCells: unknown): string[] {
+  if (!Array.isArray(headerCells)) return [];
+  const out: string[] = [];
+  for (const cell of headerCells) {
+    const label = headerLabelFromCell(cell);
+    if (!label) continue;
+    if (!isPotentialAssignmentHeaderLabel(label)) continue;
+    const key = excelHeaderToImportKey(label);
+    if (!key) out.push(label);
+  }
+  return out;
+}
+
+type ImportWarningCollector = {
+  push: (message: string) => void;
+  list: string[];
+};
+
+function createImportWarningCollector(limit = IMPORT_MAX_WARNINGS_RETURNED): ImportWarningCollector {
+  const list: string[] = [];
+  const seen = new Set<string>();
+  return {
+    list,
+    push(message: string) {
+      const msg = message.trim();
+      if (!msg || seen.has(msg)) return;
+      seen.add(msg);
+      if (list.length < limit) list.push(msg);
+    }
+  };
+}
+
+function normalizeProgressPercent(percent: number): number {
+  if (!Number.isFinite(percent)) return 0;
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+async function emitClientImportProgress(
+  sink: ClientImportProgressSink | undefined,
+  progress: ClientImportProgress
+) {
+  if (!sink) return;
+  await sink({
+    ...progress,
+    percent: normalizeProgressPercent(progress.percent),
+    processedRows: Math.max(0, Math.floor(progress.processedRows)),
+    totalRows: Math.max(0, Math.floor(progress.totalRows))
+  });
 }
 
 function sheetToRowsMatrix(ws: XLSX.WorkSheet): unknown[][] {
@@ -2737,6 +2981,29 @@ export type ClientXlsxImportOptions = {
   headerRowIndex?: number;
   /** Tizim maydoni → fayldagi ustun indeksi (0 dan). */
   columnMap?: Record<string, number>;
+  /**
+   * UI rejimi: `create` bo‘lsa `client_db_id` ustuni e’tiborsiz (faqat yangi yozuvlar).
+   * Berilmasa — avvalgidek: xaritada `client_db_id` bo‘lsa «yangilash» rejimi.
+   */
+  importMode?: "create" | "update";
+  /**
+   * Yangi klient: dublikat qaysi maydonlar bo‘yicha (`client_code`, `city`, `phone`, …).
+   * Bo‘sh yoki berilmasa — default: kod + shahar.
+   */
+  duplicateKeyFields?: string[];
+  /**
+   * Yangilash: faqat bu import kalitlari Exceldan qo‘llanadi. `undefined`/bo‘sh — barcha xaritalangan ustunlar.
+   */
+  updateApplyFields?: string[];
+  onProgress?: ClientImportProgressSink;
+};
+
+/** Import tugagach job/API javobida qatorlar bo‘yicha aniq hisob (UI «N / M» uchun). */
+export type ClientImportFinalStats = {
+  totalRows: number;
+  processedRows: number;
+  skippedDuplicate: number;
+  skippedEmpty: number;
 };
 
 export type ClientXlsxImportResult = {
@@ -2744,7 +3011,54 @@ export type ClientXlsxImportResult = {
   /** «Обновление с Excel»: `ИД` ustuni bo‘lsa */
   updated: number;
   errors: string[];
+  importStats?: ClientImportFinalStats;
 };
+
+type ImportFlowContext = {
+  warnings: ImportWarningCollector;
+  progressSink?: ClientImportProgressSink;
+  totalRows: number;
+  processedRows: number;
+  parseMs: number;
+  resolveMs: number;
+  writeMs: number;
+};
+
+async function reportImportRowProgress(
+  ctx: ImportFlowContext,
+  stage: ClientImportProgressStage,
+  force = false
+) {
+  if (!ctx.progressSink) return;
+  const stepHit = force || ctx.processedRows % IMPORT_PROGRESS_STEP_ROWS === 0;
+  const chunkHit =
+    ctx.totalRows > 0 &&
+    ctx.processedRows > 0 &&
+    (ctx.processedRows % IMPORT_PROGRESS_CHUNK_ROWS === 0 || ctx.processedRows === ctx.totalRows);
+  if (!stepHit && !chunkHit) return;
+  const percent = ctx.totalRows > 0 ? (ctx.processedRows / ctx.totalRows) * 100 : 100;
+  let message: string | undefined;
+  if (chunkHit && ctx.totalRows > 0) {
+    const nChunks = Math.ceil(ctx.totalRows / IMPORT_PROGRESS_CHUNK_ROWS);
+    const cur = Math.min(nChunks, Math.ceil(ctx.processedRows / IMPORT_PROGRESS_CHUNK_ROWS));
+    message = `Пачка ${cur} / ${nChunks} (по ${IMPORT_PROGRESS_CHUNK_ROWS} строк)`;
+  }
+  const p = emitClientImportProgress(ctx.progressSink, {
+    stage,
+    percent,
+    processedRows: ctx.processedRows,
+    totalRows: ctx.totalRows,
+    message
+  });
+  if (force) await p;
+}
+
+function estimateImportTotalRows(rows: unknown[][], headerRowIdx: number): number {
+  const firstDataRow = headerRowIdx + 1;
+  const lastRowIdx = Math.min(rows.length - 1, headerRowIdx + IMPORT_MAX_DATA_ROWS);
+  if (firstDataRow > rows.length - 1) return 0;
+  return Math.max(0, lastRowIdx - firstDataRow + 1);
+}
 
 async function importClientDataRows(
   tenantId: number,
@@ -2753,8 +3067,15 @@ async function importClientDataRows(
   colIndexByKey: Record<string, number>,
   sheetLabel: string,
   refResolver: ClientImportRefResolver,
-  staffLookup: ImportStaffLookup
-): Promise<{ created: number; errors: string[] }> {
+  staffLookup: ImportStaffLookup,
+  ctx: ImportFlowContext,
+  duplicateKeyFields: string[]
+): Promise<{
+  created: number;
+  errors: string[];
+  skippedDuplicate: number;
+  skippedEmpty: number;
+}> {
   const errors: string[] = [];
   let totalRowErrors = 0;
   const pushErr = (msg: string) => {
@@ -2765,6 +3086,7 @@ async function importClientDataRows(
   let created = 0;
   let skippedEmpty = 0;
   let skippedDuplicate = 0;
+  const hasAgentSlots = colMapHasAgentSlots(colIndexByKey);
 
   const firstDataRow = headerRowIdx + 1;
   const lastRowIdx = Math.min(rows.length - 1, headerRowIdx + IMPORT_MAX_DATA_ROWS);
@@ -2774,7 +3096,9 @@ async function importClientDataRows(
       created: 0,
       errors: [
         `Sarlavha ${headerRowIdx + 1}-qatorda («${sheetLabel}»), lekin undan keyin ma’lumot qatori yo‘q.`
-      ]
+      ],
+      skippedDuplicate: 0,
+      skippedEmpty: 0
     };
   }
 
@@ -2786,33 +3110,36 @@ async function importClientDataRows(
       phone_normalized: true,
       client_code: true,
       client_pinfl: true,
-      inn: true
+      inn: true,
+      city: true
     }
   });
-  const seenClientCodes = new Set<string>();
-  const seenPinfls = new Set<string>();
-  const seenInns = new Set<string>();
-  const seenNamePhone = new Set<string>();
-
+  const seenDuplicateKeys = new Set<string>();
   for (const c of existingClients) {
-    if (c.client_code) seenClientCodes.add(c.client_code.trim());
-    if (c.client_pinfl) seenPinfls.add(c.client_pinfl.trim());
-    if (c.inn) seenInns.add(c.inn.trim());
-    if (c.phone_normalized && c.name) {
-      seenNamePhone.add(`${c.name.trim().toLocaleLowerCase("ru-RU")}::${c.phone_normalized}`);
-    }
+    const k = duplicateKeyFromExistingRow(c, duplicateKeyFields);
+    if (k) seenDuplicateKeys.add(k);
   }
+
+  console.info(
+    `[clients import/create] tenant=${tenantId} sheet="${sheetLabel}" fileRows=${rows.length} headerRow=${headerRowIdx + 1} estDataRows=${ctx.totalRows} mappedKeys=${Object.keys(colIndexByKey).length} existingInDb=${existingClients.length} duplicateKeys=${duplicateKeyFields.join(",")}`
+  );
 
   for (let r = firstDataRow; r <= lastRowIdx; r++) {
     const row = rows[r];
     if (!Array.isArray(row)) {
       skippedEmpty += 1;
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "parsing");
       continue;
     }
 
+    const resolveStarted = Date.now();
     const nameRaw = readArrayCell(row, colIndexByKey.name);
     if (nameRaw == null) {
       skippedEmpty += 1;
+      ctx.resolveMs += Date.now() - resolveStarted;
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "parsing");
       continue;
     }
 
@@ -2882,28 +3209,37 @@ async function importClientDataRows(
       const ph = readArrayCell(row, colIndexByKey[`contact${p}_phone`]);
       slots[i] = { firstName: fn, lastName: ln, phone: ph };
     }
+    ctx.resolveMs += Date.now() - resolveStarted;
 
     try {
       const nameTrimmed = nameRaw.trim();
       const phoneNormalized = normalizePhoneDigits(phone);
-      const namePhoneKey =
-        phoneNormalized && phoneNormalized.length >= 7
-          ? `${nameTrimmed.toLocaleLowerCase("ru-RU")}::${phoneNormalized}`
+      const cityNorm =
+        city != null && String(city).trim()
+          ? String(city).trim().toLocaleLowerCase("ru-RU")
           : null;
-      const isDuplicate =
-        (client_code != null && seenClientCodes.has(client_code)) ||
-        (client_pinfl != null && seenPinfls.has(client_pinfl)) ||
-        (inn != null && seenInns.has(inn)) ||
-        (namePhoneKey != null && seenNamePhone.has(namePhoneKey));
+      const dupKey = buildDuplicateCompositeKey(duplicateKeyFields, {
+        client_code,
+        client_pinfl,
+        inn,
+        nameLower: nameTrimmed.toLocaleLowerCase("ru-RU"),
+        phoneDigits: phoneNormalized?.replace(/\D/g, "") ?? null,
+        cityNorm
+      });
+      const isDuplicate = dupKey != null && seenDuplicateKeys.has(dupKey);
       if (isDuplicate) {
         skippedDuplicate += 1;
+        ctx.processedRows += 1;
+        await reportImportRowProgress(ctx, "resolving");
         continue;
       }
 
-      const agentPatches = colMapHasAgentSlots(colIndexByKey)
-        ? buildAgentAssignmentPatchesFromImportRow(row, colIndexByKey, staffLookup)
-        : [];
+      const assignOutcome = hasAgentSlots
+        ? buildAgentAssignmentPatchesFromImportRow(row, colIndexByKey, staffLookup, r + 1, ctx.warnings.push)
+        : { createPatches: [], updatePatches: [], touched: false };
+      const agentPatches = assignOutcome.createPatches;
 
+      const writeStarted = Date.now();
       await prisma.$transaction(async (tx) => {
         const client = await tx.client.create({
           data: {
@@ -2945,14 +3281,16 @@ async function importClientDataRows(
           }
         });
         if (agentPatches.length > 0) {
-          await replaceClientAgentAssignments(tx, tenantId, client.id, agentPatches);
+          await replaceClientAgentAssignments(tx, tenantId, client.id, agentPatches, {
+            skipStaffDbValidation: true
+          });
         }
       });
+      ctx.writeMs += Date.now() - writeStarted;
       created += 1;
-      if (client_code) seenClientCodes.add(client_code);
-      if (client_pinfl) seenPinfls.add(client_pinfl);
-      if (inn) seenInns.add(inn);
-      if (namePhoneKey) seenNamePhone.add(namePhoneKey);
+      if (dupKey) seenDuplicateKeys.add(dupKey);
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "writing");
     } catch (e) {
       const raw = e instanceof Error ? e.message : "xato";
       const short =
@@ -2962,6 +3300,8 @@ async function importClientDataRows(
             ? `${raw.slice(0, 180)}…`
             : raw;
       pushErr(`Qator ${r + 1} (Excel): ${short}`);
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "writing");
     }
   }
 
@@ -2973,7 +3313,7 @@ async function importClientDataRows(
   }
   if (skippedDuplicate > 0) {
     out.push(
-      `Dublikat klientlar o‘tkazib yuborildi: ${skippedDuplicate} qator (client_code / PINFL / INN yoki telefon+name bo‘yicha).`
+      `Dublikat klientlar o‘tkazib yuborildi: ${skippedDuplicate} qator (kalit maydonlar: ${duplicateKeyFields.join(", ")}).`
     );
   }
   if (totalRowErrors > IMPORT_MAX_ERRORS_RETURNED) {
@@ -2986,7 +3326,7 @@ async function importClientDataRows(
     out.push(line);
   }
 
-  return { created, errors: out };
+  return { created, errors: out, skippedDuplicate, skippedEmpty };
 }
 
 function importColPresent(colIndexByKey: Record<string, number>, field: string): boolean {
@@ -3177,8 +3517,10 @@ async function importClientUpdateRows(
   colIndexByKey: Record<string, number>,
   sheetLabel: string,
   refResolver: ClientImportRefResolver,
-  staffLookup: ImportStaffLookup
-): Promise<{ updated: number; errors: string[] }> {
+  staffLookup: ImportStaffLookup,
+  ctx: ImportFlowContext,
+  updateApplyFields: string[] | null
+): Promise<{ updated: number; errors: string[]; skippedEmpty: number }> {
   const errors: string[] = [];
   let totalRowErrors = 0;
   const pushErr = (msg: string) => {
@@ -3197,10 +3539,13 @@ async function importClientUpdateRows(
       updated: 0,
       errors: [
         `Sarlavha ${headerRowIdx + 1}-qatorda («${sheetLabel}»), lekin undan keyin ma’lumot qatori yo‘q.`
-      ]
+      ],
+      skippedEmpty: 0
     };
   }
 
+  const applySet =
+    updateApplyFields != null && updateApplyFields.length > 0 ? new Set(updateApplyFields) : null;
   const hasAgentSlots = colMapHasAgentSlots(colIndexByKey);
   const candidateIds = new Set<number>();
   for (let r = firstDataRow; r <= lastRowIdx; r++) {
@@ -3210,6 +3555,9 @@ async function importClientUpdateRows(
     if (idVal != null) candidateIds.add(idVal);
   }
   const candidateIdList = Array.from(candidateIds);
+  console.info(
+    `[clients import/update] tenant=${tenantId} sheet="${sheetLabel}" estDataRows=${ctx.totalRows} distinctClientIdsInFile=${candidateIdList.length}`
+  );
   const existingRows =
     candidateIdList.length > 0
       ? await prisma.client.findMany({
@@ -3302,17 +3650,22 @@ async function importClientUpdateRows(
     const row = rows[r];
     if (!Array.isArray(row)) {
       skippedEmpty += 1;
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "parsing");
       continue;
     }
 
     const idVal = parseClientDbIdFromCell(readArrayCell(row, colIndexByKey.client_db_id));
     if (idVal == null) {
       skippedEmpty += 1;
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "parsing");
       continue;
     }
 
     try {
-      const data: Prisma.ClientUpdateInput = {};
+      const resolveStarted = Date.now();
+      let data: Prisma.ClientUpdateInput = {};
 
       if (importColPresent(colIndexByKey, "name")) {
         const v = readArrayCell(row, colIndexByKey.name);
@@ -3484,12 +3837,17 @@ async function importClientUpdateRows(
       for (let i = 0; i < IMPORT_CONTACT_PERSON_SLOTS; i++) {
         const p = i + 1;
         const fnK = `contact${p}_firstName`;
-        if (
+        const hasMap =
           importColPresent(colIndexByKey, fnK) ||
           importColPresent(colIndexByKey, `contact${p}_lastName`) ||
-          importColPresent(colIndexByKey, `contact${p}_phone`)
-        ) {
-          touchContacts = true;
+          importColPresent(colIndexByKey, `contact${p}_phone`);
+        if (hasMap) {
+          const allowedContact =
+            applySet == null ||
+            applySet.has(fnK) ||
+            applySet.has(`contact${p}_lastName`) ||
+            applySet.has(`contact${p}_phone`);
+          if (allowedContact) touchContacts = true;
         }
         slots[i] = {
           firstName: readArrayCell(row, colIndexByKey[`contact${p}_firstName`]),
@@ -3500,10 +3858,22 @@ async function importClientUpdateRows(
       if (touchContacts) {
         data.contact_persons = contactPersonsToJson(slots);
       }
-
-      const agentPatches = colMapHasAgentSlots(colIndexByKey)
-        ? buildAgentAssignmentPatchesFromImportRow(row, colIndexByKey, staffLookup)
-        : [];
+      if (applySet != null) {
+        data = filterClientUpdateInputByApplyFields(data, applySet);
+      }
+      const assignOutcome = hasAgentSlots
+        ? buildAgentAssignmentPatchesFromImportRow(
+            row,
+            colIndexByKey,
+            staffLookup,
+            r + 1,
+            ctx.warnings.push,
+            currentAssignmentsByClientId.get(idVal) ?? [],
+            applySet
+          )
+        : { createPatches: [], updatePatches: [], touched: false };
+      const agentPatches = assignOutcome.updatePatches;
+      ctx.resolveMs += Date.now() - resolveStarted;
 
       const existing = existingById.get(idVal);
       if (!existing) {
@@ -3514,29 +3884,39 @@ async function importClientUpdateRows(
       const nextAssignments = normalizeIncomingImportAssignments(agentPatches);
       const currentAssignments = currentAssignmentsByClientId.get(idVal) ?? [];
       const hasAssignmentChange =
-        agentPatches.length > 0 && !importAssignmentsEqual(nextAssignments, currentAssignments);
+        assignOutcome.touched && !importAssignmentsEqual(nextAssignments, currentAssignments);
       if (!hasScalars && !hasAssignmentChange) {
+        ctx.processedRows += 1;
+        await reportImportRowProgress(ctx, "resolving");
         continue;
       }
+      const writeStarted = Date.now();
       if (hasScalars && hasAssignmentChange) {
         await prisma.$transaction(async (tx) => {
           await tx.client.update({ where: { id: idVal }, data: nextData });
-          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches);
+          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches, {
+            skipStaffDbValidation: true
+          });
         });
       } else if (hasScalars) {
         await prisma.client.update({ where: { id: idVal }, data: nextData });
       } else if (hasAssignmentChange) {
         await prisma.$transaction(async (tx) => {
-          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches);
+          await replaceClientAgentAssignments(tx, tenantId, idVal, agentPatches, {
+            skipStaffDbValidation: true
+          });
         });
       }
       if (hasAssignmentChange) {
         currentAssignmentsByClientId.set(idVal, nextAssignments);
       }
+      ctx.writeMs += Date.now() - writeStarted;
       const rowChanged = hasScalars || hasAssignmentChange;
       if (rowChanged) {
         updated += 1;
       }
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "writing");
     } catch (e) {
       const raw = e instanceof Error ? e.message : "xato";
       if (raw === "NOT_FOUND") {
@@ -3550,6 +3930,8 @@ async function importClientUpdateRows(
               : raw;
         pushErr(`Qator ${r + 1} (Excel): ${short}`);
       }
+      ctx.processedRows += 1;
+      await reportImportRowProgress(ctx, "writing");
     }
   }
 
@@ -3569,7 +3951,7 @@ async function importClientUpdateRows(
     out.push(line);
   }
 
-  return { updated, errors: out };
+  return { updated, errors: out, skippedEmpty };
 }
 
 function buildManualColumnMap(raw: Record<string, number> | undefined): Record<string, number> | null {
@@ -3585,9 +3967,17 @@ function buildManualColumnMap(raw: Record<string, number> | undefined): Record<s
   return hasName || hasDbId ? colIndexByKey : null;
 }
 
-/** «Пн», «Вт» … — 1=Du … 7=Ya (UI konventsiyasi). */
-function parseRussianVisitDays(raw: string | null): number[] {
-  if (raw == null || isPlaceholderCell(raw)) return [];
+const IMPORT_ASSIGNMENT_CLEAR_TOKENS = new Set(["clear", "очистить", "tozalash", "remove", "delete"]);
+
+function isAssignmentClearToken(raw: string | null): boolean {
+  if (raw == null) return false;
+  const t = raw.trim().toLocaleLowerCase("ru-RU");
+  return t !== "" && IMPORT_ASSIGNMENT_CLEAR_TOKENS.has(t);
+}
+
+/** «Пн», «Вт» … yoki raqam 1..7 (1=Du … 7=Ya); «1,2;3» vergul/bo‘shliq bilan. */
+function parseRussianVisitDaysDetailed(raw: string | null): { days: number[]; unknownTokens: string[] } {
+  if (raw == null || isPlaceholderCell(raw)) return { days: [], unknownTokens: [] };
   const tokenMap: Record<string, number> = {
     пн: 1,
     понедельник: 1,
@@ -3596,6 +3986,7 @@ function parseRussianVisitDays(raw: string | null): number[] {
     ср: 3,
     среда: 3,
     чт: 4,
+    четверг: 4,
     четвер: 4,
     пт: 5,
     пятница: 5,
@@ -3605,16 +3996,35 @@ function parseRussianVisitDays(raw: string | null): number[] {
     воскресенье: 7,
     вск: 7
   };
-  const parts = raw
-    .split(/[,;/|]+|\s+/)
+  let normalized = String(raw).trim().replace(/\u00a0/g, " ").replace(/;+/g, ",");
+  const compact = normalized.replace(/\s/g, "");
+  /** Excel: `1.2` matn sifatida ikki kun (1 va 2); `12` yoki `1.25` bundan mustasno. */
+  const dotPair = /^([1-7])\.([1-7])$/.exec(compact);
+  if (dotPair) {
+    normalized = `${dotPair[1]},${dotPair[2]}`;
+  }
+  const parts = normalized
+    .split(/[,|/]+|\s+/)
     .map((x) => x.trim().toLowerCase().replace(/\./g, ""))
     .filter(Boolean);
   const out: number[] = [];
+  const unknownTokens: string[] = [];
   for (const p of parts) {
+    if (/^\d{1,2}$/.test(p)) {
+      const num = Number.parseInt(p, 10);
+      if (num >= 1 && num <= 7) {
+        out.push(num);
+        continue;
+      }
+    }
     const n = tokenMap[p];
     if (n != null && n >= 1 && n <= 7) out.push(n);
+    else unknownTokens.push(p);
   }
-  return [...new Set(out)].sort((a, b) => a - b);
+  return {
+    days: [...new Set(out)].sort((a, b) => a - b),
+    unknownTokens: [...new Set(unknownTokens)]
+  };
 }
 
 type ImportStaffRole = "agent" | "expeditor";
@@ -3687,40 +4097,47 @@ function pickImportStaffByAllowedRoles(
   return null;
 }
 
+type StaffResolveMatch = "code" | "id" | "name" | "phone" | "none";
+
+type StaffResolveResult = {
+  id: number | null;
+  matchedBy: StaffResolveMatch;
+};
+
 function resolveStaffByRefForImport(
   lookup: ImportStaffLookup,
   raw: string | null,
   roles: ImportStaffRole[]
-): number | null {
-  if (raw == null || isPlaceholderCell(raw)) return null;
+): StaffResolveResult {
+  if (raw == null || isPlaceholderCell(raw)) return { id: null, matchedBy: "none" };
   const t = raw.trim();
-  if (!t) return null;
+  if (!t) return { id: null, matchedBy: "none" };
 
   const byCode = pickImportStaffByAllowedRoles(
     lookup.byCode.get(t.toLocaleLowerCase("ru-RU")),
     roles
   );
-  if (byCode) return byCode.id;
+  if (byCode) return { id: byCode.id, matchedBy: "code" };
 
   if (/^\d+$/.test(t)) {
     const id = Number.parseInt(t, 10);
     const byId = lookup.byId.get(id);
-    if (byId && roles.includes(byId.role)) return byId.id;
+    if (byId && roles.includes(byId.role)) return { id: byId.id, matchedBy: "id" };
   }
 
   const byName = pickImportStaffByAllowedRoles(
     lookup.byName.get(t.toLocaleLowerCase("ru-RU")),
     roles
   );
-  if (byName) return byName.id;
+  if (byName) return { id: byName.id, matchedBy: "name" };
 
   const normPhone = normalizePhoneDigits(t);
   if (normPhone && normPhone.length >= 9) {
     const byPhone = pickImportStaffByAllowedRoles(lookup.byPhone.get(normPhone), roles);
-    if (byPhone) return byPhone.id;
+    if (byPhone) return { id: byPhone.id, matchedBy: "phone" };
   }
 
-  return null;
+  return { id: null, matchedBy: "none" };
 }
 
 function colMapHasAgentSlots(colIndexByKey: Record<string, number>): boolean {
@@ -3730,45 +4147,161 @@ function colMapHasAgentSlots(colIndexByKey: Record<string, number>): boolean {
   return false;
 }
 
+type ImportAssignmentRowOutcome = {
+  createPatches: AgentAssignmentPatch[];
+  updatePatches: AgentAssignmentPatch[];
+  touched: boolean;
+};
+
 function buildAgentAssignmentPatchesFromImportRow(
   row: unknown[],
   colIndexByKey: Record<string, number>,
-  staffLookup: ImportStaffLookup
-): AgentAssignmentPatch[] {
-  const patches: AgentAssignmentPatch[] = [];
+  staffLookup: ImportStaffLookup,
+  rowNumExcel: number,
+  warn: (message: string) => void,
+  currentAssignments?: Array<{
+    slot: number;
+    agent_id: number | null;
+    expeditor_user_id: number | null;
+    expeditor_phone: string | null;
+    visit_weekdays: number[];
+  }>,
+  /** `null` — barcha slot maydonlari Exceldan olinadi (yangi klient yoki to‘liq yangilash). */
+  assignmentApply?: Set<string> | null
+): ImportAssignmentRowOutcome {
+  const createPatches: AgentAssignmentPatch[] = [];
+  const currentBySlot = new Map(
+    (currentAssignments ?? []).map((x) => [
+      x.slot,
+      {
+        slot: x.slot,
+        agent_id: x.agent_id,
+        expeditor_user_id: x.expeditor_user_id,
+        expeditor_phone: x.expeditor_phone,
+        visit_weekdays: parseVisitWeekdaysJson(x.visit_weekdays)
+      }
+    ])
+  );
+  const updateBySlot = new Map<number, AgentAssignmentPatch>();
+  let touched = false;
   for (let slot = 1; slot <= CONTACT_SLOTS; slot++) {
-    const agentRaw = readArrayCell(row, colIndexByKey[`import_agent_${slot}`]);
-    const daysRaw = readArrayCell(row, colIndexByKey[`import_agent_${slot}_days`]);
-    const expRaw = readArrayCell(row, colIndexByKey[`import_expeditor_${slot}`]);
-    let agent_id: number | null = null;
-    if (agentRaw) {
-      agent_id = resolveStaffByRefForImport(staffLookup, agentRaw, ["agent"]);
-    }
-    const visit_weekdays = parseRussianVisitDays(daysRaw);
-    let expeditor_user_id: number | null = null;
-    let expeditor_phone: string | null = null;
-    if (expRaw) {
-      expeditor_user_id = resolveStaffByRefForImport(staffLookup, expRaw, [
-        "expeditor",
-        "agent"
-      ]);
-      if (expeditor_user_id == null) {
-        const tr = expRaw.trim();
-        if (/^\+?\d[\d\s\-()]{6,}$/.test(tr)) expeditor_phone = tr;
+    const canAgent = assignmentApply == null || assignmentApply.has(`import_agent_${slot}`);
+    const canDays = assignmentApply == null || assignmentApply.has(`import_agent_${slot}_days`);
+    const canExp = assignmentApply == null || assignmentApply.has(`import_expeditor_${slot}`);
+    const agentRaw = canAgent
+      ? readArrayCell(row, colIndexByKey[`import_agent_${slot}`])
+      : null;
+    const daysRaw = canDays
+      ? readArrayCell(row, colIndexByKey[`import_agent_${slot}_days`])
+      : null;
+    const expRaw = canExp ? readArrayCell(row, colIndexByKey[`import_expeditor_${slot}`]) : null;
+
+    const prev = currentBySlot.get(slot) ?? {
+      slot,
+      agent_id: null,
+      expeditor_user_id: null,
+      expeditor_phone: null,
+      visit_weekdays: []
+    };
+    const next: AgentAssignmentPatch = {
+      slot,
+      agent_id: prev.agent_id,
+      expeditor_user_id: prev.expeditor_user_id,
+      expeditor_phone: prev.expeditor_phone,
+      visit_weekdays: prev.visit_weekdays
+    };
+
+    if (agentRaw != null && !isPlaceholderCell(agentRaw)) {
+      touched = true;
+      if (isAssignmentClearToken(agentRaw)) {
+        next.agent_id = null;
+      } else {
+        const resolved = resolveStaffByRefForImport(staffLookup, agentRaw, ["agent"]);
+        if (resolved.id != null) {
+          next.agent_id = resolved.id;
+        } else {
+          warn(
+            `Qator ${rowNumExcel}: «Агент ${slot}» qiymati topilmadi («${agentRaw.trim()}»). Avvalgi qiymat saqlandi.`
+          );
+        }
       }
     }
-    const patch: AgentAssignmentPatch = { slot, visit_weekdays };
-    if (agent_id != null) patch.agent_id = agent_id;
-    if (expeditor_user_id != null) patch.expeditor_user_id = expeditor_user_id;
-    if (expeditor_phone) patch.expeditor_phone = expeditor_phone;
-    const hasData =
-      agent_id != null ||
-      expeditor_user_id != null ||
-      (expeditor_phone != null && expeditor_phone.length > 0) ||
-      visit_weekdays.length > 0;
-    if (hasData) patches.push(patch);
+
+    if (expRaw != null && !isPlaceholderCell(expRaw)) {
+      touched = true;
+      if (isAssignmentClearToken(expRaw)) {
+        next.expeditor_user_id = null;
+        next.expeditor_phone = null;
+      } else {
+        const resolved = resolveStaffByRefForImport(staffLookup, expRaw, ["expeditor", "agent"]);
+        if (resolved.id != null) {
+          next.expeditor_user_id = resolved.id;
+          next.expeditor_phone = null;
+        } else {
+          const tr = expRaw.trim();
+          if (/^\+?\d[\d\s\-()]{6,}$/.test(tr)) {
+            next.expeditor_user_id = null;
+            next.expeditor_phone = tr;
+          } else {
+            warn(
+              `Qator ${rowNumExcel}: «Экспедитор ${slot}» qiymati topilmadi («${tr}»). Avvalgi qiymat saqlandi.`
+            );
+          }
+        }
+      }
+    }
+
+    if (daysRaw != null && !isPlaceholderCell(daysRaw)) {
+      touched = true;
+      if (isAssignmentClearToken(daysRaw)) {
+        next.visit_weekdays = [];
+      } else {
+        const parsedDays = parseRussianVisitDaysDetailed(daysRaw);
+        if (parsedDays.days.length > 0) {
+          next.visit_weekdays = parsedDays.days;
+        }
+        if (parsedDays.unknownTokens.length > 0) {
+          warn(
+            `Qator ${rowNumExcel}: «Агент ${slot} день»da noma’lum kunlar (${parsedDays.unknownTokens.join(", ")}).`
+          );
+        }
+      }
+    }
+
+    const createPatch: AgentAssignmentPatch = { slot };
+    if (next.agent_id != null) createPatch.agent_id = next.agent_id;
+    if (next.expeditor_user_id != null) createPatch.expeditor_user_id = next.expeditor_user_id;
+    if (next.expeditor_phone != null && next.expeditor_phone !== "") {
+      createPatch.expeditor_phone = next.expeditor_phone;
+    }
+    if (Array.isArray(next.visit_weekdays) && next.visit_weekdays.length > 0) {
+      createPatch.visit_weekdays = next.visit_weekdays;
+    }
+
+    const hasDataForCreate =
+      createPatch.agent_id != null ||
+      createPatch.expeditor_user_id != null ||
+      (createPatch.expeditor_phone != null && createPatch.expeditor_phone.length > 0) ||
+      (createPatch.visit_weekdays?.length ?? 0) > 0;
+    if (hasDataForCreate) createPatches.push(createPatch);
+
+    const hasDataForUpdate =
+      next.agent_id != null ||
+      next.expeditor_user_id != null ||
+      (next.expeditor_phone != null && next.expeditor_phone.length > 0) ||
+      (next.visit_weekdays?.length ?? 0) > 0;
+    if (hasDataForUpdate) {
+      updateBySlot.set(slot, {
+        slot,
+        agent_id: next.agent_id ?? null,
+        expeditor_user_id: next.expeditor_user_id ?? null,
+        expeditor_phone: next.expeditor_phone ?? null,
+        visit_weekdays: parseVisitWeekdaysJson(next.visit_weekdays)
+      });
+    }
   }
-  return patches;
+  const updatePatches = [...updateBySlot.values()].sort((a, b) => a.slot - b.slot);
+  return { createPatches, updatePatches, touched };
 }
 
 function parseClientDbIdFromCell(raw: string | null): number | null {
@@ -3785,11 +4318,33 @@ export async function importClientsFromXlsx(
   buffer: Buffer | Uint8Array,
   opts?: ClientXlsxImportOptions
 ): Promise<ClientXlsxImportResult> {
+  const warnings = createImportWarningCollector();
+  const startedAt = Date.now();
+  await emitClientImportProgress(opts?.onProgress, {
+    stage: "queued",
+    percent: 0,
+    processedRows: 0,
+    totalRows: 0
+  });
   const raw = Buffer.from(buffer);
   if (raw.length < 4) {
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "failed",
+      percent: 100,
+      processedRows: 0,
+      totalRows: 0,
+      message: "Import fayli bo‘sh yoki juda kichik."
+    });
     return { created: 0, updated: 0, errors: ["Fayl bo‘sh yoki juda kichik."] };
   }
   if (raw[0] !== 0x50 || raw[1] !== 0x4b) {
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "failed",
+      percent: 100,
+      processedRows: 0,
+      totalRows: 0,
+      message: "Noto‘g‘ri fayl formati."
+    });
     return {
       created: 0,
       updated: 0,
@@ -3801,9 +4356,30 @@ export async function importClientsFromXlsx(
 
   let wb: XLSX.WorkBook;
   try {
-    wb = XLSX.read(raw, { type: "buffer", cellDates: true, dense: false });
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "parsing",
+      percent: 5,
+      processedRows: 0,
+      totalRows: 0
+    });
+    wb = XLSX.read(raw, {
+      type: "buffer",
+      cellDates: true,
+      dense: false,
+      bookVBA: false,
+      cellFormula: false,
+      cellHTML: false,
+      cellText: false
+    });
   } catch (e) {
     const hint = e instanceof Error ? e.message : String(e);
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "failed",
+      percent: 100,
+      processedRows: 0,
+      totalRows: 0,
+      message: "XLSX o‘qilmadi."
+    });
     return {
       created: 0,
       updated: 0,
@@ -3815,13 +4391,71 @@ export async function importClientsFromXlsx(
   }
 
   if (!wb.SheetNames.length) {
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "failed",
+      percent: 100,
+      processedRows: 0,
+      totalRows: 0,
+      message: "Varaqlar topilmadi."
+    });
     return { created: 0, updated: 0, errors: ["Jadvalda varaq yo‘q."] };
   }
 
+  const resolveStarted = Date.now();
   const refResolver = await ClientImportRefResolver.load(tenantId);
   const staffLookup = await loadImportStaffLookup(tenantId);
+  const resolveMs = Date.now() - resolveStarted;
+  const duplicateKeyFields = normalizeDuplicateKeyFields(opts?.duplicateKeyFields);
+  const updateApplyFields = normalizeUpdateApplyFields(opts?.updateApplyFields);
+  await emitClientImportProgress(opts?.onProgress, {
+    stage: "resolving",
+    percent: 10,
+    processedRows: 0,
+    totalRows: 0
+  });
 
-  const manualMap = buildManualColumnMap(opts?.columnMap);
+  const finalizeResult = async (
+    base: ClientXlsxImportResult,
+    ctx?: Pick<ImportFlowContext, "parseMs" | "resolveMs" | "writeMs" | "processedRows" | "totalRows">
+  ): Promise<ClientXlsxImportResult> => {
+    const errors = [...base.errors];
+    for (const line of warnings.list) errors.push(line);
+    if (ctx) {
+      const elapsedMs = Date.now() - startedAt;
+      const perf = `Import stats: parse=${ctx.parseMs}ms, resolve=${ctx.resolveMs}ms, write=${ctx.writeMs}ms, total=${elapsedMs}ms.`;
+      errors.push(perf);
+    }
+    const st = base.importStats;
+    const doneMsg =
+      st != null
+        ? `Готово: ${st.processedRows} / ${st.totalRows} строк; добавлено ${base.created}, обновлено ${base.updated}` +
+          (st.skippedDuplicate > 0 ? `; дубликатов: ${st.skippedDuplicate}` : "") +
+          (st.skippedEmpty > 0 ? `; пустых: ${st.skippedEmpty}` : "")
+        : undefined;
+    await emitClientImportProgress(opts?.onProgress, {
+      stage: "done",
+      percent: 100,
+      processedRows: st?.processedRows ?? ctx?.processedRows ?? 0,
+      totalRows: st?.totalRows ?? ctx?.totalRows ?? 0,
+      message: doneMsg
+    });
+    return { ...base, errors };
+  };
+
+  let manualMap = buildManualColumnMap(opts?.columnMap);
+  if (manualMap != null && opts?.importMode === "create") {
+    manualMap = { ...manualMap };
+    delete manualMap.client_db_id;
+    if (!Object.prototype.hasOwnProperty.call(manualMap, "name")) {
+      return {
+        created: 0,
+        updated: 0,
+        errors: [
+          "Yangi import (importMode=create): xaritada «Наименование» (name) ustuni bo‘lishi kerak; ichki ИД ustuni ishlatilmaydi."
+        ]
+      };
+    }
+  }
   if (manualMap != null) {
     const wantSheet = opts?.sheetName?.trim();
     const sheetName =
@@ -3849,6 +4483,22 @@ export async function importClientsFromXlsx(
         errors: [`Sarlavha qatori noto‘g‘ri (0…${Math.max(0, rows.length - 1)}).`]
       };
     }
+    const unknownHeaders = collectUnknownAssignmentHeaders(rows[headerRowIdx]);
+    if (unknownHeaders.length > 0) {
+      warnings.push(
+        `Import: agentga oid tanilmagan ustunlar topildi (${unknownHeaders.slice(0, 10).join(", ")}).`
+      );
+    }
+    const totalRows = estimateImportTotalRows(rows, headerRowIdx);
+    const ctx: ImportFlowContext = {
+      warnings,
+      progressSink: opts?.onProgress,
+      totalRows,
+      processedRows: 0,
+      parseMs: Date.now() - startedAt - resolveMs,
+      resolveMs,
+      writeMs: 0
+    };
     const isUpdate = Object.prototype.hasOwnProperty.call(manualMap, "client_db_id");
     if (isUpdate) {
       const r = await importClientUpdateRows(
@@ -3858,9 +4508,25 @@ export async function importClientsFromXlsx(
         manualMap,
         sheetName ?? "",
         refResolver,
-        staffLookup
+        staffLookup,
+        ctx,
+        updateApplyFields
       );
-      return { created: 0, updated: r.updated, errors: r.errors };
+      await reportImportRowProgress(ctx, "finalizing", true);
+      return finalizeResult(
+        {
+          created: 0,
+          updated: r.updated,
+          errors: r.errors,
+          importStats: {
+            totalRows: ctx.totalRows,
+            processedRows: ctx.processedRows,
+            skippedDuplicate: 0,
+            skippedEmpty: r.skippedEmpty
+          }
+        },
+        ctx
+      );
     }
     const r = await importClientDataRows(
       tenantId,
@@ -3869,9 +4535,25 @@ export async function importClientsFromXlsx(
       manualMap,
       sheetName ?? "",
       refResolver,
-      staffLookup
+      staffLookup,
+      ctx,
+      duplicateKeyFields
     );
-    return { created: r.created, updated: 0, errors: r.errors };
+    await reportImportRowProgress(ctx, "finalizing", true);
+    return finalizeResult(
+      {
+        created: r.created,
+        updated: 0,
+        errors: r.errors,
+        importStats: {
+          totalRows: ctx.totalRows,
+          processedRows: ctx.processedRows,
+          skippedDuplicate: r.skippedDuplicate,
+          skippedEmpty: r.skippedEmpty
+        }
+      },
+      ctx
+    );
   }
 
   const table = findImportTableInWorkbook(wb);
@@ -3898,6 +4580,22 @@ export async function importClientsFromXlsx(
   }
 
   const { rows, headerRowIdx, colIndexByKey } = table;
+  const unknownHeaders = collectUnknownAssignmentHeaders(rows[headerRowIdx]);
+  if (unknownHeaders.length > 0) {
+    warnings.push(
+      `Import: agentga oid tanilmagan ustunlar topildi (${unknownHeaders.slice(0, 10).join(", ")}).`
+    );
+  }
+  const totalRows = estimateImportTotalRows(rows, headerRowIdx);
+  const ctx: ImportFlowContext = {
+    warnings,
+    progressSink: opts?.onProgress,
+    totalRows,
+    processedRows: 0,
+    parseMs: Date.now() - startedAt - resolveMs,
+    resolveMs,
+    writeMs: 0
+  };
   const isUpdate = Object.prototype.hasOwnProperty.call(colIndexByKey, "client_db_id");
   if (isUpdate) {
     const r = await importClientUpdateRows(
@@ -3907,9 +4605,25 @@ export async function importClientsFromXlsx(
       colIndexByKey,
       table.sheetName,
       refResolver,
-      staffLookup
+      staffLookup,
+      ctx,
+      updateApplyFields
     );
-    return { created: 0, updated: r.updated, errors: r.errors };
+    await reportImportRowProgress(ctx, "finalizing", true);
+    return finalizeResult(
+      {
+        created: 0,
+        updated: r.updated,
+        errors: r.errors,
+        importStats: {
+          totalRows: ctx.totalRows,
+          processedRows: ctx.processedRows,
+          skippedDuplicate: 0,
+          skippedEmpty: r.skippedEmpty
+        }
+      },
+      ctx
+    );
   }
   const r = await importClientDataRows(
     tenantId,
@@ -3918,7 +4632,23 @@ export async function importClientsFromXlsx(
     colIndexByKey,
     table.sheetName,
     refResolver,
-    staffLookup
+    staffLookup,
+    ctx,
+    duplicateKeyFields
   );
-  return { created: r.created, updated: 0, errors: r.errors };
+  await reportImportRowProgress(ctx, "finalizing", true);
+  return finalizeResult(
+    {
+      created: r.created,
+      updated: 0,
+      errors: r.errors,
+      importStats: {
+        totalRows: ctx.totalRows,
+        processedRows: ctx.processedRows,
+        skippedDuplicate: r.skippedDuplicate,
+        skippedEmpty: r.skippedEmpty
+      }
+    },
+    ctx
+  );
 }

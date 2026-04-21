@@ -24,7 +24,7 @@ const ClientsLeafletMapDynamic = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-[520px] items-center justify-center rounded-lg border bg-muted/20">
-        <p className="text-sm text-muted-foreground">Карта (Leaflet) загружается…</p>
+        <p className="text-sm text-muted-foreground">Карта (Yandex) загружается…</p>
       </div>
     )
   }
@@ -97,7 +97,7 @@ export default function ClientsMapPage() {
         title="Карта клиентов"
         description={
           tenantSlug
-            ? `OpenStreetMap + Leaflet. Клиенты с GPS (сервер): ${gpsClientsTotal ?? totalWithCoords}.`
+            ? `Yandex Map. Клиенты с GPS (сервер): ${gpsClientsTotal ?? totalWithCoords}.`
             : "Клиенты с GPS-координатами"
         }
         actions={
@@ -182,7 +182,7 @@ export default function ClientsMapPage() {
             <div className="flex items-center justify-between gap-2">
               <CardTitle>Расположение клиентов</CardTitle>
               <span className="text-xs text-muted-foreground">
-                {clientsWithCoords.length} точек · OSM
+                {clientsWithCoords.length} точек · Yandex
               </span>
             </div>
           </CardHeader>

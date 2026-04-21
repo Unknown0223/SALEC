@@ -70,8 +70,36 @@ function parseListQuery(q: Record<string, string | undefined>): ClientBalanceLis
       : {}),
     ...(q.order_date_from?.trim() ? { order_date_from: q.order_date_from.trim() } : {}),
     ...(q.order_date_to?.trim() ? { order_date_to: q.order_date_to.trim() } : {}),
+    ...(q.sort_by?.trim() ? { sort_by: q.sort_by.trim() } : {}),
+    ...(q.sort_dir === "desc" ? { sort_dir: "desc" as const } : q.sort_dir === "asc" ? { sort_dir: "asc" as const } : {}),
     ...(deliveryOrderId !== undefined ? { delivery_order_id: deliveryOrderId } : {})
   };
+}
+
+function toNum(value: string | number | null | undefined): number {
+  if (value == null) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const n = Number(String(value).trim().replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function collectPagePaymentStats(
+  rows: Array<{ balance?: string; payment_amounts?: Array<{ label: string; amount: string }> }>
+) {
+  const paymentSums: Record<string, number> = {};
+  let pageBalanceSum = 0;
+  let nonZeroRows = 0;
+  for (const row of rows) {
+    const bal = toNum(row.balance);
+    pageBalanceSum += bal;
+    let rowHasNonZero = bal !== 0;
+    for (const p of row.payment_amounts ?? []) {
+      paymentSums[p.label] = (paymentSums[p.label] ?? 0) + toNum(p.amount);
+      if (toNum(p.amount) !== 0) rowHasNonZero = true;
+    }
+    if (rowHasNonZero) nonZeroRows += 1;
+  }
+  return { pageBalanceSum, nonZeroRows, paymentSums };
 }
 
 export async function registerClientBalanceRoutes(app: FastifyInstance) {
@@ -80,7 +108,19 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
     { preHandler: [jwtAccessVerify, requireRoles(...catalogRoles)] },
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
-      const data = await listClientBalanceTerritoryOptions(request.tenant!.id);
+      const q = request.query as Record<string, string | undefined>;
+      const hasScope =
+        Boolean(q.agent_branch?.trim()) ||
+        Boolean(q.agent_id?.trim()) ||
+        Boolean(q.supervisor_user_id?.trim()) ||
+        Boolean(q.expeditor_user_id?.trim()) ||
+        Boolean(q.trade_direction?.trim()) ||
+        Boolean(q.category?.trim()) ||
+        Boolean(q.status?.trim()) ||
+        Boolean(q.agent_payment_type?.trim()) ||
+        Boolean(q.branch_ids?.trim());
+      const scope = hasScope ? parseListQuery(q) : undefined;
+      const data = await listClientBalanceTerritoryOptions(request.tenant!.id, scope);
       return reply.send({ data });
     }
   );
@@ -100,10 +140,30 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
           view: parsed.view,
           page: parsed.page,
           limit: parsed.limit,
+          sortBy: parsed.sort_by ?? null,
+          sortDir: parsed.sort_dir ?? null,
           total: result.total,
           elapsedMs: Date.now() - t0
         },
         "client-balances report timing"
+      );
+      const pageStats = collectPagePaymentStats(
+        (result.data as Array<{ balance?: string; payment_amounts?: Array<{ label: string; amount: string }> }>) ??
+          []
+      );
+      request.log.info(
+        {
+          tenantId: request.tenant!.id,
+          view: parsed.view,
+          page: parsed.page,
+          limit: parsed.limit,
+          summaryBalance: result.summary.balance,
+          summaryPaymentByType: result.summary.payment_by_type,
+          pageBalanceSum: pageStats.pageBalanceSum,
+          pagePaymentSums: pageStats.paymentSums,
+          pageNonZeroRows: pageStats.nonZeroRows
+        },
+        "client-balances payment debug"
       );
       return reply.send(result);
     }
@@ -123,10 +183,29 @@ export async function registerClientBalanceRoutes(app: FastifyInstance) {
           tenantId: request.tenant!.id,
           page: parsed.page,
           limit: parsed.limit,
+          sortBy: parsed.sort_by ?? null,
+          sortDir: parsed.sort_dir ?? null,
           total: result.total,
           elapsedMs: Date.now() - t0
         },
         "consignment-balances report timing"
+      );
+      const pageStats = collectPagePaymentStats(
+        (result.data as Array<{ balance?: string; payment_amounts?: Array<{ label: string; amount: string }> }>) ??
+          []
+      );
+      request.log.info(
+        {
+          tenantId: request.tenant!.id,
+          page: parsed.page,
+          limit: parsed.limit,
+          summaryBalance: result.summary.total_debt,
+          summaryPaymentByType: result.summary.payment_by_type,
+          pageBalanceSum: pageStats.pageBalanceSum,
+          pagePaymentSums: pageStats.paymentSums,
+          pageNonZeroRows: pageStats.nonZeroRows
+        },
+        "consignment-balances payment debug"
       );
       return reply.send(result);
     }

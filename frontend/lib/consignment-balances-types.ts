@@ -7,6 +7,7 @@ export type ConsignmentBalanceRow = {
   client_id: number;
   client_code: string | null;
   client_name: string;
+  is_active: boolean;
   agent_name: string | null;
   agent_code: string | null;
   supervisor_name: string | null;

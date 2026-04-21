@@ -128,6 +128,12 @@ type PaymentRow = {
   note: string | null;
   created_at: string;
 };
+type LinkageScope = {
+  selected_agent_id: number | null;
+  constrained: boolean;
+  warehouse_ids: number[];
+  expeditor_ids: number[];
+};
 
 type ReturnRow = {
   id: number;
@@ -254,6 +260,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
   /** true bo‘lsa PATCH da `expeditor_user_id` yuboriladi; yo‘q bo‘lsa ombor/agent o‘zgaganda avto qayta tanlanadi */
   const [metaExpeditorTouched, setMetaExpeditorTouched] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
 
   useEffect(() => {
@@ -333,7 +340,8 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
 
   const fullReturnMut = useMutation({
     mutationFn: async () => {
-      await api.post(`/api/${tenantSlug}/returns/full-order`, { order_id: orderId });
+      const pt = (data?.price_type ?? "").trim() || "retail";
+      await api.post(`/api/${tenantSlug}/returns/full-order`, { order_id: orderId, price_type: pt });
     },
     onSuccess: async () => {
       setFullReturnError(null);
@@ -354,19 +362,57 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
         setFullReturnError("Bu zakaz allaqachon to‘liq qaytarilgan.");
       } else if (code === "NoWarehouse") {
         setFullReturnError("Qaytarish ombori topilmadi.");
+      } else if (code === "ReturnNotInterchangeable") {
+        const pid = (err.response?.data as { product_id?: number } | undefined)?.product_id;
+        const msg = (err.response?.data as { message?: string } | undefined)?.message;
+        setFullReturnError(
+          pid != null
+            ? `Mahsulot #${pid}: interchangeable guruh / narx turi mos emas.`
+            : (msg?.trim() || "To‘liq qaytarish: mahsulot interchangeable guruhda emas yoki narx turi mos emas.")
+        );
       } else {
         setFullReturnError(getUserFacingError(err, "To‘liq qaytarish bajarilmadi."));
       }
     }
   });
 
+  const selectedAgentIdForScope = useMemo(() => {
+    const parsedMeta = metaAgent.trim() ? Number.parseInt(metaAgent.trim(), 10) : NaN;
+    if (Number.isFinite(parsedMeta) && parsedMeta > 0) return parsedMeta;
+    const rowAgent = data?.agent_id ?? null;
+    return rowAgent != null && rowAgent > 0 ? rowAgent : null;
+  }, [metaAgent, data?.agent_id]);
+  const selectedWarehouseIdForScope = useMemo(() => {
+    const parsedMeta = metaWarehouse.trim() ? Number.parseInt(metaWarehouse.trim(), 10) : NaN;
+    if (Number.isFinite(parsedMeta) && parsedMeta > 0) return parsedMeta;
+    const rowWarehouse = data?.warehouse_id ?? null;
+    return rowWarehouse != null && rowWarehouse > 0 ? rowWarehouse : null;
+  }, [metaWarehouse, data?.warehouse_id]);
+  const selectedExpeditorIdForScope = useMemo(() => {
+    const parsedMeta = metaExpeditor.trim() ? Number.parseInt(metaExpeditor.trim(), 10) : NaN;
+    if (Number.isFinite(parsedMeta) && parsedMeta > 0) return parsedMeta;
+    const rowExp = data?.expeditor_id ?? null;
+    return rowExp != null && rowExp > 0 ? rowExp : null;
+  }, [metaExpeditor, data?.expeditor_id]);
+
   const warehousesQ = useQuery({
-    queryKey: ["warehouses", tenantSlug],
+    queryKey: [
+      "warehouses",
+      tenantSlug,
+      selectedAgentIdForScope,
+      selectedExpeditorIdForScope
+    ],
     enabled: enabled && canOperate,
     staleTime: STALE.reference,
     queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedAgentIdForScope != null) params.set("selected_agent_id", String(selectedAgentIdForScope));
+      if (selectedExpeditorIdForScope != null) {
+        params.set("selected_expeditor_user_id", String(selectedExpeditorIdForScope));
+      }
+      const qs = params.toString();
       const { data: body } = await api.get<{ data: { id: number; name: string }[] }>(
-        `/api/${tenantSlug}/warehouses`
+        `/api/${tenantSlug}/warehouses${qs ? `?${qs}` : ""}`
       );
       return body.data;
     }
@@ -394,10 +440,77 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
       return body.data.filter((r) => r.is_active);
     }
   });
+  const linkageQ = useQuery({
+    queryKey: [
+      "linkage-options",
+      tenantSlug,
+      "order-detail-meta",
+      selectedAgentIdForScope,
+      selectedWarehouseIdForScope,
+      selectedExpeditorIdForScope
+    ],
+    enabled:
+      enabled &&
+      canOperate &&
+      (selectedAgentIdForScope != null ||
+        selectedWarehouseIdForScope != null ||
+        selectedExpeditorIdForScope != null),
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      if (
+        selectedAgentIdForScope == null &&
+        selectedWarehouseIdForScope == null &&
+        selectedExpeditorIdForScope == null
+      ) {
+        return null;
+      }
+      const params = new URLSearchParams();
+      if (selectedAgentIdForScope != null) {
+        params.set("selected_agent_id", String(selectedAgentIdForScope));
+      }
+      if (selectedWarehouseIdForScope != null) {
+        params.set("selected_warehouse_id", String(selectedWarehouseIdForScope));
+      }
+      if (selectedExpeditorIdForScope != null) {
+        params.set("selected_expeditor_user_id", String(selectedExpeditorIdForScope));
+      }
+      const { data: body } = await api.get<{ data: LinkageScope }>(
+        `/api/${tenantSlug}/linkage/options?${params.toString()}`
+      );
+      return body.data;
+    }
+  });
   const agentUsers = (usersQ.data ?? []).filter((u) => {
     const role = u.role.trim().toLowerCase();
     return role.includes("agent") && !role.includes("expeditor");
   });
+  const filteredExpeditors = useMemo(() => {
+    const all = expeditorsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.expeditor_ids);
+    return all.filter((e) => allowed.has(e.id));
+  }, [expeditorsQ.data, linkageQ.data]);
+
+  useEffect(() => {
+    if (!metaExpeditor.trim()) return;
+    if (metaExpeditor.trim() === "__none__") return;
+    const parsed = Number.parseInt(metaExpeditor.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1 || !filteredExpeditors.some((e) => e.id === parsed)) {
+      setMetaExpeditor("");
+      setSelectionNotice("Dastavchi tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [metaExpeditor, filteredExpeditors]);
+
+  useEffect(() => {
+    if (!metaWarehouse.trim()) return;
+    const parsed = Number.parseInt(metaWarehouse.trim(), 10);
+    const list = warehousesQ.data ?? [];
+    if (!Number.isFinite(parsed) || parsed < 1 || !list.some((w) => w.id === parsed)) {
+      setMetaWarehouse("");
+      setSelectionNotice("Ombor tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [metaWarehouse, warehousesQ.data]);
 
   const canPatchMeta =
     canOperate && data != null && ORDER_LINES_EDITABLE_STATUSES.has(data.status);
@@ -941,6 +1054,11 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                     {metaError}
                   </p>
                 ) : null}
+                {selectionNotice ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+                    {selectionNotice}
+                  </p>
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="space-y-1">
                     <Label htmlFor="order-meta-wh" className="text-xs text-muted-foreground">
@@ -995,7 +1113,7 @@ export function OrderDetailView({ tenantSlug, orderId, showPrintView = false }: 
                       disabled={metaMut.isPending || expeditorsQ.isLoading}
                     >
                       <option value="">— tanlanmagan (avto yoki bo‘sh) —</option>
-                      {(expeditorsQ.data ?? []).map((r) => (
+                      {filteredExpeditors.map((r) => (
                         <option key={r.id} value={String(r.id)}>
                           {r.login} · {r.fio}
                         </option>

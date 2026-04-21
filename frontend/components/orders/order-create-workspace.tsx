@@ -40,6 +40,11 @@ import {
 } from "@/lib/profile-ref-entries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CalendarDays, Check, ChevronDown, Gift, Search } from "lucide-react";
+import {
+  buildExchangeCreateBody,
+  buildExchangePairRows,
+  ExchangeOrderCreatePanel
+} from "@/components/orders/exchange-order-create-panel";
 
 type Props = {
   tenantSlug: string | null;
@@ -863,6 +868,7 @@ function PolkiClientSearchSelect({
 export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderType }: Props) {
   const qc = useQueryClient();
   const normalizedType = (orderType ?? "order").trim();
+  const isExchangeFlow = normalizedType === "exchange";
   const isPolkiFree = normalizedType === "return";
   const isPolkiByOrder = normalizedType === "return_by_order";
   const isPolkiSheet = isPolkiFree || isPolkiByOrder;
@@ -876,6 +882,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   /** Mahsulot qadoqlari (bloklar); kartotekada qty_per_block bo‘lsa Miqdor = blok × dona/blok */
   const [blockByProductId, setBlockByProductId] = useState<Record<number, string>>({});
   const [localError, setLocalError] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [expeditorUserId, setExpeditorUserId] = useState("");
   const [priceType, setPriceType] = useState("retail");
   const [orderComment, setOrderComment] = useState("");
@@ -903,6 +910,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const consignmentDueAnchorRef = useRef<HTMLButtonElement>(null);
   /** Savdo zakazi uchun profil `payment_method_entries[].id` yoki erkin matn (backend `payment_method_ref`) */
   const [paymentMethodRef, setPaymentMethodRef] = useState("");
+  const [exchangeSourceOrderIds, setExchangeSourceOrderIds] = useState<number[]>([]);
+  const [exMinusKey, setExMinusKey] = useState("");
+  const [exMinusQty, setExMinusQty] = useState("");
+  const [exPlusProductId, setExPlusProductId] = useState("");
+  const [exPlusQty, setExPlusQty] = useState("");
+  const selectedAgentIdNum = agentId.trim() ? Number.parseInt(agentId.trim(), 10) : NaN;
+  const selectedWarehouseIdNum = warehouseId.trim() ? Number.parseInt(warehouseId.trim(), 10) : NaN;
+  const selectedExpeditorIdNum = expeditorUserId.trim() ? Number.parseInt(expeditorUserId.trim(), 10) : NaN;
 
   const polkiOrderIdsSortedKey = useMemo(
     () => [...polkiOrderIds].sort((a, b) => a - b).join(","),
@@ -946,12 +961,30 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   };
 
   const createCtxQ = useQuery({
-    queryKey: ["orders", "create-context", tenantSlug],
+    queryKey: [
+      "orders",
+      "create-context",
+      tenantSlug,
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null,
+      Number.isFinite(selectedWarehouseIdNum) && selectedWarehouseIdNum > 0 ? selectedWarehouseIdNum : null,
+      Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0 ? selectedExpeditorIdNum : null
+    ],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.list,
     queryFn: async () => {
+      const params = new URLSearchParams();
+      if (Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0) {
+        params.set("selected_agent_id", String(selectedAgentIdNum));
+      }
+      if (Number.isFinite(selectedWarehouseIdNum) && selectedWarehouseIdNum > 0) {
+        params.set("selected_warehouse_id", String(selectedWarehouseIdNum));
+      }
+      if (Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0) {
+        params.set("selected_expeditor_user_id", String(selectedExpeditorIdNum));
+      }
+      const qs = params.toString();
       const { data } = await api.get<OrderCreateContextResponse>(
-        `/api/${tenantSlug}/orders/create-context`
+        `/api/${tenantSlug}/orders/create-context${qs ? `?${qs}` : ""}`
       );
       return data;
     }
@@ -995,7 +1028,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const polkiOrdersPickQ = useQuery({
     queryKey: ["order-create-polki-orders", tenantSlug, clientIdNum],
     enabled: Boolean(
-      tenantSlug && isPolkiByOrder && Number.isFinite(clientIdNum) && clientIdNum > 0
+      tenantSlug &&
+        (isPolkiByOrder || isExchangeFlow) &&
+        Number.isFinite(clientIdNum) &&
+        clientIdNum > 0
     ),
     staleTime: STALE.list,
     queryFn: async () => {
@@ -1010,6 +1046,40 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     () => (polkiOrdersPickQ.data ?? []).filter(isPolkiReturnByOrderPickable),
     [polkiOrdersPickQ.data]
   );
+
+  const exchangeOrderIdsSortedKey = useMemo(
+    () => [...exchangeSourceOrderIds].sort((a, b) => a - b).join(","),
+    [exchangeSourceOrderIds]
+  );
+
+  const exchangeReturnsQ = useQuery({
+    queryKey: ["exchange-returns", tenantSlug, clientIdNum, exchangeOrderIdsSortedKey],
+    enabled: Boolean(
+      tenantSlug &&
+        isExchangeFlow &&
+        Number.isFinite(clientIdNum) &&
+        clientIdNum > 0 &&
+        exchangeSourceOrderIds.length > 0
+    ),
+    staleTime: STALE.detail,
+    queryFn: async () => {
+      const ids = exchangeSourceOrderIds.join(",");
+      const { data } = await api.get<{
+        items: Array<{
+          product_id: number;
+          sku: string;
+          name: string;
+          unit: string;
+          qty: string;
+          price: string;
+          is_bonus: boolean;
+          order_id?: number;
+          order_number?: string;
+        }>;
+      }>(`/api/${tenantSlug}/returns/client-data?client_id=${clientIdNum}&order_ids=${ids}`);
+      return data;
+    }
+  });
 
   const polkiOrdersPickRawCount = polkiOrdersPickQ.data?.length ?? 0;
 
@@ -1183,6 +1253,45 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
   const warehouses = createCtxQ.data?.warehouses ?? [];
   const users = createCtxQ.data?.users ?? [];
   const categories = createCtxQ.data?.product_categories ?? [];
+
+  useEffect(() => {
+    if (!clientId.trim()) return;
+    const id = Number.parseInt(clientId.trim(), 10);
+    if (!Number.isFinite(id) || id < 1) {
+      setClientId("");
+      return;
+    }
+    if (!clients.some((c) => c.id === id)) {
+      setClientId("");
+      setPolkiOrderIds([]);
+      setSelectionNotice("Klient tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [clients, clientId]);
+
+  useEffect(() => {
+    if (!warehouseId.trim()) return;
+    const id = Number.parseInt(warehouseId.trim(), 10);
+    if (!Number.isFinite(id) || id < 1 || !warehouses.some((w) => w.id === id)) {
+      setWarehouseId("");
+      setQtyByProductId({});
+      setBlockByProductId({});
+      setSelectionNotice("Ombor tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [warehouseId, warehouses]);
+
+  useEffect(() => {
+    if (!expeditorUserId.trim() || expeditorUserId.trim() === "__none__") return;
+    const id = Number.parseInt(expeditorUserId.trim(), 10);
+    if (!Number.isFinite(id) || id < 1) {
+      setExpeditorUserId("");
+      return;
+    }
+    const exps = createCtxQ.data?.expeditors ?? [];
+    if (!exps.some((e) => e.id === id)) {
+      setExpeditorUserId("");
+      setSelectionNotice("Dastavchi tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [expeditorUserId, createCtxQ.data?.expeditors]);
 
   useEffect(() => {
     if (!isPolkiSheet || warehouses.length === 0) return;
@@ -1508,6 +1617,31 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     return t;
   }, [catalogProducts, qtyByProductId, priceType, stockQ.data]);
 
+  const exchangePairRows = useMemo(
+    () => buildExchangePairRows(exchangeReturnsQ.data?.items),
+    [exchangeReturnsQ.data?.items]
+  );
+
+  const exchangePayloadCheck = useMemo(
+    () =>
+      buildExchangeCreateBody({
+        sourceOrderIds: exchangeSourceOrderIds,
+        minusKey: exMinusKey,
+        minusQty: exMinusQty,
+        plusProductId: exPlusProductId,
+        plusQty: exPlusQty,
+        pairRows: exchangePairRows
+      }),
+    [
+      exchangeSourceOrderIds,
+      exMinusKey,
+      exMinusQty,
+      exPlusProductId,
+      exPlusQty,
+      exchangePairRows
+    ]
+  );
+
   const totalVolumeM3 = useMemo(() => {
     const map = new Map((stockQ.data ?? []).map((s) => [s.product_id, s]));
     let v = 0;
@@ -1623,6 +1757,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           const body: Record<string, unknown> = {
             client_id: cid,
             warehouse_id: wid,
+            price_type: priceType.trim() || "retail",
             lines: batchLines
           };
           if (noteJoined) body.note = noteJoined;
@@ -1644,6 +1779,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         const body: Record<string, unknown> = {
           client_id: cid,
           warehouse_id: wid,
+          price_type: priceType.trim() || "retail",
           lines
         };
         if (isPolkiFree) {
@@ -1655,6 +1791,56 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         if (noteJoined) body.note = noteJoined;
         if (refusalReasonRefPolki.trim()) body.refusal_reason_ref = refusalReasonRefPolki.trim();
         await api.post(`/api/${tenantSlug}/returns/period`, body);
+        return;
+      }
+
+      if (isExchangeFlow) {
+        const pairRows = buildExchangePairRows(exchangeReturnsQ.data?.items);
+        const built = buildExchangeCreateBody({
+          sourceOrderIds: exchangeSourceOrderIds,
+          minusKey: exMinusKey,
+          minusQty: exMinusQty,
+          plusProductId: exPlusProductId,
+          plusQty: exPlusQty,
+          pairRows
+        });
+        if (!built.ok) throw new Error(`exchange_${built.reason}`);
+        const cid = Number.parseInt(clientId, 10);
+        if (!Number.isFinite(cid) || cid < 1) throw new Error("client");
+        const wid = Number.parseInt(warehouseId, 10);
+        if (!warehouseId.trim() || !Number.isFinite(wid) || wid < 1) throw new Error("warehouse");
+        const agentParsed = agentId.trim() ? Number.parseInt(agentId, 10) : NaN;
+        const agent_id =
+          Number.isFinite(agentParsed) && agentParsed > 0 ? agentParsed : null;
+        if (agent_id == null) throw new Error("agent");
+        const freeComment = orderComment.trim();
+        const presetStored = orderNotePreset.trim();
+        let commentOut: string | null = freeComment || null;
+        if (presetStored) {
+          const presetLabel =
+            refEntryLabelByStored(ctxProfile?.references?.order_note_entries, presetStored) ??
+            presetStored;
+          commentOut = freeComment ? `${presetLabel}\n${freeComment}` : presetLabel;
+        }
+        const body: Record<string, unknown> = {
+          client_id: cid,
+          warehouse_id: wid,
+          agent_id,
+          price_type: priceType.trim() || "retail",
+          order_type: "exchange",
+          apply_bonus: false,
+          items: [],
+          comment: commentOut,
+          request_type_ref: requestTypeRef.trim() || null,
+          ...built.body
+        };
+        const expRaw = expeditorUserId.trim();
+        if (expRaw === "__none__") body.expeditor_user_id = null;
+        else if (expRaw !== "") {
+          const eid = Number.parseInt(expRaw, 10);
+          if (Number.isFinite(eid) && eid > 0) body.expeditor_user_id = eid;
+        }
+        await api.post(`/api/${tenantSlug}/orders`, body);
         return;
       }
 
@@ -1738,9 +1924,10 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["orders", tenantSlug] });
       void qc.invalidateQueries({ queryKey: ["orders", "create-context", tenantSlug] });
-      if (isPolkiSheet) {
+      if (isPolkiSheet || isExchangeFlow) {
         void qc.invalidateQueries({ queryKey: ["returns", tenantSlug] });
         void qc.invalidateQueries({ queryKey: ["returns-client-data", tenantSlug] });
+        void qc.invalidateQueries({ queryKey: ["exchange-returns", tenantSlug] });
       }
       setRequestTypeRef("");
       setOrderNotePreset("");
@@ -1918,6 +2105,18 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         setLocalError("Mahsulot topilmadi yoki faol emas.");
         return;
       }
+      if (code === "ReturnNotInterchangeable") {
+        const id = ax.response?.data?.product_id as number | undefined;
+        const msg = ax.response?.data?.message;
+        setLocalError(
+          id != null
+            ? `Mahsulot #${id}: faol interchangeable guruhda emas yoki tanlangan narx turi (${priceType.trim() || "retail"}) mos emas.`
+            : (typeof msg === "string" && msg.trim()
+                ? msg
+                : "Qaytarish uchun mahsulot interchangeable guruhda emas yoki narx turi mos emas.")
+        );
+        return;
+      }
       if (code === "BadOrder") {
         setLocalError("Zakaz topilmadi yoki qaytarish uchun mos emas.");
         return;
@@ -2010,17 +2209,27 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
           stockReadyForLines &&
           (isPolkiFree || (isPolkiByOrder && polkiOrderIds.length > 0))
       )
-    : Boolean(
-        hasClient &&
-          hasWarehouse &&
-          selectedItemsCount > 0 &&
-          !mutation.isPending &&
-          !loadingLists &&
-          stockReadyForLines &&
-          !hasQtyOverStock &&
-          !hasMissingPriceForSelected &&
-          (!requiresAgentAndPayment || (Boolean(agentId.trim()) && Boolean(paymentMethodRef.trim())))
-      );
+    : isExchangeFlow
+      ? Boolean(
+          hasClient &&
+            hasWarehouse &&
+            Boolean(agentId.trim()) &&
+            exchangeReturnsQ.isSuccess &&
+            exchangePayloadCheck.ok &&
+            !mutation.isPending &&
+            !loadingLists
+        )
+      : Boolean(
+          hasClient &&
+            hasWarehouse &&
+            selectedItemsCount > 0 &&
+            !mutation.isPending &&
+            !loadingLists &&
+            stockReadyForLines &&
+            !hasQtyOverStock &&
+            !hasMissingPriceForSelected &&
+            (!requiresAgentAndPayment || (Boolean(agentId.trim()) && Boolean(paymentMethodRef.trim())))
+        );
 
   /** Nega «Возврат» o‘chiq — foydalanuvchiga aniq sabab (rus.). */
   const polkiSubmitBlockedReason = useMemo((): string | null => {
@@ -2122,14 +2331,18 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             ? "Возврат с полки"
             : isPolkiByOrder
               ? "Возврат с полки по заказу"
-              : "Yangi zakaz"
+              : isExchangeFlow
+                ? "Обмен (связанный)"
+                : "Yangi zakaz"
         }
         description={
           isPolkiSheet
             ? isPolkiByOrder
               ? "Параметры и состав; по заказу — только доставленные заказы, можно выбрать несколько."
               : "Компактные параметры и таблица состава возврата за период."
-            : "Klient, ombor va mahsulot miqdorlari — to‘liq sahifa."
+            : isExchangeFlow
+              ? "Минус по доставленному заказу, плюс только из группы взаимозаменяемых."
+              : "Klient, ombor va mahsulot miqdorlari — to‘liq sahifa."
         }
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2173,15 +2386,23 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                         ? "Agentni tanlang (savdo zakazi)"
                         : requiresAgentAndPayment && !paymentMethodRef.trim()
                           ? "To‘lov usulini tanlang"
-                          : selectedItemsCount === 0
-                            ? "Kamida bitta mahsulot miqdorini kiriting"
-                            : hasQtyOverStock
-                              ? "Miqdor qoldiqdan oshmasin"
-                              : hasMissingPriceForSelected
-                                ? "Tanlangan narx turi bo‘yicha narxi yo‘q mahsulotlar bor"
-                                : !stockReadyForLines
-                                  ? "Qoldiqlar Загрузка…"
+                          : isExchangeFlow
+                            ? !agentId.trim()
+                              ? "Agentni tanlang"
+                              : exchangeReturnsQ.isLoading
+                                ? "Загрузка строк заказа…"
+                                : !exchangePayloadCheck.ok
+                                  ? "Заполните минус/плюс и проверьте лимиты"
                                   : undefined
+                            : selectedItemsCount === 0
+                              ? "Kamida bitta mahsulot miqdorini kiriting"
+                              : hasQtyOverStock
+                                ? "Miqdor qoldiqdan oshmasin"
+                                : hasMissingPriceForSelected
+                                  ? "Tanlangan narx turi bo‘yicha narxi yo‘q mahsulotlar bor"
+                                  : !stockReadyForLines
+                                    ? "Qoldiqlar Загрузка…"
+                                    : undefined
               }
             >
               {mutation.isPending
@@ -2190,7 +2411,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   : "Saqlanmoqda…"
                 : isPolkiSheet
                   ? "Возврат"
-                  : "Yaratish"}
+                  : isExchangeFlow
+                    ? "Обмен"
+                    : "Yaratish"}
             </Button>
           </div>
         }
@@ -2205,6 +2428,11 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         {localError ? (
           <p className="text-sm text-destructive" role="alert">
             {localError}
+          </p>
+        ) : null}
+        {selectionNotice ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300" role="status">
+            {selectionNotice}
           </p>
         ) : null}
 
@@ -2228,7 +2456,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   <code className="rounded bg-muted px-1 text-xs text-foreground">
                     npm run dev --prefix backend
                   </code>{" "}
-                  ni ishga tushiring (odatda port 4000). Boshqa portda bo‘lsa,{" "}
+                  ni ishga tushiring (odatda port 18080). Boshqa portda bo‘lsa,{" "}
                   <code className="rounded bg-muted px-1 text-xs text-foreground">
                     NEXT_PUBLIC_API_URL
                   </code>{" "}
@@ -2252,6 +2480,16 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
         ) : null}
 
         {!isPolkiSheet ? (
+          isExchangeFlow ? (
+            <div
+              className="rounded-lg border border-dashed border-violet-500/40 bg-violet-500/5 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground"
+              role="note"
+            >
+              <span className="font-medium text-foreground">Обмен: </span>
+              минус списывается только в пределах остатка по доставленному заказу; плюс — только из группы
+              взаимозаменяемых для выбранной позиции (тип цены должен быть разрешён в группе).
+            </div>
+          ) : (
           <div
             className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground"
             role="note"
@@ -2261,6 +2499,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             ulanadi. Hozir «Skidka turi» faqat ko‘rinish; bonuslar serverdagi{" "}
             <span className="font-medium text-foreground">apply_bonus</span> bilan bog‘langan.
           </div>
+          )
         ) : (
           <div
             className="rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-4 py-2.5 text-[11px] leading-relaxed text-muted-foreground"
@@ -2303,6 +2542,13 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 onChange={(e) => {
                   setClientId(e.target.value);
                   if (isPolkiByOrder) setPolkiOrderIds([]);
+                  if (isExchangeFlow) {
+                    setExchangeSourceOrderIds([]);
+                    setExMinusKey("");
+                    setExMinusQty("");
+                    setExPlusProductId("");
+                    setExPlusQty("");
+                  }
                 }}
                 disabled={mutation.isPending || loadingLists}
               >
@@ -3323,6 +3569,30 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             </div>
           )}
 
+          {isExchangeFlow && tenantSlug ? (
+            <div className="mb-4">
+              <ExchangeOrderCreatePanel
+                tenantSlug={tenantSlug}
+                clientIdNum={clientIdNum}
+                warehouseId={warehouseId}
+                agentId={agentId}
+                priceType={priceType}
+                mutationPending={mutation.isPending}
+                ordersForPick={polkiOrdersForPick}
+                sourceOrderIds={exchangeSourceOrderIds}
+                onSourceOrderIdsChange={setExchangeSourceOrderIds}
+                minusKey={exMinusKey}
+                onMinusKeyChange={setExMinusKey}
+                minusQty={exMinusQty}
+                onMinusQtyChange={setExMinusQty}
+                plusProductId={exPlusProductId}
+                onPlusProductIdChange={setExPlusProductId}
+                plusQty={exPlusQty}
+                onPlusQtyChange={setExPlusQty}
+              />
+            </div>
+          ) : null}
+
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div className="relative min-w-0 flex-1">
               {isPolkiSheet ? (
@@ -3337,14 +3607,14 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 onChange={(e) => setProductSearch(e.target.value)}
                 disabled={
                   mutation.isPending ||
-                  (isPolkiSheet ? !canShowPolkiGrid : !canPickProducts)
+                  (isPolkiSheet ? !canShowPolkiGrid : isExchangeFlow ? true : !canPickProducts)
                 }
                 className={cn("h-10", isPolkiSheet && "pl-9")}
               />
             </div>
           </div>
 
-          {!isPolkiSheet ? (
+          {!isPolkiSheet && !isExchangeFlow ? (
           <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
             <div className="max-h-[min(60vh,720px)] overflow-auto">
               <table className="w-full min-w-[980px] border-collapse text-sm">
@@ -3679,7 +3949,7 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
             />
           )}
 
-          {!isPolkiSheet && hasMissingPriceForSelected ? (
+          {!isPolkiSheet && !isExchangeFlow && hasMissingPriceForSelected ? (
             <p className="mt-3 text-xs text-destructive">
               Tanlangan narx turi ({priceType}) bo‘yicha narxi yo‘q mahsulot bor:{" "}
               {missingPriceProductNames.join(", ")}
@@ -3697,6 +3967,12 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                 более {MAX_POLKI_RETURN_QTY} шт на склад за раз: в счёт входят и оплата, и бонус, если обе
                 части физически возвращаются на склад (как в строке «Авторасп: … опл … бон»). При большем
                 объёме оформите несколько возвратов.
+              </>
+            ) : isExchangeFlow ? (
+              <>
+                <span className="font-medium text-foreground">Обмен: </span>
+                минус увеличивает факт на складе; плюс резервируется при создании и списывается при подтверждении.
+                При отмене — возврат резерва и откат прихода минуса.
               </>
             ) : (
               <>
@@ -3736,7 +4012,9 @@ export function OrderCreateWorkspace({ tenantSlug, onCreated, onCancel, orderTyp
                   : "Saqlanmoqda…"
                 : isPolkiSheet
                   ? "Возврат"
-                  : "Yaratish"}
+                  : isExchangeFlow
+                    ? "Обмен"
+                    : "Yaratish"}
             </Button>
           </div>
         </div>

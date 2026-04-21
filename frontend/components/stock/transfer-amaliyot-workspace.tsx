@@ -29,6 +29,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Warehouse = { id: number; name: string };
+type AgentPick = { id: number; fio: string; login: string; is_active: boolean };
 
 type CategoryRow = { id: number; name: string; parent_id: number | null; is_active: boolean };
 
@@ -115,6 +116,8 @@ export function TransferAmaliyotWorkspace() {
   const canWrite = role === "admin" || role === "operator";
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [agents, setAgents] = useState<AgentPick[]>([]);
+  const [agentFilterId, setAgentFilterId] = useState("");
   const [loadWh, setLoadWh] = useState(true);
   const [whError, setWhError] = useState<string | null>(null);
 
@@ -195,7 +198,12 @@ export function TransferAmaliyotWorkspace() {
       setLoadWh(true);
       setWhError(null);
       try {
-        const res = await apiFetch<{ data?: Warehouse[] }>(`/api/${tenant}/warehouses`);
+        const params = new URLSearchParams();
+        if (agentFilterId.trim()) params.set("selected_agent_id", agentFilterId.trim());
+        const qs = params.toString();
+        const res = await apiFetch<{ data?: Warehouse[] }>(
+          `/api/${tenant}/warehouses${qs ? `?${qs}` : ""}`
+        );
         if (!cancelled) setWarehouses(res.data ?? []);
       } catch (e) {
         if (!cancelled) {
@@ -209,7 +217,32 @@ export function TransferAmaliyotWorkspace() {
     return () => {
       cancelled = true;
     };
+  }, [hydrated, tenant, agentFilterId]);
+
+  useEffect(() => {
+    if (!hydrated || !tenant) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch<{ data?: AgentPick[] }>(`/api/${tenant}/agents?is_active=true`);
+        if (!cancelled) setAgents((res.data ?? []).filter((a) => a.is_active));
+      } catch {
+        if (!cancelled) setAgents([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [hydrated, tenant]);
+
+  useEffect(() => {
+    if (!sourceId.trim()) return;
+    if (!warehouses.some((w) => String(w.id) === sourceId.trim())) setSourceId("");
+  }, [sourceId, warehouses]);
+  useEffect(() => {
+    if (!destId.trim()) return;
+    if (!warehouses.some((w) => String(w.id) === destId.trim())) setDestId("");
+  }, [destId, warehouses]);
 
   useEffect(() => {
     if (!hydrated || !tenant) return;
@@ -459,6 +492,26 @@ export function TransferAmaliyotWorkspace() {
                 )}
               </div>
               {whError && <p className="mt-2 text-sm text-destructive">{whError}</p>}
+              <div className="mt-3 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Agent (ombor filtri)</Label>
+                <Select
+                  value={agentFilterId || "__all__"}
+                  onValueChange={(v) => setAgentFilterId(v === "__all__" ? "" : v)}
+                  disabled={loadWh}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Barchasi" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Barchasi</SelectItem>
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.fio} ({a.login})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Manba</Label>

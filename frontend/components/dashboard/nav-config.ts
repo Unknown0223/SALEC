@@ -2,6 +2,17 @@ export type NavItem = { href: string; label: string; roles?: string[]; disabled?
 
 export type NavGroup = { title: string; items: NavItem[] };
 
+/** Dashboard ichki bo'limlari (chap paneldagi ichki menyu) */
+export const dashboardHomeNav: { sectionTitle: string; items: NavItem[] } = {
+  sectionTitle: "Дашборды",
+  items: [
+    { href: "/dashboard", label: "Супервайзер" },
+    { href: "#", label: "Финансы", disabled: true },
+    { href: "#", label: "Дашборд продаж", disabled: true },
+    { href: "#", label: "Мониторинг продаж и планов", disabled: true }
+  ]
+};
+
 /** Rasm (Lalaku-style) bo‘yicha: ombor */
 export const dashboardStockNav: { sectionTitle: string; items: NavItem[] } = {
   sectionTitle: "Склад",
@@ -75,7 +86,7 @@ export const dashboardKassaNav: {
         { href: "/reports", label: "Отчёт по приходам" },
         { href: "#", label: "Движение денежных средств", disabled: true },
         { href: "#", label: "Акт сверки", disabled: true },
-        { href: "#", label: "Долги по заказам", disabled: true }
+        { href: "/reports/order-debts", label: "Долги по заказам" }
       ]
     },
     {
@@ -111,13 +122,14 @@ export const dashboardUsersNav: { sectionTitle: string; items: NavItem[] } = {
 /** Chap panel tartibi — referens UI (yashil sidebar) */
 export type SidebarLayoutEntry =
   | { kind: "link"; item: NavItem }
+  | { kind: "dashboard" }
   | { kind: "orders" }
   | { kind: "stock" }
   | { kind: "kassa" }
   | { kind: "users" };
 
 export const dashboardSidebarLayout: SidebarLayoutEntry[] = [
-  { kind: "link", item: { href: "/dashboard", label: "Дашборд" } },
+  { kind: "dashboard" },
   { kind: "orders" },
   { kind: "link", item: { href: "/clients", label: "Клиенты" } },
   { kind: "link", item: { href: "/territories", label: "Территории" } },
@@ -135,8 +147,12 @@ export const dashboardSidebarLayout: SidebarLayoutEntry[] = [
 export function flattenMobileNavItems(): NavItem[] {
   const out: NavItem[] = [];
   for (const e of dashboardSidebarLayout) {
-    if (e.kind === "link") {
-      out.push(e.item);
+    if (e.kind === "dashboard") {
+      out.push(...dashboardHomeNav.items);
+    } else if (e.kind === "link") {
+      if (!e.item.disabled && e.item.href !== "#") {
+        out.push(e.item);
+      }
     } else if (e.kind === "orders") {
       out.push(...dashboardOrdersNavFlatItems());
     } else if (e.kind === "stock") {

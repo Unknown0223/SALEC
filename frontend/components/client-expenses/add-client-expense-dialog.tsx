@@ -28,6 +28,15 @@ import { useEffect, useMemo, useState } from "react";
 
 type StaffPick = { id: number; fio: string; code?: string | null };
 type CashDeskRow = { id: number; name: string; is_active: boolean };
+type LinkageScope = {
+  selected_agent_id: number | null;
+  selected_cash_desk_id?: number | null;
+  selected_expeditor_user_id?: number | null;
+  constrained: boolean;
+  client_ids: number[];
+  cash_desk_ids: number[];
+  expeditor_ids: number[];
+};
 
 const controlClass =
   "flex h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
@@ -79,6 +88,7 @@ export function AddClientExpenseDialog({
   const [note, setNote] = useState("");
   const [ledgerAgentUserId, setLedgerAgentUserId] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
   const clientFixed = fixedClientId != null && fixedClientId > 0;
 
@@ -149,6 +159,45 @@ export function AddClientExpenseDialog({
     }
   });
 
+  const selectedAgentIdNum = agentFilterId.trim() ? Number.parseInt(agentFilterId.trim(), 10) : NaN;
+  const selectedCashDeskIdNum = cashDeskId.trim() ? Number.parseInt(cashDeskId.trim(), 10) : NaN;
+  const selectedExpeditorIdNum = expeditorUserId.trim() ? Number.parseInt(expeditorUserId.trim(), 10) : NaN;
+  const linkageQ = useQuery({
+    queryKey: [
+      "linkage-options",
+      tenantSlug,
+      "add-client-expense",
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null,
+      Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0 ? selectedCashDeskIdNum : null,
+      Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0 ? selectedExpeditorIdNum : null
+    ],
+    enabled: Boolean(tenantSlug) && hydrated && open,
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      if (
+        (!Number.isFinite(selectedAgentIdNum) || selectedAgentIdNum < 1) &&
+        (!Number.isFinite(selectedCashDeskIdNum) || selectedCashDeskIdNum < 1) &&
+        (!Number.isFinite(selectedExpeditorIdNum) || selectedExpeditorIdNum < 1)
+      ) {
+        return null;
+      }
+      const params = new URLSearchParams();
+      if (Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0) {
+        params.set("selected_agent_id", String(selectedAgentIdNum));
+      }
+      if (Number.isFinite(selectedCashDeskIdNum) && selectedCashDeskIdNum > 0) {
+        params.set("selected_cash_desk_id", String(selectedCashDeskIdNum));
+      }
+      if (Number.isFinite(selectedExpeditorIdNum) && selectedExpeditorIdNum > 0) {
+        params.set("selected_expeditor_user_id", String(selectedExpeditorIdNum));
+      }
+      const { data } = await api.get<{ data: LinkageScope }>(
+        `/api/${tenantSlug}/linkage/options?${params.toString()}`
+      );
+      return data.data;
+    }
+  });
+
   const profileQ = useQuery({
     queryKey: ["settings", "profile", tenantSlug, "add-client-expense-refs"],
     enabled: Boolean(tenantSlug) && hydrated && open,
@@ -166,17 +215,55 @@ export function AddClientExpenseDialog({
 
   const filteredClients = useMemo(() => {
     const all = clientsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (scope?.constrained) {
+      const allowed = new Set(scope.client_ids);
+      return all.filter((c) => allowed.has(c.id));
+    }
     const aid = agentFilterId.trim() ? Number.parseInt(agentFilterId, 10) : NaN;
     if (!Number.isFinite(aid) || aid < 1) return all;
     return all.filter((c) => c.agent_id === aid);
-  }, [clientsQ.data, agentFilterId]);
+  }, [clientsQ.data, linkageQ.data, agentFilterId]);
+  const filteredCashDesks = useMemo(() => {
+    const all = cashDesksQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.cash_desk_ids);
+    return all.filter((d) => allowed.has(d.id));
+  }, [cashDesksQ.data, linkageQ.data]);
+  const filteredExpeditors = useMemo(() => {
+    const all = expeditorsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.expeditor_ids);
+    return all.filter((d) => allowed.has(d.id));
+  }, [expeditorsQ.data, linkageQ.data]);
 
   useEffect(() => {
     if (clientFixed) return;
     if (!clientId) return;
     const ok = filteredClients.some((c) => String(c.id) === clientId);
-    if (!ok) setClientId("");
+    if (!ok) {
+      setClientId("");
+      setSelectionNotice("Klient tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
   }, [clientFixed, filteredClients, clientId]);
+
+  useEffect(() => {
+    if (!cashDeskId.trim()) return;
+    if (!filteredCashDesks.some((d) => String(d.id) === cashDeskId.trim())) {
+      setCashDeskId("");
+      setSelectionNotice("Kassa tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [cashDeskId, filteredCashDesks]);
+
+  useEffect(() => {
+    if (!expeditorUserId.trim()) return;
+    if (!filteredExpeditors.some((d) => String(d.id) === expeditorUserId.trim())) {
+      setExpeditorUserId("");
+      setSelectionNotice("Dastavchi tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [expeditorUserId, filteredExpeditors]);
 
   const paySelectOpts = useMemo(
     () => paymentMethodSelectOptions(profileQ.data, profileQ.data?.payment_types),
@@ -253,6 +340,11 @@ export function AddClientExpenseDialog({
             {err ? (
               <p className="text-sm text-destructive" role="alert">
                 {err}
+              </p>
+            ) : null}
+            {selectionNotice ? (
+              <p className="text-sm text-amber-700 dark:text-amber-300" role="status">
+                {selectionNotice}
               </p>
             ) : null}
 
@@ -382,7 +474,7 @@ export function AddClientExpenseDialog({
                 onChange={(e) => setCashDeskId(e.target.value)}
               >
                 <option value="">—</option>
-                {(cashDesksQ.data ?? []).map((d) => (
+                {filteredCashDesks.map((d) => (
                   <option key={d.id} value={String(d.id)}>
                     {d.name}
                   </option>
@@ -402,7 +494,7 @@ export function AddClientExpenseDialog({
                 onChange={(e) => setExpeditorUserId(e.target.value)}
               >
                 <option value="">—</option>
-                {(expeditorsQ.data ?? []).map((e) => (
+                {filteredExpeditors.map((e) => (
                   <option key={e.id} value={String(e.id)}>
                     {e.fio}
                   </option>

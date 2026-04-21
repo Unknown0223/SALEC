@@ -71,6 +71,9 @@ type ClientImportMultipartOk = {
   sheetName?: string;
   headerRowIndex?: number;
   columnMap?: Record<string, number>;
+  importMode?: "create" | "update";
+  duplicateKeyFields?: string[];
+  updateApplyFields?: string[];
 };
 
 async function parseClientImportMultipart(request: FastifyRequest): Promise<ClientImportMultipartOk | null> {
@@ -78,6 +81,9 @@ async function parseClientImportMultipart(request: FastifyRequest): Promise<Clie
   let sheetName: string | undefined;
   let headerRowIndex: number | undefined;
   let columnMap: Record<string, number> | undefined;
+  let importMode: "create" | "update" | undefined;
+  let duplicateKeyFields: string[] | undefined;
+  let updateApplyFields: string[] | undefined;
 
   const parts = request.parts();
   for await (const part of parts) {
@@ -99,6 +105,23 @@ async function parseClientImportMultipart(request: FastifyRequest): Promise<Clie
         } catch {
           /* ignore */
         }
+      } else if (part.fieldname === "importMode") {
+        const m = String(part.value ?? "").trim().toLowerCase();
+        if (m === "create" || m === "update") importMode = m;
+      } else if (part.fieldname === "duplicateKeyFields") {
+        try {
+          const parsed = JSON.parse(String(part.value ?? "[]")) as unknown;
+          if (Array.isArray(parsed)) duplicateKeyFields = parsed.map((x) => String(x ?? "").trim()).filter(Boolean);
+        } catch {
+          /* ignore */
+        }
+      } else if (part.fieldname === "updateApplyFields") {
+        try {
+          const parsed = JSON.parse(String(part.value ?? "[]")) as unknown;
+          if (Array.isArray(parsed)) updateApplyFields = parsed.map((x) => String(x ?? "").trim()).filter(Boolean);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -106,7 +129,7 @@ async function parseClientImportMultipart(request: FastifyRequest): Promise<Clie
   if (!buf || buf.length === 0) {
     return null;
   }
-  return { buf, sheetName, headerRowIndex, columnMap };
+  return { buf, sheetName, headerRowIndex, columnMap, importMode, duplicateKeyFields, updateApplyFields };
 }
 
 function parseLocalYmd(s: string): Date | null {
@@ -292,6 +315,22 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
   }
   const inn = q.inn?.trim() || undefined;
   const phone = q.phone?.trim() || undefined;
+  const client_pinfl = q.client_pinfl?.trim() || undefined;
+  let has_active_equipment: boolean | undefined;
+  if (q.has_active_equipment === "true") has_active_equipment = true;
+  else if (q.has_active_equipment === "false") has_active_equipment = false;
+  const equipment_kind = q.equipment_kind?.trim() || undefined;
+  let has_credit: boolean | undefined;
+  if (q.has_credit === "true") has_credit = true;
+  else if (q.has_credit === "false") has_credit = false;
+  let agent_consignment: "yes" | "no" | undefined;
+  const acRaw = q.agent_consignment?.trim().toLowerCase();
+  if (acRaw === "yes" || acRaw === "true" || acRaw === "1") agent_consignment = "yes";
+  else if (acRaw === "no" || acRaw === "false" || acRaw === "0") agent_consignment = "no";
+  let agent_consignment_limited: "yes" | "no" | undefined;
+  const aclRaw = q.agent_consignment_limited?.trim().toLowerCase();
+  if (aclRaw === "yes" || aclRaw === "true" || aclRaw === "1") agent_consignment_limited = "yes";
+  else if (aclRaw === "no" || aclRaw === "false" || aclRaw === "0") agent_consignment_limited = "no";
   const created_from = q.created_from?.trim() || undefined;
   const created_to = q.created_to?.trim() || undefined;
   let supervisor_user_id: number | undefined;
@@ -326,6 +365,12 @@ function parseClientListQuery(q: Record<string, string | undefined>): ListClient
     ...(visit_weekday !== undefined ? { visit_weekday } : {}),
     ...(inn ? { inn } : {}),
     ...(phone ? { phone } : {}),
+    ...(client_pinfl ? { client_pinfl } : {}),
+    ...(has_active_equipment !== undefined ? { has_active_equipment } : {}),
+    ...(equipment_kind ? { equipment_kind } : {}),
+    ...(has_credit !== undefined ? { has_credit } : {}),
+    ...(agent_consignment !== undefined ? { agent_consignment } : {}),
+    ...(agent_consignment_limited !== undefined ? { agent_consignment_limited } : {}),
     ...(created_from ? { created_from } : {}),
     ...(created_to ? { created_to } : {}),
     ...(supervisor_user_id !== undefined ? { supervisor_user_id } : {}),
@@ -440,7 +485,10 @@ export async function registerClientRoutes(app: FastifyInstance) {
       const result = await importClientsFromXlsx(request.tenant!.id, parsed.buf, {
         sheetName: parsed.sheetName,
         headerRowIndex: parsed.headerRowIndex,
-        columnMap: parsed.columnMap
+        columnMap: parsed.columnMap,
+        importMode: parsed.importMode,
+        duplicateKeyFields: parsed.duplicateKeyFields,
+        updateApplyFields: parsed.updateApplyFields
       });
       return reply.send(result);
     }
@@ -463,7 +511,10 @@ export async function registerClientRoutes(app: FastifyInstance) {
         const { queue, jobId } = await enqueueClientsImportJob(tenant.id, Number(user.sub), tempPath, {
           sheetName: parsed.sheetName,
           headerRowIndex: parsed.headerRowIndex,
-          columnMap: parsed.columnMap
+          columnMap: parsed.columnMap,
+          importMode: parsed.importMode,
+          duplicateKeyFields: parsed.duplicateKeyFields,
+          updateApplyFields: parsed.updateApplyFields
         });
         tempPath = null;
         return reply.status(202).send({

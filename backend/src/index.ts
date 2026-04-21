@@ -11,8 +11,10 @@ async function main() {
   const app = buildApp();
   await initOrderEventBusRedis(env.REDIS_URL, app.log);
 
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
-  app.log.info(`Server listening on port ${env.PORT}`);
+  /** Dev/test: `0.0.0.0` ba’zi Windows portlarida EACCES beradi; lokalda 127.0.0.1 yetarli. */
+  const listenHost = env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
+  await app.listen({ port: env.PORT, host: listenHost });
+  app.log.info({ port: env.PORT, host: listenHost }, "Server listening");
 
   enableAutoClose();
   app.log.info("Auto-status cron worker enabled.");

@@ -195,7 +195,7 @@ export default function AgentTrackPage() {
     <PageShell>
       <PageHeader
         title="Agent GPS treki"
-        description="Mobil ilova yoki POST /agent-locations orqali kelgan nuqtalar. OpenStreetMap + chiziq."
+        description="Mobil ilova yoki POST /agent-locations orqali kelgan nuqtalar. Yandex Map + trek chizig‘i."
         actions={
           <Link href="/routes" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             Marshrut kunlari

@@ -10,7 +10,7 @@ import { STALE } from "@/lib/query-stale";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { pickCityTerritoryHint } from "@/lib/city-territory-hint";
 import { mergeRefOptions } from "@/lib/merge-ref-options";
 import { mergeRefSelectOptions } from "@/lib/ref-select-options";
@@ -142,23 +142,275 @@ function SpravochnikAdminLink({ href, children }: { href: string; children: Reac
 const MAP_DEFAULT_LAT = 41.311081;
 const MAP_DEFAULT_LON = 69.279737;
 
-/**
- * Ichki ko‘rinish: OpenStreetMap embed (CSP sababli Yandex map-widget `cs.js` xatolarini bermaydi).
- * Yandex — faqat qidiruv va «to‘liq xarita» havolalari orqali.
- */
-function openStreetMapEmbedUrl(lat: number, lon: number, withMarker: boolean): string {
-  const dLat = withMarker ? 0.006 : 0.11;
-  const dLon = withMarker ? 0.008 : 0.14;
-  const minLon = lon - dLon;
-  const minLat = lat - dLat;
-  const maxLon = lon + dLon;
-  const maxLat = lat + dLat;
-  const bbox = `${minLon},${minLat},${maxLon},${maxLat}`;
-  let url = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik`;
-  if (withMarker) {
-    url += `&marker=${encodeURIComponent(`${lat},${lon}`)}`;
+const YANDEX_LANG = "ru_RU";
+
+type YMapsLike = {
+  ready: (cb: () => void) => void;
+  Map: new (el: HTMLElement, state: Record<string, unknown>, opts?: Record<string, unknown>) => {
+    destroy: () => void;
+    setCenter: (center: [number, number], zoom?: number) => void;
+    events: { add: (name: string, fn: (e: { get: (k: string) => unknown }) => void) => void };
+    geoObjects: { add: (obj: unknown) => void; remove: (obj: unknown) => void };
+  };
+  Placemark: new (
+    coords: [number, number],
+    props?: Record<string, unknown>,
+    opts?: Record<string, unknown>
+  ) => { geometry: { setCoordinates: (coords: [number, number]) => void } };
+  geocode: (
+    q: string,
+    opts?: Record<string, unknown>
+  ) => Promise<{
+    geoObjects: {
+      getLength: () => number;
+      get: (idx: number) => {
+        geometry: { getCoordinates: () => [number, number] };
+      };
+    };
+  }>;
+};
+
+declare global {
+  interface Window {
+    ymaps?: YMapsLike;
+    __ymapsLoaderPromise?: Promise<YMapsLike>;
   }
-  return url;
+}
+
+function loadYandexMapsApi(): Promise<YMapsLike> {
+  if (typeof window === "undefined") return Promise.reject(new Error("NoWindow"));
+  if (window.ymaps) return Promise.resolve(window.ymaps);
+  if (window.__ymapsLoaderPromise) return window.__ymapsLoaderPromise;
+  const key = process.env.NEXT_PUBLIC_YANDEX_MAPS_API_KEY?.trim();
+  const src = key
+    ? `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(key)}&lang=${YANDEX_LANG}`
+    : `https://api-maps.yandex.ru/2.1/?lang=${YANDEX_LANG}`;
+  window.__ymapsLoaderPromise = new Promise<YMapsLike>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-yandex-maps="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => (window.ymaps ? resolve(window.ymaps) : reject(new Error("NoYMaps"))));
+      existing.addEventListener("error", () => reject(new Error("YMapsScriptError")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.yandexMaps = "1";
+    script.onload = () => (window.ymaps ? resolve(window.ymaps) : reject(new Error("NoYMaps")));
+    script.onerror = () => reject(new Error("YMapsScriptError"));
+    document.head.appendChild(script);
+  });
+  return window.__ymapsLoaderPromise;
+}
+
+function normalizeCoord(raw: string): number | null {
+  const t = raw.trim().replace(",", ".");
+  if (!t) return null;
+  const n = Number.parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function inLatRange(n: number): boolean {
+  return n >= -90 && n <= 90;
+}
+function inLonRange(n: number): boolean {
+  return n >= -180 && n <= 180;
+}
+
+function parseCoordsFromLocationText(
+  rawInput: string,
+  existingLatRaw: string,
+  existingLonRaw: string
+): { lat: number | null; lon: number | null } | null {
+  const input = rawInput.trim();
+  if (!input) return null;
+
+  const existingLat = normalizeCoord(existingLatRaw);
+  const existingLon = normalizeCoord(existingLonRaw);
+
+  const tryUrl = (() => {
+    const maybeUrl = /^(https?:\/\/)/i.test(input)
+      ? input
+      : /^[\w.-]+\.[a-z]{2,}(\/|$|\?)/i.test(input)
+        ? `https://${input}`
+        : null;
+    if (!maybeUrl) return null;
+    try {
+      const u = new URL(maybeUrl);
+      const q = u.searchParams;
+      const fromLatLon = (latRaw: string | null, lonRaw: string | null) => {
+        if (!latRaw || !lonRaw) return null;
+        const lat = normalizeCoord(latRaw);
+        const lon = normalizeCoord(lonRaw);
+        if (lat == null || lon == null || !inLatRange(lat) || !inLonRange(lon)) return null;
+        return { lat, lon };
+      };
+      const qParam = q.get("q") ?? q.get("query");
+      if (qParam) {
+        const m = qParam.match(/(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/);
+        if (m) return fromLatLon(m[1] ?? null, m[2] ?? null);
+      }
+      const ll = q.get("ll");
+      if (ll) {
+        const m = ll.match(/(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/);
+        if (m) {
+          const lon = normalizeCoord(m[1] ?? "");
+          const lat = normalizeCoord(m[2] ?? "");
+          if (lat != null && lon != null && inLatRange(lat) && inLonRange(lon)) return { lat, lon };
+        }
+      }
+      const pt = q.get("pt");
+      if (pt) {
+        const m = pt.match(/(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/);
+        if (m) {
+          const lon = normalizeCoord(m[1] ?? "");
+          const lat = normalizeCoord(m[2] ?? "");
+          if (lat != null && lon != null && inLatRange(lat) && inLonRange(lon)) return { lat, lon };
+        }
+      }
+      const at = u.href.match(/@(-?\d+(?:[.,]\d+)?),\s*(-?\d+(?:[.,]\d+)?)/);
+      if (at) return fromLatLon(at[1] ?? null, at[2] ?? null);
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+  if (tryUrl) return tryUrl;
+
+  const labeledLat = input.match(/(?:lat|latitude|широта)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/i)?.[1] ?? null;
+  const labeledLon =
+    input.match(/(?:lon|lng|long|longitude|долгота)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/i)?.[1] ?? null;
+  if (labeledLat || labeledLon) {
+    const lat = labeledLat ? normalizeCoord(labeledLat) : existingLat;
+    const lon = labeledLon ? normalizeCoord(labeledLon) : existingLon;
+    if (lat != null && lon != null && inLatRange(lat) && inLonRange(lon)) return { lat, lon };
+  }
+
+  const nums = Array.from(input.matchAll(/-?\d+(?:[.,]\d+)?/g))
+    .map((m) => normalizeCoord(m[0] ?? ""))
+    .filter((n): n is number => n != null);
+  if (nums.length >= 2) {
+    const a = nums[0]!;
+    const b = nums[1]!;
+    if (inLatRange(a) && inLonRange(b)) return { lat: a, lon: b };
+    if (inLonRange(a) && inLatRange(b)) return { lat: b, lon: a };
+  }
+  if (nums.length === 1) {
+    const one = nums[0]!;
+    if (existingLat == null && inLatRange(one) && existingLon != null) return { lat: one, lon: existingLon };
+    if (existingLon == null && inLonRange(one) && existingLat != null) return { lat: existingLat, lon: one };
+  }
+  return null;
+}
+
+function YandexCoordinatePicker({
+  lat,
+  lon,
+  disabled,
+  onPick
+}: {
+  lat: number | null;
+  lon: number | null;
+  disabled: boolean;
+  onPick: (lat: number, lon: number) => void;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<ReturnType<YMapsLike["Map"]> | null>(null);
+  const markerRef = useRef<ReturnType<YMapsLike["Placemark"]> | null>(null);
+  const disabledRef = useRef(disabled);
+  const onPickRef = useRef(onPick);
+
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
+
+  useEffect(() => {
+    onPickRef.current = onPick;
+  }, [onPick]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let cancelled = false;
+    void loadYandexMapsApi()
+      .then((ymaps) => {
+        if (cancelled || !host) return;
+        ymaps.ready(() => {
+          if (cancelled || !host) return;
+          const center: [number, number] =
+            lat != null && lon != null ? [lat, lon] : [MAP_DEFAULT_LAT, MAP_DEFAULT_LON];
+          const map = new ymaps.Map(
+            host,
+            {
+              center,
+              zoom: lat != null && lon != null ? 15 : 11,
+              controls: ["zoomControl", "typeSelector", "fullscreenControl"]
+            },
+            { suppressMapOpenBlock: true }
+          );
+          mapRef.current = map;
+          if (lat != null && lon != null) {
+            const marker = new ymaps.Placemark([lat, lon], {}, { preset: "islands#redDotIcon" });
+            markerRef.current = marker;
+            map.geoObjects.add(marker);
+          }
+          map.events.add("click", (e) => {
+            if (disabledRef.current) return;
+            const coords = e.get("coords");
+            if (!Array.isArray(coords) || coords.length < 2) return;
+            const nextLat = Number(coords[0]);
+            const nextLon = Number(coords[1]);
+            if (!Number.isFinite(nextLat) || !Number.isFinite(nextLon)) return;
+            if (!markerRef.current) {
+              const marker = new ymaps.Placemark([nextLat, nextLon], {}, { preset: "islands#redDotIcon" });
+              markerRef.current = marker;
+              map.geoObjects.add(marker);
+            } else {
+              markerRef.current.geometry.setCoordinates([nextLat, nextLon]);
+            }
+            onPickRef.current(nextLat, nextLon);
+          });
+        });
+      })
+      .catch(() => {
+        // Map loader errors are handled by fallback help text in form
+      });
+    return () => {
+      cancelled = true;
+      if (mapRef.current) mapRef.current.destroy();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (lat == null || lon == null) {
+      if (markerRef.current) {
+        map.geoObjects.remove(markerRef.current);
+        markerRef.current = null;
+      }
+      return;
+    }
+    if (!markerRef.current && window.ymaps) {
+      const marker = new window.ymaps.Placemark([lat, lon], {}, { preset: "islands#redDotIcon" });
+      markerRef.current = marker;
+      map.geoObjects.add(marker);
+    } else {
+      markerRef.current?.geometry.setCoordinates([lat, lon]);
+    }
+    map.setCenter([lat, lon], 15);
+  }, [lat, lon]);
+
+  return (
+    <div
+      ref={hostRef}
+      className="block min-h-[280px] w-full border-0 sm:min-h-[360px]"
+      style={{ height: 420 }}
+    />
+  );
 }
 
 type Props = {
@@ -212,6 +464,8 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
   const [longitude, setLongitude] = useState("");
   const [zone, setZone] = useState("");
   const [mapSearchText, setMapSearchText] = useState("");
+  const [mapSearchPending, setMapSearchPending] = useState(false);
+  const [mapSearchNotice, setMapSearchNotice] = useState<string | null>(null);
   const [agentSlots, setAgentSlots] = useState<AgentSlotForm[]>(() => [emptyAgentSlot()]);
 
   const clientQ = useQuery({
@@ -535,16 +789,67 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
     "flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
   const selectCls = inputCls;
 
-  const latN = latitude.trim().replace(",", ".");
-  const lonN = longitude.trim().replace(",", ".");
-  const mapOk =
-    latN !== "" && lonN !== "" && Number.isFinite(Number.parseFloat(latN)) && Number.isFinite(Number.parseFloat(lonN));
-  const latNum = mapOk ? Number.parseFloat(latN) : MAP_DEFAULT_LAT;
-  const lonNum = mapOk ? Number.parseFloat(lonN) : MAP_DEFAULT_LON;
-  const mapEmbedUrl = openStreetMapEmbedUrl(latNum, lonNum, mapOk);
+  const latParsed = normalizeCoord(latitude);
+  const lonParsed = normalizeCoord(longitude);
+  const mapOk = latParsed != null && lonParsed != null && inLatRange(latParsed) && inLonRange(lonParsed);
+  const latN = mapOk ? String(latParsed) : "";
+  const lonN = mapOk ? String(lonParsed) : "";
   const yandexMapsHref = mapOk
     ? `https://yandex.com/maps/?pt=${encodeURIComponent(lonN)},${encodeURIComponent(latN)}&z=17&l=map`
     : `https://yandex.com/maps/?ll=${encodeURIComponent(String(MAP_DEFAULT_LON))}%2C${encodeURIComponent(String(MAP_DEFAULT_LAT))}&z=11`;
+
+  const applyPickedCoords = (nextLat: number, nextLon: number) => {
+    setLatitude(nextLat.toFixed(6));
+    setLongitude(nextLon.toFixed(6));
+    setMapSearchNotice(null);
+  };
+
+  const handleMapSearch = async () => {
+    const query = mapSearchText.trim();
+    if (!query) return;
+
+    const parsed = parseCoordsFromLocationText(query, latitude, longitude);
+    if (parsed && parsed.lat != null && parsed.lon != null) {
+      applyPickedCoords(parsed.lat, parsed.lon);
+      return;
+    }
+
+    setMapSearchPending(true);
+    setMapSearchNotice(null);
+    try {
+      const ymaps = await loadYandexMapsApi();
+      const byAddress = await new Promise<{ lat: number; lon: number } | null>((resolve) => {
+        ymaps.ready(() => {
+          void ymaps
+            .geocode(query, { results: 1 })
+            .then((res) => {
+              if (res.geoObjects.getLength() < 1) {
+                resolve(null);
+                return;
+              }
+              const coords = res.geoObjects.get(0).geometry.getCoordinates();
+              const nextLat = Number(coords[0]);
+              const nextLon = Number(coords[1]);
+              if (!Number.isFinite(nextLat) || !Number.isFinite(nextLon)) {
+                resolve(null);
+                return;
+              }
+              resolve({ lat: nextLat, lon: nextLon });
+            })
+            .catch(() => resolve(null));
+        });
+      });
+      if (byAddress) {
+        applyPickedCoords(byAddress.lat, byAddress.lon);
+        return;
+      }
+      setMapSearchNotice("Koordinata yoki manzil aniqlanmadi. Matn formatini tekshiring.");
+    } catch {
+      setMapSearchNotice("Yandex карта yuklanmadi. Internet yoki API kalitini tekshiring.");
+    } finally {
+      setMapSearchPending(false);
+    }
+  };
 
   if (clientQ.isError) {
     return (
@@ -932,50 +1237,43 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
             <section className="rounded-lg border bg-card p-4 shadow-sm sm:p-5">
               <Caption variant="write">Карта</Caption>
               <p className="mt-1 text-xs text-muted-foreground">
-                Предпросмотр — OpenStreetMap. Для точки на карте укажите широту и долготу. Поиск по адресу — Yandex (поле и ссылка ниже).
+                Kartada nuqtani bevosita bosib tanlashingiz mumkin. Qidiruv maydoni Telegram/Google/Yandex linki, lat/lon juftligi
+                yoki oddiy manzil matnini qabul qiladi.
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
                 <Input
                   className={cn(inputCls, "sm:flex-1")}
-                  placeholder="Адрес или объект (поиск в Yandex)"
+                  placeholder="Manzil yoki lokatsiya (41.31, 69.27 | Google/Telegram link)"
                   value={mapSearchText}
                   onChange={(e) => setMapSearchText(e.target.value)}
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || mapSearchPending}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter") return;
                     e.preventDefault();
-                    const t = mapSearchText.trim();
-                    if (!t) return;
-                    window.open(`https://yandex.com/maps/?text=${encodeURIComponent(t)}`, "_blank", "noopener,noreferrer");
+                    void handleMapSearch();
                   }}
                 />
                 <Button
                   type="button"
                   variant="secondary"
                   className="h-10 shrink-0 sm:w-auto"
-                  disabled={mutation.isPending || !mapSearchText.trim()}
-                  onClick={() => {
-                    const t = mapSearchText.trim();
-                    if (!t) return;
-                    window.open(`https://yandex.com/maps/?text=${encodeURIComponent(t)}`, "_blank", "noopener,noreferrer");
-                  }}
+                  disabled={mutation.isPending || mapSearchPending || !mapSearchText.trim()}
+                  onClick={() => void handleMapSearch()}
                 >
-                  Поиск
+                  {mapSearchPending ? "Qidirilmoqda..." : "Topish / Qo‘llash"}
                 </Button>
               </div>
+              {mapSearchNotice ? <p className="mt-2 text-xs text-amber-600">{mapSearchNotice}</p> : null}
               <div className="relative mt-3 overflow-hidden rounded-lg border bg-muted/30">
-                <iframe
-                  title="Карта — OpenStreetMap"
-                  src={mapEmbedUrl}
-                  width="100%"
-                  height={420}
-                  className="block min-h-[280px] w-full border-0 sm:min-h-[360px]"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
+                <YandexCoordinatePicker
+                  lat={mapOk ? latParsed : null}
+                  lon={mapOk ? lonParsed : null}
+                  disabled={mutation.isPending}
+                  onPick={applyPickedCoords}
                 />
                 {!mapOk ? (
                   <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md bg-background/95 px-2 py-1.5 text-center text-[11px] text-muted-foreground shadow-sm ring-1 ring-border/60">
-                    Точка на карте: введите широту и долготу ниже
+                    Nuqtani xaritadan bosing yoki yuqoridagi maydonga koordinata/link/manzil qo‘ying
                   </div>
                 ) : null}
               </div>
@@ -986,7 +1284,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     id="ce-lat"
                     inputMode="decimal"
                     value={latitude}
-                    onChange={(e) => setLatitude(e.target.value)}
+                    onChange={(e) => {
+                      setLatitude(e.target.value);
+                      setMapSearchNotice(null);
+                    }}
                     disabled={mutation.isPending}
                   />
                 </div>
@@ -996,7 +1297,10 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                     id="ce-lon"
                     inputMode="decimal"
                     value={longitude}
-                    onChange={(e) => setLongitude(e.target.value)}
+                    onChange={(e) => {
+                      setLongitude(e.target.value);
+                      setMapSearchNotice(null);
+                    }}
                     disabled={mutation.isPending}
                   />
                 </div>
@@ -1009,6 +1313,7 @@ export function ClientEditForm({ tenantSlug, clientId, onSuccess, onCancel }: Pr
                   onClick={() => {
                     setLatitude("");
                     setLongitude("");
+                    setMapSearchNotice(null);
                   }}
                   disabled={mutation.isPending}
                 >

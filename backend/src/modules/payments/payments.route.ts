@@ -4,6 +4,7 @@ import { prisma } from "../../config/database";
 import { ensureTenantContext } from "../../lib/tenant-context";
 import { actorUserIdOrNull } from "../../lib/request-actor";
 import { getAccessUser, jwtAccessVerify, requireRoles } from "../auth/auth.prehandlers";
+import { parseSelectedMastersFromQuery, resolveConstraintScope } from "../linkage/linkage.service";
 import {
   createPayment,
   deletePayment,
@@ -169,7 +170,16 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     async (request, reply) => {
       if (!ensureTenantContext(request, reply)) return;
       const q = request.query as Record<string, string | undefined>;
-      const result = await listPayments(request.tenant!.id, parsePaymentListQuery(q));
+      const selected = parseSelectedMastersFromQuery(q);
+      const scope = await resolveConstraintScope(request.tenant!.id, selected);
+      const query = parsePaymentListQuery(q);
+      if (scope.constrained) {
+        query.client_ids = scope.client_ids;
+        query.cash_desk_ids = scope.cash_desk_ids;
+        query.expeditor_user_ids = scope.expeditor_ids;
+        query.warehouse_ids = scope.warehouse_ids;
+      }
+      const result = await listPayments(request.tenant!.id, query);
       return reply.send(result);
     }
   );

@@ -62,7 +62,9 @@ export default function LoginPage() {
           return;
         }
       }
-      setError("Не удалось подключиться к серверу или непредвиденная ошибка. Проверьте, что backend слушает порт 4000.");
+      setError(
+        "Не удалось подключиться к серверу или непредвиденная ошибка. Проверьте, что backend запущен (локально обычно порт 18080, см. PORT в backend)."
+      );
     } finally {
       setLoading(false);
     }

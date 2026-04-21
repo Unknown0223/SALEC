@@ -192,11 +192,14 @@ function paymentAmountsForSpravochnik(
 }
 
 function buildNetNormFromRows(
-  rows: Array<{ payment_type: string; net: Prisma.Decimal }>
+  rows: Array<{ payment_type: string; net: Prisma.Decimal }>,
+  entries: PaymentMethodEntryDto[]
 ): Map<string, Prisma.Decimal> {
   const netNorm = new Map<string, Prisma.Decimal>();
   for (const r of rows) {
-    const nk = normPayTypeKey(r.payment_type ?? "");
+    const resolved =
+      resolvePaymentMethodRefToLabel(r.payment_type, entries) ?? (r.payment_type ?? "").trim();
+    const nk = normPayTypeKey(resolved);
     const prev = netNorm.get(nk) ?? new Prisma.Decimal(0);
     netNorm.set(nk, prev.add(r.net));
   }
@@ -383,7 +386,9 @@ export async function getClientBalanceLedger(
       inner = new Map();
       agentPayMap.set(aid, inner);
     }
-    const nk = normPayTypeKey(r.payment_type ?? "");
+    const resolved =
+      resolvePaymentMethodRefToLabel(r.payment_type, paymentMethodEntries) ?? (r.payment_type ?? "").trim();
+    const nk = normPayTypeKey(resolved);
     const cur = inner.get(nk) ?? new Prisma.Decimal(0);
     inner.set(nk, cur.add(r.net));
   }
@@ -559,7 +564,7 @@ export async function getClientBalanceLedger(
   `;
   const summary_payment_by_type = paymentAmountsForSpravochnik(
     sprLabels,
-    buildNetNormFromRows(payNetRowsFiltered)
+    buildNetNormFromRows(payNetRowsFiltered, paymentMethodEntries)
   );
 
   const agentTotalsSqlBody = (orderAgent: Prisma.Sql, payAgent: Prisma.Sql) => Prisma.sql`

@@ -61,6 +61,13 @@ type ClientReturnData = {
 };
 
 type ClientForSelect = { id: number; name: string };
+type StaffPick = { id: number; fio: string; code?: string | null };
+type LinkageScope = {
+  selected_agent_id: number | null;
+  constrained: boolean;
+  client_ids: number[];
+  warehouse_ids: number[];
+};
 
 type OrderPickRow = {
   id: number;
@@ -122,6 +129,7 @@ function ReturnsPageContent() {
     selectedOrderIds.length === 1 ? selectedOrderIds[0]! : null;
 
   const [clientId, setClientId] = useState(client_id_num ? String(client_id_num) : "");
+  const [agentFilterId, setAgentFilterId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [polkiRangeOpen, setPolkiRangeOpen] = useState(false);
@@ -133,6 +141,7 @@ function ReturnsPageContent() {
   >([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
   // Clients dropdown
   const clientsQ = useQuery({
@@ -144,6 +153,33 @@ function ReturnsPageContent() {
         `/api/${tenantSlug}/clients?page=1&limit=500&is_active=true`
       );
       return data.data ?? [];
+    }
+  });
+  const agentsQ = useQuery({
+    queryKey: ["agents", tenantSlug, "returns-filter"],
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      const { data } = await api.get<{ data: StaffPick[] }>(`/api/${tenantSlug}/agents?is_active=true`);
+      return data.data ?? [];
+    }
+  });
+  const selectedAgentIdNum = agentFilterId.trim() ? Number.parseInt(agentFilterId.trim(), 10) : NaN;
+  const linkageQ = useQuery({
+    queryKey: [
+      "linkage-options",
+      tenantSlug,
+      "returns",
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null
+    ],
+    enabled: Boolean(tenantSlug),
+    staleTime: STALE.reference,
+    queryFn: async () => {
+      if (!Number.isFinite(selectedAgentIdNum) || selectedAgentIdNum < 1) return null;
+      const { data } = await api.get<{ data: LinkageScope }>(
+        `/api/${tenantSlug}/linkage/options?selected_agent_id=${selectedAgentIdNum}`
+      );
+      return data.data;
     }
   });
 
@@ -250,12 +286,22 @@ function ReturnsPageContent() {
   };
 
   const warehouseQuery = useQuery({
-    queryKey: ["warehouses", tenantSlug, "returns"],
+    queryKey: [
+      "warehouses",
+      tenantSlug,
+      "returns",
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null
+    ],
     enabled: Boolean(tenantSlug),
     staleTime: STALE.reference,
     queryFn: async () => {
+      const params = new URLSearchParams();
+      if (Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0) {
+        params.set("selected_agent_id", String(selectedAgentIdNum));
+      }
+      const qs = params.toString();
       const { data } = await api.get<{ data: { id: number; name: string; stock_purpose: string }[] }>(
-        `/api/${tenantSlug}/warehouses`
+        `/api/${tenantSlug}/warehouses${qs ? `?${qs}` : ""}`
       );
       return data.data ?? [];
     }
@@ -263,7 +309,13 @@ function ReturnsPageContent() {
   const returnWh = warehouseQuery.data?.find((w) => w.stock_purpose === "return");
 
   const clientOrdersPickQ = useQuery({
-    queryKey: ["returns-order-pick", tenantSlug, clientId, polkiMode],
+    queryKey: [
+      "returns-order-pick",
+      tenantSlug,
+      clientId,
+      polkiMode,
+      Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0 ? selectedAgentIdNum : null
+    ],
     enabled: Boolean(
       tenantSlug &&
         clientId &&
@@ -274,12 +326,37 @@ function ReturnsPageContent() {
     ),
     staleTime: STALE.list,
     queryFn: async () => {
+      const params = new URLSearchParams({
+        page: "1",
+        limit: "100",
+        client_id: encodeURIComponent(clientId)
+      });
+      if (Number.isFinite(selectedAgentIdNum) && selectedAgentIdNum > 0) {
+        params.set("agent_id", String(selectedAgentIdNum));
+      }
       const { data: body } = await api.get<{ data: OrderPickRow[] }>(
-        `/api/${tenantSlug}/orders?page=1&limit=100&client_id=${encodeURIComponent(clientId)}`
+        `/api/${tenantSlug}/orders?${params.toString()}`
       );
       return body.data ?? [];
     }
   });
+  const filteredClients = useMemo(() => {
+    const all = clientsQ.data ?? [];
+    const scope = linkageQ.data;
+    if (!scope?.constrained) return all;
+    const allowed = new Set(scope.client_ids);
+    return all.filter((c) => allowed.has(c.id));
+  }, [clientsQ.data, linkageQ.data]);
+
+  useEffect(() => {
+    if (!clientId.trim()) return;
+    if (!filteredClients.some((c) => String(c.id) === clientId)) {
+      setClientId("");
+      setReturnLines([]);
+      if (polkiMode === "order") setPolkiOrderIdsInUrl([]);
+      setSelectionNotice("Klient tanlovi yangilandi: mos bo‘lmagan qiymat olib tashlandi.");
+    }
+  }, [clientId, filteredClients, polkiMode]);
 
   const toggleOrderSelected = (orderId: number, checked: boolean) => {
     const set = new Set(selectedOrderIds);
@@ -504,6 +581,7 @@ function ReturnsPageContent() {
       if (polkiMode === "order") {
         const body: Record<string, unknown> = {
           client_id: Number(clientId),
+          price_type: "retail",
           lines: linesBatch
         };
         if (returnWh) body.warehouse_id = returnWh.id;
@@ -511,7 +589,11 @@ function ReturnsPageContent() {
         if (refusalReasonRef.trim()) body.refusal_reason_ref = refusalReasonRef.trim();
         await api.post(`/api/${tenantSlug}/returns/period-batch`, body);
       } else {
-        const body: Record<string, unknown> = { client_id: Number(clientId), lines: linesFree };
+        const body: Record<string, unknown> = {
+          client_id: Number(clientId),
+          price_type: "retail",
+          lines: linesFree
+        };
         if (returnWh) body.warehouse_id = returnWh.id;
         if (dateFrom) body.date_from = dateFrom;
         if (dateTo) body.date_to = dateTo;
@@ -529,7 +611,15 @@ function ReturnsPageContent() {
       else if (data?.error === "NothingToReturn") setErr("Tanlangan davrda qaytariladigan mahsulot yo'q.");
       else if (data?.error === "BadClient") setErr("Mijoz topilmadi.");
       else if (data?.error === "BadProduct") setErr("Mahsulot topilmadi.");
-      else if (data?.error === "BadOrder") setErr("Zakaz topilmadi yoki bu mijozga tegishli emas.");
+      else if (data?.error === "ReturnNotInterchangeable") {
+        const pid = (data as { product_id?: number }).product_id;
+        const msg = (data as { message?: string }).message;
+        setErr(
+          pid != null
+            ? `Mahsulot #${pid}: interchangeable guruh / narx turi mos emas.`
+            : (msg?.trim() || "Mahsulot faol interchangeable guruhda emas yoki narx turi mos emas.")
+        );
+      } else if (data?.error === "BadOrder") setErr("Zakaz topilmadi yoki bu mijozga tegishli emas.");
       else if (data?.error === "NoWarehouse") setErr("Qaytarish ombori topilmadi.");
       else if (data?.error === "DatabaseSchemaMismatch")
         setErr("Baza migratsiyasi qo‘llanmagan. backend: npm run db:deploy");
@@ -632,6 +722,26 @@ function ReturnsPageContent() {
             <CardContent className="p-4 space-y-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Agent</label>
+                  <select
+                    className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm"
+                    value={agentFilterId}
+                    onChange={(e) => {
+                      setAgentFilterId(e.target.value);
+                      setClientId("");
+                      setReturnLines([]);
+                      if (polkiMode === "order") setPolkiOrderIdsInUrl([]);
+                    }}
+                  >
+                    <option value="">Barcha agentlar</option>
+                    {(agentsQ.data ?? []).map((a) => (
+                      <option key={a.id} value={String(a.id)}>
+                        {a.fio}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Mijoz</label>
                   <select
                     className="w-full h-10 rounded-md border border-input bg-background px-2 text-sm"
@@ -644,7 +754,7 @@ function ReturnsPageContent() {
                     }}
                   >
                     <option value="">Mijozni tanlang…</option>
-                    {(clientsQ.data ?? []).map((c) => (
+                    {filteredClients.map((c) => (
                       <option key={c.id} value={String(c.id)}>{c.name}</option>
                     ))}
                   </select>
@@ -744,6 +854,11 @@ function ReturnsPageContent() {
 
           {/* Err */}
           {err && <p className="text-sm text-destructive" role="alert">{err}</p>}
+          {selectionNotice ? (
+            <p className="text-sm text-amber-700 dark:text-amber-300" role="status">
+              {selectionNotice}
+            </p>
+          ) : null}
 
           {/* Products table */}
           {((polkiMode === "free" && productMap.size > 0) ||

@@ -37,6 +37,7 @@ import { registerPriceMatrixRoutes } from "./modules/products/price-matrix.route
 import { registerNotificationRoutes } from "./modules/notifications/notifications.route";
 import { registerMobileRoutes } from "./modules/mobile/mobile.route";
 import { registerJobRoutes } from "./modules/jobs/jobs.route";
+import { registerLinkageRoutes } from "./modules/linkage/linkage.route";
 import { env } from "./config/env";
 import { prisma } from "./config/database";
 import { loggerOptions } from "./config/logger";
@@ -89,6 +90,7 @@ export function buildApp() {
   app.register(registerFieldRoutes);
   app.register(registerNotificationRoutes);
   app.register(registerMobileRoutes);
+  app.register(registerLinkageRoutes);
   app.register(registerJobRoutes);
 
   app.get("/health", async () => ({

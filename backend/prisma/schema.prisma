@@ -853,6 +853,8 @@ model Order {
   is_consignment              Boolean          @default(false)
   /// Konsignatsiya to‘lash muddati (ixtiyoriy)
   consignment_due_date      DateTime?
+  /// Obmen: manba zakazlar va minus/plus qatorlar (audit)
+  exchange_meta             Json?
   /// Savdo zakazida majburiy: reja / tanlangan to‘lov usuli (spravochnik, masalan naqd)
   payment_method_ref        String?          @db.VarChar(64)
   payments                    Payment[]
@@ -1011,6 +1013,8 @@ model OrderItem {
   id         Int     @id @default(autoincrement())
   order_id   Int
   product_id Int
+  /// `exchange` hujjatida: `minus` (klientdan qaytgan) yoki `plus` (yangi chiqim)
+  exchange_line_kind String? @db.VarChar(16)
   qty        Decimal @db.Decimal(15, 3)
   price      Decimal @db.Decimal(15, 2)
   total      Decimal @db.Decimal(15, 2)

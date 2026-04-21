@@ -13,6 +13,7 @@ import {
   deleteProductCatalogGroup,
   deleteProductManufacturer,
   deleteProductSegment,
+  getInterchangeableExchangeLookupForProduct,
   getInterchangeableProductGroup,
   listInterchangeableProductGroups,
   listProductBrands,
@@ -76,6 +77,10 @@ function mapErr(reply: FastifyReply, e: unknown) {
   if (msg === "NOT_FOUND") return reply.status(404).send({ error: "NotFound" });
   if (msg === "IN_USE") return reply.status(409).send({ error: "InUse" });
   if (msg === "BAD_PRODUCT") return reply.status(400).send({ error: "BadProduct" });
+  if (msg === "BAD_PRICE_TYPE") {
+    const ex = e as Error & { price_type?: string };
+    return reply.status(400).send({ error: "BadPriceType", price_type: ex.price_type });
+  }
   if (msg === "VALIDATION") return reply.status(400).send({ error: "ValidationError" });
   throw e;
 }
@@ -196,6 +201,27 @@ export async function registerProductCatalogRoutes(app: FastifyInstance) {
   );
 
   const interchangePath = "/api/:slug/catalog/interchangeable-groups";
+
+  app.get(
+    `${interchangePath}/exchange-lookup/:productId`,
+    { preHandler: [jwtAccessVerify] },
+    async (request, reply) => {
+      if (!ensureTenantContext(request, reply)) return;
+      const productId = Number.parseInt((request.params as { productId: string }).productId, 10);
+      if (Number.isNaN(productId) || productId < 1) {
+        return reply.status(400).send({ error: "InvalidId" });
+      }
+      const q = request.query as Record<string, string | undefined>;
+      const priceType = (q.price_type ?? "retail").trim() || "retail";
+      const row = await getInterchangeableExchangeLookupForProduct(
+        request.tenant!.id,
+        productId,
+        priceType
+      );
+      if (!row) return reply.status(404).send({ error: "NotFound" });
+      return reply.send(row);
+    }
+  );
 
   app.get(interchangePath, { preHandler: [jwtAccessVerify] }, async (request, reply) => {
     if (!ensureTenantContext(request, reply)) return;

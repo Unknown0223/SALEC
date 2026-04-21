@@ -10,6 +10,7 @@ import {
   displayExpeditorPhone,
   displayLegalName,
   displayPinfl,
+  displayVisitDateShort,
   getClientSlotsWithDataInRows,
   getVisitWeekdaysForSlot,
   parseGpsText
@@ -142,6 +143,65 @@ function cellContent(row: ClientRow, colId: ClientColumnId, maps?: ClientRefDisp
       if (!p) return dash;
       const g = formatDigitsGroupedLoose(p);
       return TxtMono(g);
+    }
+    case "agent_assignments_badge": {
+      const sorted = [...row.agent_assignments].sort((a, b) => a.slot - b.slot);
+      const chips: ReactNode[] = [];
+      for (const a of sorted) {
+        const name = a.agent_name?.trim();
+        const code = a.agent_code?.trim();
+        if (!name && !code) continue;
+        const label = [code, name].filter(Boolean).join(" ");
+        const date = displayVisitDateShort(a.visit_date);
+        const wdays = getVisitWeekdaysForSlot(row, a.slot);
+        const wdRu = ["", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+        const wdPart =
+          wdays.length > 0
+            ? ` · ${wdays
+                .slice(0, 4)
+                .map((d) => wdRu[d] ?? String(d))
+                .join(" ")}${wdays.length > 4 ? ` +${wdays.length - 4}` : ""}`
+            : "";
+        const datePart = wdays.length === 0 && date ? ` · ${date}` : "";
+        chips.push(
+          <span
+            key={a.slot}
+            className="block rounded-md bg-primary/12 px-1.5 py-0.5 text-[10px] font-medium leading-snug text-primary"
+          >
+            {label}
+            {wdPart}
+            {datePart}
+          </span>
+        );
+      }
+      if (chips.length === 0) {
+        const legacy = row.agent_name?.trim();
+        if (legacy) {
+          const d = displayVisitDateShort(row.visit_date);
+          const wdays = getVisitWeekdaysForSlot(row, 1);
+          const wdRu = ["", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+          const wdPart =
+            wdays.length > 0
+              ? ` · ${wdays
+                  .slice(0, 4)
+                  .map((k) => wdRu[k] ?? String(k))
+                  .join(" ")}${wdays.length > 4 ? ` +${wdays.length - 4}` : ""}`
+              : "";
+          const datePart = d && wdays.length === 0 ? ` · ${d}` : "";
+          chips.push(
+            <span
+              key={0}
+              className="block rounded-md bg-primary/12 px-1.5 py-0.5 text-[10px] font-medium leading-snug text-primary"
+            >
+              {legacy}
+              {wdPart}
+              {datePart}
+            </span>
+          );
+        }
+      }
+      if (chips.length === 0) return dash;
+      return <div className="flex max-w-[16rem] flex-col gap-1">{chips}</div>;
     }
     case "contact_person":
       return Txt(row.responsible_person);

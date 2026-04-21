@@ -22,8 +22,11 @@ services:
   redis:
     image: redis:7
     container_name: savdo_redis
+    # Ba'zi Windows qurilmalarida 6379 Hyper-V excluded range ichida bo'lib,
+    # `bind: An attempt was made to access a socket in a way forbidden...` beradi.
+    # Host portni 16479 ga ko'chiring va `REDIS_URL` ni `redis://127.0.0.1:16479` qiling.
     ports:
-      - "6379:6379"
+      - "16479:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
